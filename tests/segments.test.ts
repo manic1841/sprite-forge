@@ -4,6 +4,7 @@ import {
   readCutList,
   removeSegment,
   renameSegment,
+  setSegmentRange,
   ValidationError,
   validateArtifact,
 } from '../src/core/index.js';
@@ -334,6 +335,100 @@ describe('Segment speed', () => {
         }),
       ).rejects.toThrow(ValidationError);
       expect(store.readJson(CUTS_PATH)).toMatchObject({ cuts: [] });
+    });
+  });
+});
+
+describe('setSegmentRange', () => {
+  it('retargets a Segment to a new half-open range, keeping its id and speed', async () => {
+    await withStore(async (store) => {
+      seedRecording(store, 100);
+      await addSegment(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+        startFrame: 10,
+        endFrame: 20,
+        speed: 2,
+      });
+
+      const cutList = await setSegmentRange(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+        startFrame: 12,
+        endFrame: 26,
+      });
+
+      expect(cutList.cuts).toEqual([
+        { id: 'walk', startFrame: 12, endFrame: 26, speed: 2 },
+      ]);
+      expect(store.readJson(CUTS_PATH)).toMatchObject({
+        hash: HASH,
+        frameCount: 100,
+        cuts: [{ id: 'walk', startFrame: 12, endFrame: 26, speed: 2 }],
+      });
+      validateArtifact('cuts', store.readJson(CUTS_PATH));
+    });
+  });
+
+  it('rejects an empty range (endFrame not greater than startFrame), writing nothing', async () => {
+    await withStore(async (store) => {
+      seedRecording(store, 100);
+      await addSegment(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+        startFrame: 10,
+        endFrame: 20,
+      });
+
+      await expect(
+        setSegmentRange(store.root, {
+          recordingId: RECORDING_ID,
+          id: 'walk',
+          startFrame: 20,
+          endFrame: 20,
+        }),
+      ).rejects.toThrow(ValidationError);
+      expect(store.readJson(CUTS_PATH)).toMatchObject({
+        cuts: [{ id: 'walk', startFrame: 10, endFrame: 20 }],
+      });
+    });
+  });
+
+  it('rejects a range that runs past the Recording frame count', async () => {
+    await withStore(async (store) => {
+      seedRecording(store, 100);
+      await addSegment(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+        startFrame: 10,
+        endFrame: 20,
+      });
+
+      await expect(
+        setSegmentRange(store.root, {
+          recordingId: RECORDING_ID,
+          id: 'walk',
+          startFrame: 90,
+          endFrame: 101,
+        }),
+      ).rejects.toThrow(ValidationError);
+      expect(store.readJson(CUTS_PATH)).toMatchObject({
+        cuts: [{ id: 'walk', startFrame: 10, endFrame: 20 }],
+      });
+    });
+  });
+
+  it('rejects an unknown cut id', async () => {
+    await withStore(async (store) => {
+      seedRecording(store, 100);
+      await expect(
+        setSegmentRange(store.root, {
+          recordingId: RECORDING_ID,
+          id: 'walk',
+          startFrame: 10,
+          endFrame: 20,
+        }),
+      ).rejects.toThrow(/No Segment/);
     });
   });
 });
