@@ -1,0 +1,1053 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PROTOTYPE — sprite-forge web tool surface</title>
+<!--
+  ============================================================================
+  THROWAWAY PROTOTYPE — not production code, not committed to main.
+  ============================================================================
+  Question: what should the sprite-forge web tool surface look like and
+  behave like?  Three structurally different takes on the same whole tool
+  (Library -> Clip editor -> Alignment -> Export), switchable with ?variant=
+  or the floating bar at the bottom.  Flip through, then say things like
+  "I want the rail from B with the timeline from C" — that is the real answer.
+
+  Run it: open this file in a browser. That's it. No build, no server.
+  Fake data only; nothing is saved anywhere.  See the parent ticket for the
+  decisions this is meant to shake out.  Not the real tool.
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#0d0f14; --panel:#141722; --panel-2:#1b1f2c; --panel-3:#222738;
+    --line:#2b3145; --line-2:#3a4257;
+    --ink:#e7eaf3; --dim:#8b93a8; --dim-2:#5f6679;
+    --accent:#8ab4ff; --accent-2:#5b8cff;
+    --good:#6ee7b7; --warn:#fcd34d; --bad:#f87171; --pink:#f7a8c4; --pink-2:#d6336c;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink); font:13px/1.5 var(--mono);
+    -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  .btn{
+    background:var(--panel-2);border:1px solid var(--line);border-radius:6px;
+    padding:5px 10px;color:var(--ink);
+  }
+  .btn:hover{border-color:var(--line-2);background:var(--panel-3)}
+  .btn.on{background:var(--accent);border-color:var(--accent);color:#0b1020;font-weight:700}
+  .btn.ghost{background:transparent}
+  .btn.pri{background:var(--accent);border-color:var(--accent);color:#0b1020;font-weight:700}
+  .tag{
+    font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);
+    border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+  }
+  .tag.ok{color:var(--good);border-color:#2c5b4b}
+  .tag.draft{color:var(--warn);border-color:#5b4c22}
+  .muted{color:var(--dim)}
+  .dim2{color:var(--dim-2)}
+  canvas{image-rendering:pixelated}
+  .stage-bg{
+    background:
+      linear-gradient(45deg,#151926 25%,transparent 25%,transparent 75%,#151926 75%),
+      linear-gradient(45deg,#151926 25%,#10131c 25%,#10131c 75%,#151926 75%);
+    background-size:16px 16px;background-position:0 0,8px 8px;
+  }
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2a3044;border-radius:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---- prototype chrome (the bar + banner are obviously not the design) ---- */
+  #proto-banner{
+    position:fixed;top:0;left:0;right:0;z-index:9000;
+    display:flex;gap:10px;align-items:center;justify-content:center;
+    background:repeating-linear-gradient(45deg,#2a1f0a,#2a1f0a 10px,#33270d 10px,#33270d 20px);
+    color:#fcd34d;font-size:11px;padding:4px 10px;border-bottom:1px solid #4a3a12;
+  }
+  #proto-banner b{color:#fff}
+  #switcher{
+    position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:9000;
+    display:flex;align-items:center;gap:2px;
+    background:#0b0d13;border:1px solid var(--line-2);border-radius:999px;
+    box-shadow:0 10px 30px rgba(0,0,0,.6),0 0 0 4px rgba(138,180,255,.08);
+    padding:4px;
+  }
+  #switcher button.nav{width:34px;height:34px;border-radius:999px;font-size:16px;color:var(--dim)}
+  #switcher button.nav:hover{background:var(--panel-3);color:var(--ink)}
+  #switcher .label{
+    min-width:230px;text-align:center;padding:0 12px;font-size:12px;
+  }
+  #switcher .label b{color:var(--accent)}
+  #switcher .label span{color:var(--dim)}
+  #switcher .keys{color:var(--dim-2);font-size:10px;padding-right:8px}
+
+  /* ---- app ---- */
+  #app{position:absolute;top:26px;bottom:0;left:0;right:0;overflow:hidden}
+  .fill{height:100%}
+  .row{display:flex}
+  .col{display:flex;flex-direction:column}
+  .center{align-items:center}
+  .between{justify-content:space-between}
+  .grow{flex:1;min-width:0;min-height:0}
+  .scroll{overflow:auto}
+  .pad{padding:12px}
+  h1,h2,h3{margin:0;font-weight:600}
+  .ttl{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .hr{height:1px;background:var(--line);margin:8px 0}
+  .pill{border:1px solid var(--line);border-radius:999px;padding:2px 9px;font-size:11px;color:var(--dim)}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:12px}
+  .kv .k{color:var(--dim)}
+  .field{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .field label{color:var(--dim);min-width:74px;font-size:12px}
+  select,input[type=text],input[type=range]{
+    background:var(--panel-2);border:1px solid var(--line);border-radius:6px;color:var(--ink);
+    padding:4px 6px;font:inherit;font-size:12px;
+  }
+  input[type=range]{padding:0}
+  .swatch-list{display:flex;flex-wrap:wrap;gap:6px}
+  .swatch{width:22px;height:22px;border-radius:5px;border:1px solid var(--line-2)}
+  .swatch.sel{outline:2px solid var(--accent);outline-offset:1px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .card .hd{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--line)}
+  .card .bd{padding:12px}
+  .asset{cursor:pointer;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);padding:8px;display:flex;gap:10px;align-items:center}
+  .asset:hover{border-color:var(--line-2)}
+  .asset.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .thumb{width:44px;height:44px;border-radius:6px;flex:none}
+  .film{position:relative;display:flex;gap:0;overflow-x:auto;padding:8px 6px}
+  .film .cell{flex:none;position:relative;padding:2px;border-radius:4px;cursor:pointer}
+  .film .cell.sel{background:var(--accent);outline:none}
+  .film .cell.inrange{background:#233}
+  .film .cell .n{position:absolute;top:0;left:2px;font-size:8px;color:var(--dim-2)}
+  .strip{position:relative;height:26px;border:1px solid var(--line);border-radius:6px;background:#10131c;overflow:hidden}
+  .strip .seg{position:absolute;top:0;bottom:0;background:rgba(138,180,255,.22);border-left:2px solid var(--accent);border-right:2px solid var(--accent);cursor:grab}
+  .strip .play{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--good)}
+  .strip .tick{position:absolute;top:0;bottom:0;width:1px;background:#222a3b}
+  .stepper{display:flex;align-items:stretch;gap:0;border-bottom:1px solid var(--line);background:var(--panel)}
+  .stepper .step{display:flex;align-items:center;gap:8px;padding:9px 16px;color:var(--dim);border-right:1px solid var(--line);cursor:pointer}
+  .stepper .step .num{width:18px;height:18px;border-radius:999px;border:1px solid var(--line-2);display:grid;place-items:center;font-size:10px}
+  .stepper .step.on{color:var(--ink);background:var(--panel-2)}
+  .stepper .step.on .num{background:var(--accent);color:#0b1020;border-color:var(--accent);font-weight:700}
+  .stepper .step.done .num{border-color:var(--good);color:var(--good)}
+  .rail{width:250px;flex:none;border-right:1px solid var(--line);background:var(--panel)}
+  .inspector{width:290px;flex:none;border-left:1px solid var(--line);background:var(--panel)}
+  .shelf{display:flex;gap:12px;overflow-x:auto;padding:12px}
+  .shelfcard{flex:none;width:170px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px;cursor:pointer}
+  .shelfcard.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .shelfcard .big{width:100%;height:96px;border-radius:8px;margin-bottom:8px}
+  .gridcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:12px}
+  .bignum{font-size:22px;font-weight:700}
+  .manifest{background:#0b0e15;border:1px solid var(--line);border-radius:8px;padding:10px;white-space:pre;font-size:11px;overflow:auto;color:#c8d3ea}
+  #c-main{overflow:hidden}
+  #c-main canvas{max-width:100%;max-height:100%}
+  .manifest .s{color:var(--good)}
+</style>
+</head>
+<body>
+<div id="proto-banner">
+  <b>PROTOTYPE</b> · sprite-forge web tool surface · fake data, nothing saved ·
+  switch variants with <b>← →</b> or the bar below
+</div>
+<div id="app"></div>
+<div id="switcher"></div>
+
+<script>
+"use strict";
+/* ==========================================================================
+   0. Fake domain data  (mirrors the vocabulary the design settled on:
+      Recording -> Segment -> Clip -> Sequence -> Asset -> Export)
+   ========================================================================== */
+const CHAR = { id:"kirby", canvas:{ w:56, h:56, anchor:{ x:28, y:48 } } };
+
+const RECORDINGS = [
+  { id:"fat-walk", label:"fat_walk.gif", frames:64, bg:"#9421ce" },
+  { id:"idle",     label:"idle.gif",     frames:48, bg:"#9421ce" },
+  { id:"jump",     label:"jump.gif",     frames:40, bg:"#9421ce" },
+];
+
+const SEGMENTS = [ // the recording's cut list
+  { cutId:"walk-a", recording:"fat-walk", start:0,  end:24, name:"walk" },
+  { cutId:"turn-a", recording:"fat-walk", start:28, end:42, name:"turn" },
+  { cutId:"idle-a", recording:"idle",     start:4,  end:38, name:"idle" },
+  { cutId:"jump-a", recording:"jump",     start:6,  end:30, name:"jump" },
+];
+
+const ASSETS = [
+  { id:"walk",  from:"walk-a", loop:true,  frames:24, delaysMs:[50] },
+  { id:"turn",  from:"turn-a", loop:false, frames:14, delaysMs:[50], flipsFacing:true },
+  { id:"idle",  from:"idle-a", loop:true,  frames:34, delaysMs:[50] },
+  { id:"jump",  from:"jump-a", loop:false, frames:24, delaysMs:[50] },
+];
+
+const SITUATIONS = ["idle","happy","nod","alert"];
+
+const S = {
+  variant:"A",
+  step:0,                        // pipeline variant
+  recording:"fat-walk",
+  frame:12,
+  sel:"walk-a",                  // selected segment / asset id
+  scrub:false,
+  brush:{ tool:"paint", color:"#f7a8c4", size:2 },
+  offsets:{ walk:[0,0], turn:[0,0], idle:[0,0], jump:[0,0] },
+  bindings:{ idle:["idle"], happy:["walk"], nod:["idle"], alert:["jump"] },
+  paint:{},                      // assetId -> offscreen canvas (repair layer)
+  align:{
+    ghost:true, showCanvas:true, showAnchor:true,
+    visible:{ walk:true, turn:true, idle:true, jump:true },
+  },
+};
+const rec = id => RECORDINGS.find(r => r.id === id);
+const seg = id => SEGMENTS.find(s => s.cutId === id);
+const asset = id => ASSETS.find(a => a.id === id);
+
+/* ==========================================================================
+   1. Pixel sprite drawing  (deterministic fake art so the tool looks alive)
+   ========================================================================== */
+function drawSprite(g, kind, frame, ox, oy){
+  // draw onto a tiny virtual grid so it looks like pixel art when upscaled
+  const T = (x,y,w,h,c) => { g.fillStyle=c; g.fillRect(ox+x,oy+y,w,h); };
+  const bob  = kind==="idle" ? Math.round(Math.sin(frame/4)) : 0;
+  const phase = Math.sin((frame % 12)/12 * Math.PI*2);
+  const crouch = kind==="jump" ? Math.round(Math.cos(frame/6)*2) : 0;
+  const y = 10 + bob + crouch;
+  const body = "#f7a8c4", shade = "#e07aa6", foot = "#d6336c";
+  // feet
+  const fL = kind==="walk" ? Math.round(phase*2) : 0;
+  const fR = kind==="walk" ? -fL : 0;
+  T(6+fL, y+12, 4, 3, foot);
+  T(14+fR, y+12, 4, 3, foot);
+  // body
+  T(5, y+3, 14, 10, body);
+  T(4, y+5, 16, 6, body);
+  T(6, y+1, 12, 3, body);
+  T(5, y+11, 14, 2, shade);
+  T(4, y+6, 2, 5, shade);
+  T(18, y+6, 2, 5, shade);
+  // face
+  const blink = kind==="idle" && (frame % 24) > 21;
+  if(blink){ T(9,y+5,2,1,"#2a1420"); T(13,y+5,2,1,"#2a1420"); }
+  else { T(9,y+4,2,3,"#2a1420"); T(13,y+4,2,3,"#2a1420");
+         T(9,y+4,1,1,"#fff");    T(13,y+4,1,1,"#fff"); }
+  T(11,y+8,2,1,"#b04a72");
+}
+
+function spriteCanvas(kind, frame, opts = {}){
+  const { w=24, h=24, bg=null, ghost=false } = opts;
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+  if (bg){ g.fillStyle = bg; g.fillRect(0,0,w,h); }
+  if (ghost) g.globalAlpha = 0.22;
+  drawSprite(g, kind, frame, 0, 0);
+  return c;
+}
+const kindOf = recordingId => recordingId === "fat-walk" ? (S.sel === "turn-a" ? "turn" : "walk")
+                          : recordingId === "idle" ? "idle" : "jump";
+
+/* Blit one frame of a clip onto a big canvas at a pixel scale, honouring
+   per-clip placement offset and the character Canvas / Anchor. */
+function paintStage(cv, { kind, frame, offset=[0,0], showBg=null, ghost=false,
+                          showCanvas=true, showAnchor=true, showGrid=false }){
+  const g = cv.getContext("2d"); g.imageSmoothingEnabled = false;
+  const scale = 4;
+  cv.width = CHAR.canvas.w * scale; cv.height = CHAR.canvas.h * scale;
+  g.clearRect(0,0,cv.width,cv.height);
+  if (showBg){ g.fillStyle = showBg; g.fillRect(0,0,cv.width,cv.height); }
+  if (showGrid){
+    g.strokeStyle = "#1b2130";
+    for(let x=0;x<=cv.width;x+=scale*8){ g.beginPath(); g.moveTo(x,0); g.lineTo(x,cv.height); g.stroke(); }
+    for(let y=0;y<=cv.height;y+=scale*8){ g.beginPath(); g.moveTo(0,y); g.lineTo(cv.width,y); g.stroke(); }
+  }
+  const sp = spriteCanvas(kind, frame, { ghost });
+  const dx = Math.round((CHAR.canvas.anchor.x - 12 + offset[0]) * scale);
+  const dy = Math.round((CHAR.canvas.anchor.y - 20 + offset[1]) * scale);
+  g.drawImage(sp, dx, dy, sp.width*scale, sp.height*scale);
+
+  if (showCanvas){
+    g.strokeStyle = "#3a4257"; g.lineWidth = 1;
+    g.strokeRect(0.5,0.5,cv.width-1,cv.height-1);
+  }
+  if (showAnchor){
+    g.strokeStyle = "#6ee7b7"; g.lineWidth = 1;
+    const ax = CHAR.canvas.anchor.x*scale, ay = CHAR.canvas.anchor.y*scale;
+    g.beginPath(); g.moveTo(ax-7,ay); g.lineTo(ax+7,ay);
+    g.moveTo(ax,ay-7); g.lineTo(ax,ay+7); g.stroke();
+    g.strokeStyle = "rgba(110,231,183,.35)";
+    g.beginPath(); g.moveTo(ax,0); g.lineTo(ax,cv.height); g.stroke();
+  }
+}
+
+/* ==========================================================================
+   2. Small DOM helpers
+   ========================================================================== */
+const $  = (sel, root=document) => root.querySelector(sel);
+const h  = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;" }[c]));
+
+/* ==========================================================================
+   3. Shared little widgets (data/logic only — each variant lays out its own
+      chrome; nothing here is a shared Layout)
+   ========================================================================== */
+function filmstrip({ recordingId, segId, onPickFrame, thumb=2 }){
+  const r = rec(recordingId), s = seg(segId);
+  const el = h(`<div class="film" role="list"></div>`);
+  for (let i=0;i<r.frames;i++){
+    const cell = h(`<div class="cell" role="listitem" title="frame ${i}"><span class="n">${i}</span></div>`);
+    if (s && i>=s.start && i<s.end) cell.classList.add("inrange");
+    if (i === S.frame) cell.classList.add("sel");
+    const c = spriteCanvas(kindOf(recordingId), i, { w:24,h:24, bg:r.bg });
+    c.style.width = (24*thumb)+"px"; c.style.height=(24*thumb)+"px"; c.style.display="block";
+    cell.prepend(c);
+    cell.onclick = () => { onPickFrame(i); };
+    el.appendChild(cell);
+  }
+  return el;
+}
+
+function coverageStrip(recordingId){
+  const r = rec(recordingId);
+  const el = h(`<div class="strip"></div>`);
+  for (let i=0;i<r.frames;i+=8){
+    el.appendChild(h(`<div class="tick" style="left:${(i/r.frames*100)}%"></div>`));
+  }
+  SEGMENTS.filter(s=>s.recording===recordingId).forEach(s=>{
+    const left = s.start/r.frames*100, right = s.end/r.frames*100;
+    const seg = h(`<div class="seg" style="left:${left}%;width:${right-left}%" title="${esc(s.name)}"></div>`);
+    segmentDrag(seg, s, r, el);
+    el.appendChild(seg);
+  });
+  el.appendChild(h(`<div class="play" style="left:${(S.frame/r.frames*100)}%"></div>`));
+  return el;
+}
+// (placed after use above for hoisting clarity)
+function segmentDrag(el, s, r, host){
+  el.onpointerdown = (e) => {
+    e.preventDefault(); el.setPointerCapture(e.pointerId);
+    const rect = host.getBoundingClientRect();
+    const move = (ev) => {
+      const f = Math.max(0, Math.min(r.frames, Math.round((ev.clientX-rect.left)/rect.width*r.frames)));
+      if (Math.abs(f - s.start) < Math.abs(f - s.end)) s.start = Math.min(f, s.end-1);
+      else s.end = Math.max(f, s.start+1);
+      el.style.left = (s.start/r.frames*100)+"%";
+      el.style.width = ((s.end-s.start)/r.frames*100)+"%";
+    };
+    const up = () => { window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); render(); };
+    window.addEventListener("pointermove",move); window.addEventListener("pointerup",up);
+  };
+}
+
+function manifestFor(){
+  const anims = {};
+  ASSETS.forEach(a=>{
+    anims[a.id] = { sheet:`clips/${a.id}.png`, frameCount:a.frames,
+      delaysMs:a.delaysMs, loop:a.loop };
+    if (a.flipsFacing) anims[a.id].flipsFacing = true;
+  });
+  return {
+    formatVersion:"1.0.0", target:"pixel-pet", character:CHAR.id,
+    authoredFacing:"right",
+    canvas:{ width:CHAR.canvas.w, height:CHAR.canvas.h, anchor:{...CHAR.canvas.anchor} },
+    animations:anims,
+    bindings:S.bindings,
+    lock:{ spriteForgeVersion:"0.1.0", exportedAt:"2026-10-08T00:00:00Z" },
+  };
+}
+
+/* ==========================================================================
+   4. VARIANT A — "Workbench"  (docked IDE: rail | stage | inspector + docked
+      filmstrip; mode tabs swap the stage, chrome never moves)
+   ========================================================================== */
+function renderA(root){
+  const A = h(`<div class="fill row"></div>`);
+  A.innerHTML = `
+    <aside class="rail col scroll">
+      <div class="pad ttl">Library</div>
+      <div class="pad" style="padding-top:0">
+        <div class="ttl dim2" style="margin-bottom:6px">Recordings</div>
+        ${RECORDINGS.map(r=>`
+          <div class="asset" data-rec="${r.id}" style="margin-bottom:6px">
+            <canvas class="thumb stage-bg" data-thumb="${r.id}"></canvas>
+            <div class="grow">
+              <div>${esc(r.label)}</div>
+              <div class="muted" style="font-size:11px">${r.frames} frames · ${SEGMENTS.filter(s=>s.recording===r.id).length} segments</div>
+            </div>
+          </div>`).join("")}
+        <div class="hr"></div>
+        <div class="ttl dim2" style="margin-bottom:6px">Committed assets</div>
+        ${ASSETS.map(a=>`
+          <div class="asset ${a.id==="walk"?"":""}" data-asset="${a.id}" style="margin-bottom:6px">
+            <canvas class="thumb stage-bg" data-athumb="${a.id}"></canvas>
+            <div class="grow">
+              <div>${esc(a.id)} <span class="tag ${"ok"}">asset</span></div>
+              <div class="muted" style="font-size:11px">${a.frames}f · ${a.loop?"loop":"once"}${a.flipsFacing?" · flips":""}</div>
+            </div>
+          </div>`).join("")}
+      </div>
+    </aside>
+    <div class="col grow">
+      <div class="row between center" style="padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)">
+        <div class="row center" style="gap:6px">
+          <button class="btn" data-mode="clip">Clip editor</button>
+          <button class="btn" data-mode="align">Alignment</button>
+          <button class="btn" data-mode="export">Export</button>
+        </div>
+        <div class="row center" style="gap:8px">
+          <span class="pill" id="a-ctx"></span>
+        </div>
+      </div>
+      <div class="grow row" id="a-stage" style="min-height:0"></div>
+      <div style="border-top:1px solid var(--line);background:var(--panel)">
+        <div class="row between center" style="padding:6px 12px">
+          <span class="ttl" id="a-strip-title">Segment</span>
+          <span class="muted" id="a-strip-sub" style="font-size:11px"></span>
+        </div>
+        <div id="a-strip"></div>
+        <div id="a-strip2" class="pad" style="padding-top:0"></div>
+      </div>
+    </div>
+    <aside class="inspector col scroll" id="a-insp"></aside>`;
+
+  root.appendChild(A);
+
+  A.querySelectorAll("[data-thumb]").forEach(cv=>{
+    const r = rec(cv.dataset.thumb);
+    cv.width=24;cv.height=24; const g=cv.getContext("2d");g.imageSmoothingEnabled=false;
+    g.fillStyle=r.bg;g.fillRect(0,0,24,24); drawSprite(g, r.id==="fat-walk"?"walk":r.id, 8, 0, 0);
+  });
+  A.querySelectorAll("[data-asset]").forEach(el=> el.onclick = ()=>{ S.sel = el.dataset.asset; A._firstSegOf = null; renderA_stage(A); renderA_insp(A); });
+  A.querySelectorAll("[data-athumb]").forEach(cv=>{
+    const a = asset(cv.dataset.athumb);
+    cv.width=24;cv.height=24; const g=cv.getContext("2d");g.imageSmoothingEnabled=false;
+    drawSprite(g, a.id==="turn"?"turn":a.id, 3, 0, 0);
+  });
+  A.querySelectorAll("[data-rec]").forEach(el=> el.onclick = ()=>{ S.recording = el.dataset.rec; S.sel = SEGMENTS.find(s=>s.recording===S.recording).cutId; S.frame = seg(S.sel).start; renderA_stage(A); renderA_insp(A); });
+  A.querySelectorAll("[data-mode]").forEach(el=> el.onclick = ()=>{ S.variant = S.variant; A._mode = el.dataset.mode; renderA_stage(A); renderA_insp(A); A.querySelectorAll("[data-mode]").forEach(b=>b.classList.toggle("on", b.dataset.mode===A._mode)); });
+
+  A._mode = A._mode || "clip";
+  A.querySelectorAll("[data-mode]").forEach(b=>b.classList.toggle("on", b.dataset.mode===A._mode));
+  A.render = () => { renderA_stage(A); renderA_insp(A); };
+  renderA_stage(A); renderA_insp(A);
+}
+
+function renderA_stage(A){
+  const stage = A.querySelector("#a-stage");
+  const segs = SEGMENTS.filter(s=>s.recording===S.recording);
+  const s = segs.find(x=>x.cutId===S.sel) || segs[0]; S.sel = s.cutId;
+  const mode = A._mode;
+  A.querySelector("#a-ctx").textContent = `recording: ${S.recording} · frame ${S.frame} · seg ${s.name} [${s.start},${s.end})`;
+
+  if (mode === "clip"){
+    stage.style.display = "flex";
+    stage.innerHTML = `
+      <div class="col grow center" style="justify-content:center;gap:10px;padding:14px">
+        <div class="row center" style="gap:8px">
+          <button class="btn" data-tool="paint">Brush</button>
+          <button class="btn" data-tool="erase">Erase</button>
+          <button class="btn" data-tool="pipette">Eyedropper</button>
+          <span class="hr" style="width:1px;height:18px;margin:0 4px;background:var(--line)"></span>
+          <span class="muted" style="font-size:11px">tool: <b id="a-tool">${S.brush.tool}</b></span>
+        </div>
+        <div style="position:relative">
+          <canvas id="a-canvas" class="stage-bg" style="border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.5);cursor:crosshair"></canvas>
+        </div>
+        <div class="row center" style="gap:12px">
+          <button class="btn ghost" id="a-prev">◀ frame</button>
+          <button class="btn pri" id="a-play">▶ play segment</button>
+          <button class="btn ghost" id="a-next">frame ▶</button>
+          <span class="muted" style="font-size:11px">±1 frame, snapped</span>
+        </div>
+      </div>`;
+    const cv = stage.querySelector("#a-canvas");
+    const layer = S.paint[s.cutId] || (S.paint[s.cutId] = (()=>{ const c=document.createElement("canvas");c.width=CHAR.canvas.w*4;c.height=CHAR.canvas.h*4;return c; })());
+    const draw = () => {
+      paintStage(cv, { kind: kindOf(S.recording), frame: S.frame, offset:[0,0], showBg:rec(S.recording).bg, showGrid:true });
+      const g = cv.getContext("2d"); g.drawImage(layer,0,0);
+    };
+    draw();
+    const paintAt = (e) => {
+      const r = cv.getBoundingClientRect();
+      const x = Math.round((e.clientX-r.left)/r.width*layer.width);
+      const y = Math.round((e.clientY-r.top)/r.height*layer.height);
+      const g = layer.getContext("2d"); g.imageSmoothingEnabled=false;
+      const px = 4*S.brush.size;
+      if (S.brush.tool === "erase") g.clearRect(x-px/2,y-px/2,px,px);
+      else { g.fillStyle = S.brush.color; g.fillRect(x-px/2,y-px/2,px,px); }
+      S.brush.last = S.brush.color; draw();
+    };
+    let down=false;
+    cv.onpointerdown = (e)=>{ down=true; cv.setPointerCapture(e.pointerId); paintAt(e); };
+    cv.onpointermove = (e)=>{ if(down) paintAt(e); };
+    cv.onpointerup   = ()=> down=false;
+    stage.querySelectorAll("[data-tool]").forEach(b=>b.onclick=()=>{
+      S.brush.tool = b.dataset.tool; stage.querySelector("#a-tool").textContent = S.brush.tool;
+      stage.querySelectorAll("[data-tool]").forEach(x=>x.classList.toggle("on",x.dataset.tool===S.brush.tool));
+    });
+    stage.querySelectorAll("[data-tool]").forEach(x=>x.classList.toggle("on",x.dataset.tool===S.brush.tool));
+    stage.querySelector("#a-prev").onclick = ()=>{ S.frame = Math.max(s.start, S.frame-1); draw(); renderA_strip(A); renderA_insp(A); };
+    stage.querySelector("#a-next").onclick = ()=>{ S.frame = Math.min(s.end-1, S.frame+1); draw(); renderA_strip(A); renderA_insp(A); };
+    stage.querySelector("#a-play").onclick = ()=>{
+      let i = s.start; clearInterval(A._timer);
+      A._timer = setInterval(()=>{ S.frame = i; draw(); i = i+1 >= s.end ? s.start : i+1; }, 90);
+    };
+  }
+  else if (mode === "align"){
+    stage.style.display = "block";
+    stage.innerHTML = `
+      <div class="col center" style="height:100%;justify-content:center;gap:12px;padding:14px">
+        <div class="muted" style="font-size:11px">all clips on the shared canvas; nudge manual offsets until the foot-base aligns on the anchor ✚</div>
+        <canvas id="a-align" class="stage-bg" style="border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.5)"></canvas>
+        <div class="row center" style="gap:10px;flex-wrap:wrap;max-width:640px">
+          ${ASSETS.map(a=>`<button class="btn ${S.align.visible[a.id]?"on":""}" data-av="${a.id}">${a.id}</button>`).join("")}
+        </div>
+      </div>`;
+    const cv = stage.querySelector("#a-align");
+    const draw = () => {
+      cv.width = CHAR.canvas.w*4; cv.height = CHAR.canvas.h*4;
+      const g = cv.getContext("2d"); g.imageSmoothingEnabled=false;
+      g.strokeStyle="#1b2130"; for(let x=0;x<=cv.width;x+=32){g.beginPath();g.moveTo(x,0);g.lineTo(x,cv.height);g.stroke();}
+      for(let y=0;y<=cv.height;y+=32){g.beginPath();g.moveTo(0,y);g.lineTo(cv.width,y);g.stroke();}
+      ASSETS.filter(a=>S.align.visible[a.id]).forEach(a=>{
+        const sp = spriteCanvas(a.id==="turn"?"turn":a.id, 0, { ghost:true });
+        const off = S.offsets[a.id];
+        g.globalAlpha = 1;
+        g.drawImage(sp, Math.round((CHAR.canvas.anchor.x-12+off[0])*4), Math.round((CHAR.canvas.anchor.y-20+off[1])*4), sp.width*4, sp.height*4);
+      });
+      g.globalAlpha=1; g.strokeStyle="#3a4257"; g.strokeRect(.5,.5,cv.width-1,cv.height-1);
+      const ax=CHAR.canvas.anchor.x*4, ay=CHAR.canvas.anchor.y*4;
+      g.strokeStyle="#6ee7b7"; g.beginPath(); g.moveTo(ax-8,ay);g.lineTo(ax+8,ay);g.moveTo(ax,ay-8);g.lineTo(ax,ay+8);g.stroke();
+    };
+    draw();
+    stage.querySelectorAll("[data-av]").forEach(b=>b.onclick=()=>{ S.align.visible[b.dataset.av] = !S.align.visible[b.dataset.av]; renderA_stage(A); });
+  }
+  else {
+    stage.style.display = "block";
+    stage.innerHTML = `
+      <div class="col center" style="height:100%;justify-content:center;padding:14px">
+        <div class="card" style="max-width:560px;width:100%">
+          <div class="hd"><span class="ttl">Export → pixel-pet</span><span class="tag ok">closed</span></div>
+          <div class="bd col" style="gap:8px">
+            ${SITUATIONS.map(sit=>`
+              <div class="field"><label>${sit}</label>
+                <select data-bind="${sit}">
+                  ${ASSETS.map(a=>`<option value="${a.id}" ${S.bindings[sit].includes(a.id)?"selected":""}>${a.label||a.id}</option>`).join("")}
+                </select>
+              </div>`).join("")}
+            <div class="hr"></div>
+            <div class="row between center">
+              <span class="muted" style="font-size:11px">every situation needs a binding</span>
+              <button class="btn pri" id="a-export">Export bundle</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    stage.querySelectorAll("select[data-bind]").forEach(sel=>sel.onchange=()=>{ S.bindings[sel.dataset.bind]=[sel.value]; renderA_insp(A); });
+    stage.querySelector("#a-export").onclick = ()=> alert("PROTOTYPE: would write exports/pixel-pet/manifest.json + clips/*.png.\n\n"+JSON.stringify(manifestFor(),null,2));
+  }
+  renderA_strip(A);
+}
+
+function renderA_strip(A){
+  const host = A.querySelector("#a-strip"); host.innerHTML="";
+  const s = seg(S.sel);
+  A.querySelector("#a-strip-title").textContent = `Segment — ${s.name}`;
+  A.querySelector("#a-strip-sub").textContent = `[${s.start}, ${s.end}) · ${s.end-s.start} frames · recording ${S.recording}`;
+  host.appendChild(filmstrip({ recordingId:S.recording, segId:S.sel, onPickFrame:(i)=>{ S.frame=i; renderA_stage(A); renderA_insp(A); } }));
+  const cov = A.querySelector("#a-strip2"); cov.innerHTML = "";
+  cov.appendChild(SEGMENTS.filter(x=>x.recording===S.recording).length ? h(`<div class="ttl dim2" style="margin-bottom:6px">Recording timeline</div>`) : h(`<span></span>`));
+  cov.appendChild(coverageStrip(S.recording));
+}
+
+function renderA_insp(A){
+  const insp = A.querySelector("#a-insp");
+  const a = asset(S.sel);
+  insp.innerHTML = `
+    <div class="pad ttl">Inspector</div>
+    <div class="pad" style="padding-top:0">
+      <div class="kv">
+        <span class="k">character</span><span>${CHAR.id}</span>
+        <span class="k">canvas</span><span>${CHAR.canvas.w}×${CHAR.canvas.h}</span>
+        <span class="k">anchor</span><span>(${CHAR.canvas.anchor.x}, ${CHAR.canvas.anchor.y})</span>
+        <span class="k">background</span><span><span class="swatch" style="display:inline-block;width:12px;height:12px;background:${rec(S.recording).bg};vertical-align:-2px"></span> ${rec(S.recording).bg}</span>
+      </div>
+      <div class="hr"></div>
+      <div class="ttl" style="margin-bottom:6px">Brush</div>
+      <div class="field"><label>colour</label>
+        <div class="swatch-list">
+          ${["#f7a8c4","#ffffff","#d6336c","#2a1420","#6ee7b7","#000000"].map(c=>
+            `<div class="swatch ${S.brush.color===c?"sel":""}" data-c="${c}" style="background:${c}"></div>`).join("")}
+        </div>
+      </div>
+      <div class="field"><label>size</label><input type="range" min="1" max="6" value="${S.brush.size}" id="a-size"></div>
+      <div class="hr"></div>
+      ${a ? `<div class="ttl" style="margin-bottom:6px">Selected asset</div>
+      <div class="kv">
+        <span class="k">id</span><span>${a.id}</span>
+        <span class="k">frames</span><span>${a.frames}</span>
+        <span class="k">loop</span><span>${a.loop}</span>
+        <span class="k">from</span><span>${a.from}</span>
+      </div>` : `<div class="muted">no committed asset selected</div>`}
+    </div>`;
+  insp.querySelectorAll("[data-c]").forEach(el=>el.onclick=()=>{ S.brush.color=el.dataset.c; renderA_insp(A); });
+  const sz = insp.querySelector("#a-size"); if(sz) sz.oninput = ()=>{ S.brush.size=+sz.value; };
+}
+
+/* ==========================================================================
+   5. VARIANT B — "Pipeline"  (linear stepper across the top: Library →
+      Segment → Repair → Align → Export; one big task per screen, heavy
+      Next/Back, chrome appears only when the step needs it)
+   ========================================================================== */
+const B_STEPS = ["Library","Segment","Repair","Align","Export"];
+function renderB(root){
+  const B = h(`<div class="fill col"></div>`);
+  B.innerHTML = `
+    <div class="stepper">
+      ${B_STEPS.map((n,i)=>`<div class="step ${i<S.step?"done":""} ${i===S.step?"on":""}" data-step="${i}">
+        <span class="num">${i<S.step?"✓":i+1}</span><span>${n}</span></div>`).join("")}
+      <div class="grow"></div>
+      <div class="row center" style="padding:0 12px;gap:8px">
+        <span class="pill">kirby · step ${S.step+1}/${B_STEPS.length}</span>
+      </div>
+    </div>
+    <div class="grow col" id="b-body" style="min-height:0"></div>
+    <div class="row between center" style="padding:10px 16px;border-top:1px solid var(--line);background:var(--panel)">
+      <button class="btn ghost" id="b-back" ${S.step===0?"disabled":""}>← Back</button>
+      <span class="muted" id="b-hint" style="font-size:11px"></span>
+      <button class="btn pri" id="b-next">${S.step===B_STEPS.length-1?"Export bundle →":"Next →"}</button>
+    </div>`;
+  root.appendChild(B);
+  B.querySelectorAll("[data-step]").forEach(el=>el.onclick=()=>{ S.step=+el.dataset.step; renderB(root); });
+  B.querySelector("#b-back").onclick = ()=>{ S.step=Math.max(0,S.step-1); renderB(root); };
+  B.querySelector("#b-next").onclick = ()=>{
+    if (S.step===B_STEPS.length-1){ alert("PROTOTYPE: would write exports/pixel-pet/manifest.json + clips/*.png.\n\n"+JSON.stringify(manifestFor(),null,2)); return; }
+    S.step++; renderB(root);
+  };
+  renderB_body(B);
+}
+
+function renderB_body(B){
+  const body = B.querySelector("#b-body");
+  const hint = B.querySelector("#b-hint");
+  const step = S.step;
+
+  if (step === 0){
+    hint.textContent = "Pick a recording to work on, or an existing asset to fork.";
+    body.innerHTML = `
+      <div class="pad ttl">Recordings</div>
+      <div class="shelf">
+        ${RECORDINGS.map(r=>`
+          <div class="shelfcard" data-r="${r.id}">
+            <canvas class="big stage-bg" data-big="${r.id}"></canvas>
+            <div><b>${esc(r.label)}</b></div>
+            <div class="muted" style="font-size:11px">${r.frames} frames · ${SEGMENTS.filter(s=>s.recording===r.id).length} segments</div>
+          </div>`).join("")}
+      </div>
+      <div class="pad ttl">Committed assets</div>
+      <div class="gridcards">
+        ${ASSETS.map(a=>`
+          <div class="shelfcard" data-a="${a.id}" style="width:auto">
+            <canvas class="big stage-bg" data-abig="${a.id}" style="height:80px"></canvas>
+            <div><b>${a.id}</b> <span class="tag ok">asset</span></div>
+            <div class="muted" style="font-size:11px">${a.frames}f · ${a.loop?"loop":"once"}</div>
+          </div>`).join("")}
+      </div>`;
+    body.querySelectorAll("[data-big]").forEach(cv=>{ cv.width=120;cv.height=96;const g=cv.getContext("2d");g.imageSmoothingEnabled=false;const r=rec(cv.dataset.big);g.fillStyle=r.bg;g.fillRect(0,0,120,96);const sp=spriteCanvas(r.id==="fat-walk"?"walk":r.id,8,{});g.drawImage(sp,36,24,48,48); });
+    body.querySelectorAll("[data-abig]").forEach(cv=>{ cv.width=120;cv.height=80;const g=cv.getContext("2d");g.imageSmoothingEnabled=false;const a=asset(cv.dataset.abig);const sp=spriteCanvas(a.id==="turn"?"turn":a.id,2,{});g.drawImage(sp,36,16,48,48); });
+    body.querySelectorAll("[data-r]").forEach(el=>el.onclick=()=>{ S.recording=el.dataset.r; S.sel=SEGMENTS.find(s=>s.recording===S.recording).cutId; S.frame=seg(S.sel).start; S.step=1; renderB(B.parentElement||document.getElementById("app")); });
+    body.querySelectorAll("[data-a]").forEach(el=>el.onclick=()=>{ S.sel=el.dataset.a; S.step=3; renderB(B.parentElement||document.getElementById("app")); });
+  }
+  else if (step === 1){
+    hint.textContent = "Drag the segment handles on the timeline; scrub frame-accurately to check the cut.";
+    const s = seg(S.sel);
+    body.innerHTML = `
+      <div class="row grow" style="min-height:0">
+        <div class="col grow center" style="justify-content:center;gap:10px;padding:16px">
+          <canvas id="b-canvas" class="stage-bg" style="border-radius:8px"></canvas>
+          <div class="row center" style="gap:10px">
+            <button class="btn ghost" id="b-prev">◀</button>
+            <span class="pill">frame ${S.frame}</span>
+            <button class="btn ghost" id="b-fnext">▶</button>
+          </div>
+        </div>
+        <aside class="inspector col scroll" style="padding:12px">
+          <div class="ttl">Segment</div>
+          <div class="field"><label>name</label><input type="text" id="b-name" value="${esc(s.name)}"></div>
+          <div class="kv">
+            <span class="k">recording</span><span>${S.recording}</span>
+            <span class="k">range</span><span id="b-range">[${s.start}, ${s.end})</span>
+            <span class="k">length</span><span>${s.end-s.start} frames</span>
+          </div>
+          <div class="hr"></div>
+          <div class="ttl" style="margin-bottom:6px">Cut list</div>
+          ${SEGMENTS.filter(x=>x.recording===S.recording).map(x=>`
+            <div class="asset ${x.cutId===S.sel?"sel":""}" data-cut="${x.cutId}" style="margin-bottom:6px">
+              <div class="grow"><div>${esc(x.name)}</div><div class="muted" style="font-size:11px">[${x.start},${x.end})</div></div>
+            </div>`).join("")}
+          <button class="btn" style="margin-top:8px" id="b-addseg">+ new segment</button>
+        </aside>
+      </div>
+      <div style="border-top:1px solid var(--line);padding:10px 16px;background:var(--panel)">
+        <div class="ttl dim2" style="margin-bottom:6px">Recording timeline — drag the highlighted range</div>
+        <div id="b-cov"></div>
+      </div>`;
+    const cv = body.querySelector("#b-canvas");
+    const draw = ()=> paintStage(cv, { kind:kindOf(S.recording), frame:S.frame, showBg:rec(S.recording).bg, showGrid:true });
+    draw();
+    body.querySelector("#b-prev").onclick = ()=>{ S.frame=Math.max(0,S.frame-1); draw(); };
+    body.querySelector("#b-fnext").onclick = ()=>{ S.frame=Math.min(rec(S.recording).frames-1,S.frame+1); draw(); };
+    body.querySelector("#b-name").oninput = (e)=>{ s.name=e.target.value; };
+    body.querySelectorAll("[data-cut]").forEach(el=>el.onclick=()=>{ S.sel=el.dataset.cut; S.frame=seg(S.sel).start; renderB_body(B); });
+    body.querySelector("#b-addseg").onclick = ()=>{ const r=rec(S.recording); const id="seg-"+Math.random().toString(36).slice(2,6); SEGMENTS.push({cutId:id,recording:S.recording,start:0,end:Math.min(12,r.frames),name:"new"}); S.sel=id; renderB_body(B); };
+    body.querySelector("#b-cov").appendChild(coverageStrip(S.recording));
+  }
+  else if (step === 2){
+    hint.textContent = "Paint or erase on the frame; edits replay on commit. Eyedropper samples the current frame.";
+    const s = seg(S.sel);
+    body.innerHTML = `
+      <div class="row grow" style="min-height:0">
+        <div class="col grow center" style="justify-content:center;gap:12px;padding:16px">
+          <div class="row center" style="gap:8px">
+            <button class="btn ${S.brush.tool==="paint"?"on":""}" data-tool="paint">Brush</button>
+            <button class="btn ${S.brush.tool==="erase"?"on":""}" data-tool="erase">Erase</button>
+            <button class="btn ${S.brush.tool==="pipette"?"on":""}" data-tool="pipette">Eyedropper</button>
+          </div>
+          <canvas id="b-paint" class="stage-bg" style="border-radius:8px;cursor:crosshair"></canvas>
+          <div class="muted" style="font-size:11px">repair script → characters/kirby/repairs/${s.cutId}/repair.json</div>
+        </div>
+        <aside class="inspector col scroll" style="padding:12px">
+          <div class="ttl">Repair operations</div>
+          <div id="b-ops" class="col" style="gap:4px;margin:8px 0"></div>
+          <div class="hr"></div>
+          <div class="ttl" style="margin-bottom:6px">Colour</div>
+          <div class="swatch-list">
+            ${["#f7a8c4","#ffffff","#d6336c","#2a1420","#6ee7b7","#000000"].map(c=>`<div class="swatch ${S.brush.color===c?"sel":""}" data-c="${c}" style="background:${c}"></div>`).join("")}
+          </div>
+          <div class="field" style="margin-top:10px"><label>size</label><input type="range" min="1" max="6" value="${S.brush.size}" id="b-size"></div>
+          <button class="btn" id="b-undo" style="margin-top:10px">Undo last op</button>
+        </aside>
+      </div>`;
+    const cv = body.querySelector("#b-paint");
+    if (!S.paint[s.cutId]){ const c=document.createElement("canvas");c.width=CHAR.canvas.w*4;c.height=CHAR.canvas.h*4;S.paint[s.cutId]=c; }
+    const layer = S.paint[s.cutId];
+    const draw = ()=>{ paintStage(cv,{kind:kindOf(S.recording),frame:S.frame,showBg:rec(S.recording).bg,showGrid:true}); cv.getContext("2d").drawImage(layer,0,0); };
+    draw();
+    const ops = (S.ops ||= {});
+    ops[s.cutId] ||= [];
+    const paintAt = (e)=>{
+      const r=cv.getBoundingClientRect();
+      const x=Math.round((e.clientX-r.left)/r.width*layer.width), y=Math.round((e.clientY-r.top)/r.height*layer.height);
+      const g=layer.getContext("2d"); g.imageSmoothingEnabled=false; const px=4*S.brush.size;
+      if (S.brush.tool==="pipette"){ const d=cv.getContext("2d").getImageData(Math.round(x),Math.round(y),1,1).data; S.brush.color=`rgb(${d[0]},${d[1]},${d[2]})`; renderB_body(B); return; }
+      if (S.brush.tool==="erase") g.clearRect(x-px/2,y-px/2,px,px); else { g.fillStyle=S.brush.color; g.fillRect(x-px/2,y-px/2,px,px); }
+      ops[s.cutId].push({tool:S.brush.tool==="erase"?"erase-rect":"paint-brush",frame:S.frame,color:S.brush.tool==="erase"?null:S.brush.color});
+      draw(); renderB_ops(body, s.cutId, ops, ()=>renderB_body(B));
+    };
+    let down=false; cv.onpointerdown=(e)=>{down=true;cv.setPointerCapture(e.pointerId);paintAt(e);};
+    cv.onpointermove=(e)=>{if(down)paintAt(e);}; cv.onpointerup=()=>down=false;
+    body.querySelectorAll("[data-tool]").forEach(b=>b.onclick=()=>{ S.brush.tool=b.dataset.tool; renderB_body(B); });
+    body.querySelectorAll("[data-c]").forEach(el=>el.onclick=()=>{ S.brush.color=el.dataset.c; renderB_body(B); });
+    body.querySelector("#b-size").oninput=(e)=>{ S.brush.size=+e.target.value; };
+    body.querySelector("#b-undo").onclick=()=>{ ops[s.cutId].pop(); const g=layer.getContext("2d"); g.clearRect(0,0,layer.width,layer.height); draw(); renderB_ops(body,s.cutId,ops,()=>renderB_body(B)); };
+    renderB_ops(body, s.cutId, ops, ()=>renderB_body(B));
+  }
+  else if (step === 3){
+    hint.textContent = "Toggle clips, nudge manual offsets; the anchor ✚ stays fixed on the shared canvas.";
+    body.innerHTML = `
+      <div class="row grow" style="min-height:0">
+        <div class="col grow center" style="justify-content:center;gap:12px;padding:16px">
+          <canvas id="b-align" class="stage-bg" style="border-radius:8px"></canvas>
+          <div class="row center" style="gap:8px;flex-wrap:wrap">
+            ${ASSETS.map(a=>`<button class="btn ${S.align.visible[a.id]?"on":""}" data-av="${a.id}">${a.id}</button>`).join("")}
+          </div>
+        </div>
+        <aside class="inspector col scroll" style="padding:12px">
+          <div class="ttl">Placement offsets</div>
+          ${ASSETS.map(a=>`
+            <div style="margin:10px 0">
+              <div class="row between center"><span>${a.id}</span><span class="muted" style="font-size:11px">(${S.offsets[a.id][0]}, ${S.offsets[a.id][1]})</span></div>
+              <div class="field"><label>dx</label><input type="range" min="-12" max="12" value="${S.offsets[a.id][0]}" data-ox="${a.id}"></div>
+              <div class="field"><label>dy</label><input type="range" min="-12" max="12" value="${S.offsets[a.id][1]}" data-oy="${a.id}"></div>
+            </div>`).join("")}
+          <div class="hr"></div>
+          <div class="muted" style="font-size:11px">canvas ${CHAR.canvas.w}×${CHAR.canvas.h}, symmetric about the anchor; growing it rebakes every clip.</div>
+        </aside>
+      </div>`;
+    const cv = body.querySelector("#b-align");
+    const draw = ()=>{
+      cv.width=CHAR.canvas.w*4; cv.height=CHAR.canvas.h*4;
+      const g=cv.getContext("2d"); g.imageSmoothingEnabled=false;
+      g.strokeStyle="#1b2130"; for(let x=0;x<=cv.width;x+=32){g.beginPath();g.moveTo(x,0);g.lineTo(x,cv.height);g.stroke();}
+      for(let y=0;y<=cv.height;y+=32){g.beginPath();g.moveTo(0,y);g.lineTo(cv.width,y);g.stroke();}
+      ASSETS.filter(a=>S.align.visible[a.id]).forEach(a=>{
+        const sp=spriteCanvas(a.id==="turn"?"turn":a.id,0,{ghost:true}); const o=S.offsets[a.id];
+        g.drawImage(sp,Math.round((CHAR.canvas.anchor.x-12+o[0])*4),Math.round((CHAR.canvas.anchor.y-20+o[1])*4),sp.width*4,sp.height*4);
+      });
+      g.strokeStyle="#3a4257"; g.strokeRect(.5,.5,cv.width-1,cv.height-1);
+      const ax=CHAR.canvas.anchor.x*4, ay=CHAR.canvas.anchor.y*4; g.strokeStyle="#6ee7b7";
+      g.beginPath(); g.moveTo(ax-8,ay);g.lineTo(ax+8,ay);g.moveTo(ax,ay-8);g.lineTo(ax,ay+8);g.stroke();
+    };
+    draw();
+    body.querySelectorAll("[data-av]").forEach(b=>b.onclick=()=>{ S.align.visible[b.dataset.av]=!S.align.visible[b.dataset.av]; renderB_body(B); });
+    body.querySelectorAll("[data-ox]").forEach(el=>el.oninput=()=>{ S.offsets[el.dataset.ox][0]=+el.value; draw(); });
+    body.querySelectorAll("[data-oy]").forEach(el=>el.oninput=()=>{ S.offsets[el.dataset.oy][1]=+el.value; draw(); });
+  }
+  else {
+    hint.textContent = "Bind each situation, then export. A closed export requires every situation bound.";
+    body.innerHTML = `
+      <div class="row grow" style="min-height:0">
+        <div class="col grow scroll" style="padding:16px">
+          <div class="ttl" style="margin-bottom:8px">Situation → animation</div>
+          ${SITUATIONS.map(sit=>`
+            <div class="card" style="margin-bottom:8px">
+              <div class="bd row between center">
+                <b>${sit}</b>
+                <div class="row center" style="gap:8px">
+                  <select data-bind="${sit}">
+                    ${ASSETS.map(a=>`<option value="${a.id}" ${S.bindings[sit].includes(a.id)?"selected":""}>${a.id}</option>`).join("")}
+                  </select>
+                  <span class="tag ${S.bindings[sit].length?"ok":""}">${S.bindings[sit].length?"bound":"missing"}</span>
+                </div>
+              </div>
+            </div>`).join("")}
+        </div>
+        <aside class="inspector col" style="padding:12px">
+          <div class="ttl">manifest.json</div>
+          <pre class="manifest grow" id="b-man">${esc(JSON.stringify(manifestFor(),null,1))}</pre>
+        </aside>
+      </div>`;
+    body.querySelectorAll("select[data-bind]").forEach(sel=>sel.onchange=()=>{ S.bindings[sel.dataset.bind]=[sel.value]; renderB_body(B); });
+  }
+}
+
+function renderB_ops(body, cutId, ops, rerender){
+  const host = body.querySelector("#b-ops"); if(!host) return;
+  const list = ops[cutId] || [];
+  host.innerHTML = list.length ? list.map((o,i)=>`<div class="row between" style="font-size:11px"><span class="muted">${i+1}. ${o.tool}</span><span class="dim2">f${o.frame}${o.color?" · "+o.color:""}</span></div>`).join("")
+    : `<span class="muted" style="font-size:11px">no operations yet — paint something</span>`;
+}
+
+/* ==========================================================================
+   6. VARIANT C — "Timeline-first"  (the Recording timeline is the hero; a
+      horizontal shelf of asset cards; segments are dragged straight on the
+      filmstrip; repair/align happen inline below the timeline)
+   ========================================================================== */
+function renderC(root){
+  const C = h(`<div class="fill col"></div>`);
+  const s = seg(S.sel);
+  C.innerHTML = `
+    <div class="row between center" style="padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel)">
+      <div class="row center" style="gap:10px">
+        <b>sprite-forge</b><span class="muted">·</span><span class="muted">${CHAR.id}</span>
+      </div>
+      <div class="row center" style="gap:6px">
+        <button class="btn" data-view="edit">Edit</button>
+        <button class="btn" data-view="align">Align</button>
+        <button class="btn" data-view="export">Export</button>
+      </div>
+    </div>
+
+    <div class="shelf" id="c-shelf">
+      ${ASSETS.map(a=>`
+        <div class="shelfcard ${a.id===S.sel||a.from===S.sel?"sel":""}" data-a="${a.id}">
+          <canvas class="big stage-bg" data-abig="${a.id}"></canvas>
+          <div class="row between center"><b>${a.id}</b><span class="tag ok">${a.frames}f</span></div>
+          <div class="muted" style="font-size:11px">${a.loop?"loops":"plays once"}${a.flipsFacing?" · flips facing":""}</div>
+        </div>`).join("")}
+      <div class="shelfcard" data-a="__rec" style="border-style:dashed">
+        <div class="big center row" style="height:96px;justify-content:center;font-size:26px;color:var(--dim-2)">＋</div>
+        <div class="muted" style="font-size:11px">new from recording…</div>
+      </div>
+    </div>
+
+    <div class="hr" style="margin:0"></div>
+
+    <div class="col grow" id="c-main" style="min-height:0"></div>
+
+    <div style="border-top:1px solid var(--line);background:var(--panel);padding:10px 14px">
+      <div class="row between center" style="margin-bottom:8px">
+        <div class="row center" style="gap:10px">
+          <span class="ttl">Recording · ${S.recording}</span>
+          <select id="c-rec">${RECORDINGS.map(r=>`<option ${r.id===S.recording?"selected":""}>${r.id}</option>`).join("")}</select>
+        </div>
+        <div class="row center" style="gap:8px">
+          <span class="pill">frame ${S.frame}</span>
+          <span class="muted" style="font-size:11px">drag the shaded range to re-cut</span>
+        </div>
+      </div>
+      <div id="c-cov"></div>
+      <div id="c-film" style="margin-top:8px"></div>
+    </div>`;
+  root.appendChild(C);
+
+  C.querySelectorAll("[data-abig]").forEach(cv=>{ cv.width=150;cv.height=72;cv.style.height="72px";const g=cv.getContext("2d");g.imageSmoothingEnabled=false;const a=asset(cv.dataset.abig);const sp=spriteCanvas(a.id==="turn"?"turn":a.id,2,{});g.drawImage(sp,55,14,44,44); });
+  C.querySelectorAll("[data-a]").forEach(el=>el.onclick=()=>{
+    if (el.dataset.a==="__rec"){ S.recording="jump"; S.sel=SEGMENTS.find(x=>x.recording==="jump").cutId; S.frame=seg(S.sel).start; renderC(root); return; }
+    const a=asset(el.dataset.a); S.sel=a.from; S.recording=seg(a.from).recording; S.frame=seg(a.from).start; renderC(root);
+  });
+  C.querySelectorAll("[data-view]").forEach(el=>el.onclick=()=>{ C._view=el.dataset.view; renderC_main(C); });
+  C._view = C._view || "edit";
+  C.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("on", b.dataset.view===C._view));
+  C.querySelector("#c-rec").onchange = (e)=>{ S.recording=e.target.value; S.sel=SEGMENTS.find(s=>s.recording===S.recording).cutId; S.frame=seg(S.sel).start; renderC(root); };
+  renderC_main(C);
+  renderC_timeline(C);
+}
+
+function renderC_main(C){
+  const main = C.querySelector("#c-main");
+  const s = seg(S.sel);
+  if (C._view === "edit"){
+    main.innerHTML = `
+      <div class="row grow" style="min-height:0">
+        <div class="col grow center" style="justify-content:center;padding:14px">
+          <canvas id="c-canvas" class="stage-bg" style="border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.5)"></canvas>
+          <div class="row center" style="gap:10px;margin-top:10px">
+            <button class="btn ghost" data-tool="pipette">Eyedropper</button>
+            <button class="btn" data-tool="paint">Brush</button>
+            <button class="btn" data-tool="erase">Erase</button>
+            <span class="hr" style="width:1px;height:16px;background:var(--line)"></span>
+            <div class="swatch-list">
+              ${["#f7a8c4","#ffffff","#d6336c","#2a1420","#6ee7b7","#000000"].map(c=>`<div class="swatch ${S.brush.color===c?"sel":""}" data-c="${c}" style="background:${c}"></div>`).join("")}
+            </div>
+          </div>
+        </div>
+        <aside style="width:250px;flex:none;border-left:1px solid var(--line);padding:12px" class="col">
+          <div class="ttl">Segment in focus</div>
+          <div class="kv" style="margin-top:8px">
+            <span class="k">name</span><span>${esc(s.name)}</span>
+            <span class="k">recording</span><span>${s.recording}</span>
+            <span class="k">range</span><span>[${s.start}, ${s.end})</span>
+            <span class="k">length</span><span>${s.end-s.start}f</span>
+            <span class="k">canvas</span><span>${CHAR.canvas.w}×${CHAR.canvas.h}</span>
+          </div>
+          <div class="hr"></div>
+          <div class="muted" style="font-size:11px">Repair edits are recorded as a replayable script, not baked in.</div>
+        </aside>
+      </div>`;
+    const cv = main.querySelector("#c-canvas");
+    if (!S.paint[s.cutId]){ const c=document.createElement("canvas");c.width=CHAR.canvas.w*4;c.height=CHAR.canvas.h*4;S.paint[s.cutId]=c; }
+    const layer = S.paint[s.cutId];
+    const draw = ()=>{ paintStage(cv,{kind:kindOf(S.recording),frame:S.frame,showBg:rec(S.recording).bg,showGrid:true}); cv.getContext("2d").drawImage(layer,0,0); };
+    draw();
+    const paintAt=(e)=>{ const r=cv.getBoundingClientRect(); const x=Math.round((e.clientX-r.left)/r.width*layer.width), y=Math.round((e.clientY-r.top)/r.height*layer.height); const g=layer.getContext("2d");g.imageSmoothingEnabled=false;const px=4*S.brush.size;
+      if (S.brush.tool==="pipette"){ const d=cv.getContext("2d").getImageData(x,y,1,1).data; S.brush.color=`rgb(${d[0]},${d[1]},${d[2]})`; renderC_main(C); return; }
+      if (S.brush.tool==="erase") g.clearRect(x-px/2,y-px/2,px,px); else { g.fillStyle=S.brush.color; g.fillRect(x-px/2,y-px/2,px,px); } draw(); };
+    let down=false; cv.onpointerdown=(e)=>{down=true;cv.setPointerCapture(e.pointerId);paintAt(e);}; cv.onpointermove=(e)=>{if(down)paintAt(e);}; cv.onpointerup=()=>down=false;
+    main.querySelectorAll("[data-tool]").forEach(b=>b.onclick=()=>{ S.brush.tool=b.dataset.tool; renderC_main(C); });
+    main.querySelectorAll("[data-c]").forEach(el=>el.onclick=()=>{ S.brush.color=el.dataset.c; renderC_main(C); });
+  }
+  else if (C._view === "align"){
+    main.innerHTML = `
+      <div class="row grow" style="min-height:0">
+        <div class="col grow center" style="justify-content:center;padding:14px">
+          <canvas id="c-align" class="stage-bg" style="border-radius:10px"></canvas>
+          <div class="muted" style="font-size:11px;margin-top:8px">drag a clip to place it; shared canvas · anchor ✚</div>
+        </div>
+        <aside style="width:250px;flex:none;border-left:1px solid var(--line);padding:12px">
+          <div class="ttl">Clips</div>
+          ${ASSETS.map(a=>`
+            <div style="margin:10px 0">
+              <div class="row between center"><label class="row center" style="gap:6px"><input type="checkbox" data-av="${a.id}" ${S.align.visible[a.id]?"checked":""}> ${a.id}</label>
+              <span class="muted" style="font-size:11px">(${S.offsets[a.id][0]},${S.offsets[a.id][1]})</span></div>
+            </div>`).join("")}
+        </aside>
+      </div>`;
+    const cv = main.querySelector("#c-align");
+    const draw = ()=>{
+      cv.width=CHAR.canvas.w*4; cv.height=CHAR.canvas.h*4; const g=cv.getContext("2d"); g.imageSmoothingEnabled=false;
+      g.strokeStyle="#1b2130"; for(let x=0;x<=cv.width;x+=32){g.beginPath();g.moveTo(x,0);g.lineTo(x,cv.height);g.stroke();}
+      for(let y=0;y<=cv.height;y+=32){g.beginPath();g.moveTo(0,y);g.lineTo(cv.width,y);g.stroke();}
+      ASSETS.filter(a=>S.align.visible[a.id]).forEach(a=>{ const sp=spriteCanvas(a.id==="turn"?"turn":a.id,0,{ghost:true}); const o=S.offsets[a.id];
+        g.drawImage(sp,Math.round((CHAR.canvas.anchor.x-12+o[0])*4),Math.round((CHAR.canvas.anchor.y-20+o[1])*4),sp.width*4,sp.height*4); });
+      g.strokeStyle="#3a4257"; g.strokeRect(.5,.5,cv.width-1,cv.height-1);
+      const ax=CHAR.canvas.anchor.x*4, ay=CHAR.canvas.anchor.y*4; g.strokeStyle="#6ee7b7";
+      g.beginPath(); g.moveTo(ax-8,ay);g.lineTo(ax+8,ay);g.moveTo(ax,ay-8);g.lineTo(ax,ay+8);g.stroke();
+    };
+    draw();
+    // drag-to-nudge the topmost visible clip
+    let drag=null;
+    cv.onpointerdown=(e)=>{ drag=ASSETS.filter(a=>S.align.visible[a.id]).slice(-1)[0]; cv.setPointerCapture(e.pointerId); };
+    cv.onpointermove=(e)=>{ if(!drag) return; const r=cv.getBoundingClientRect(); const dx=Math.round((e.movementX)/r.width*CHAR.canvas.w); const dy=Math.round((e.movementY)/r.height*CHAR.canvas.h); S.offsets[drag.id][0]=Math.max(-12,Math.min(12,S.offsets[drag.id][0]+dx)); S.offsets[drag.id][1]=Math.max(-12,Math.min(12,S.offsets[drag.id][1]+dy)); draw(); };
+    cv.onpointerup=()=>{ drag=null; renderC_main(C); };
+    main.querySelectorAll("[data-av]").forEach(el=>el.onchange=()=>{ S.align.visible[el.dataset.av]=el.checked; renderC_main(C); });
+  }
+  else {
+    main.innerHTML = `
+      <div class="row grow" style="min-height:0">
+        <div class="col grow scroll" style="padding:14px">
+          <div class="row" style="gap:10px;flex-wrap:wrap">
+            ${SITUATIONS.map(sit=>`
+              <div class="card" style="min-width:150px">
+                <div class="bd col" style="gap:6px">
+                  <b>${sit}</b>
+                  <select data-bind="${sit}">${ASSETS.map(a=>`<option value="${a.id}" ${S.bindings[sit].includes(a.id)?"selected":""}>${a.id}</option>`).join("")}</select>
+                  <span class="tag ${S.bindings[sit].length?"ok":""}">${S.bindings[sit].length?"bound":"missing"}</span>
+                </div>
+              </div>`).join("")}
+          </div>
+          <div class="hr"></div>
+          <button class="btn pri" id="c-export" style="align-self:flex-start">Export bundle → exports/pixel-pet/</button>
+        </div>
+        <aside style="width:320px;flex:none;border-left:1px solid var(--line);padding:12px" class="col">
+          <div class="ttl">manifest.json</div>
+          <pre class="manifest grow">${esc(JSON.stringify(manifestFor(),null,1))}</pre>
+        </aside>
+      </div>`;
+    main.querySelectorAll("select[data-bind]").forEach(sel=>sel.onchange=()=>{ S.bindings[sel.dataset.bind]=[sel.value]; renderC_main(C); });
+    main.querySelector("#c-export").onclick=()=>alert("PROTOTYPE: would write exports/pixel-pet/manifest.json + clips/*.png.\n\n"+JSON.stringify(manifestFor(),null,2));
+  }
+}
+
+function renderC_timeline(C){
+  const cov = C.querySelector("#c-cov"); cov.innerHTML=""; cov.appendChild(coverageStrip(S.recording));
+  const film = C.querySelector("#c-film"); film.innerHTML="";
+  film.appendChild(filmstrip({ recordingId:S.recording, segId:S.sel, thumb:1, onPickFrame:(i)=>{ S.frame=i; renderC_main(C); renderC_timeline(C); } }));
+}
+
+/* ==========================================================================
+   7. Switcher + boot
+   ========================================================================== */
+const VARIANTS = {
+  A:{ name:"Workbench", desc:"docked rail · stage · inspector" },
+  B:{ name:"Pipeline",  desc:"linear stepper, one task per screen" },
+  C:{ name:"Timeline-first", desc:"recording timeline is the hero" },
+};
+const KEYS = Object.keys(VARIANTS);
+
+function setVariant(v, {push=true}={}){
+  S.variant = v;
+  const app = $("#app"); app.innerHTML = "";
+  if (v==="A") renderA(app); else if (v==="B") renderB(app); else renderC(app);
+  renderSwitcher();
+  if (push){ const u = new URL(location.href); u.searchParams.set("variant", v); history.replaceState(null,"",u); }
+}
+function renderSwitcher(){
+  const i = KEYS.indexOf(S.variant);
+  const sw = $("#switcher");
+  sw.innerHTML = `
+    <button class="nav" id="sw-prev" title="previous variant">‹</button>
+    <div class="label">Variant <b>${S.variant}</b> <span>· ${VARIANTS[S.variant].name} — ${VARIANTS[S.variant].desc}</span></div>
+    <button class="nav" id="sw-next" title="next variant">›</button>
+    <span class="keys">← →</span>`;
+  sw.querySelector("#sw-prev").onclick = ()=> setVariant(KEYS[(i-1+KEYS.length)%KEYS.length]);
+  sw.querySelector("#sw-next").onclick = ()=> setVariant(KEYS[(i+1)%KEYS.length]);
+}
+function cycle(dir){ const i=KEYS.indexOf(S.variant); setVariant(KEYS[(i+dir+KEYS.length)%KEYS.length]); }
+
+document.addEventListener("keydown", (e)=>{
+  const t = document.activeElement;
+  if (t && (t.tagName==="INPUT" || t.tagName==="TEXTAREA" || t.tagName==="SELECT" || t.isContentEditable)) return;
+  if (e.key==="ArrowLeft") cycle(-1);
+  if (e.key==="ArrowRight") cycle(1);
+});
+
+const render = () => setVariant(S.variant, { push:false });
+
+const qs = new URLSearchParams(location.search).get("variant");
+setVariant(KEYS.includes(qs) ? qs : "A");
+</script>
+</body>
+</html>
