@@ -124,6 +124,16 @@ export function manifestPath(target: string): string {
   return `${exportDir(target)}/manifest.json`;
 }
 
+/** The one folder of copied sheets inside an Export (`exports/<target>/clips/`). */
+export function exportClipsDir(target: string): string {
+  return `${exportDir(target)}/clips`;
+}
+
+/** A copied Asset sheet inside an Export, named by the exported Asset id. */
+export function exportSheetPath(target: string, assetId: string): string {
+  return `${exportClipsDir(target)}/${assetId}.png`;
+}
+
 /** The contract artifacts every committed Asset folder holds, in read order. */
 export const ASSET_META_FILE = 'meta.json';
 export const ASSET_PROVENANCE_FILE = 'provenance.json';

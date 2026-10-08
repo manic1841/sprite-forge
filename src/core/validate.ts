@@ -17,13 +17,14 @@ import type { FormatsPlugin } from 'ajv-formats';
 // ajv-formats is CJS whose callable plugin is the module itself; load it through
 // CJS interop so it works identically under tsx, vitest and the built ESM CLI.
 const addFormats = createRequire(import.meta.url)('ajv-formats') as FormatsPlugin;
-import { ValidationError, type ValidationIssue } from './errors.js';
+import { StoreError, ValidationError, type ValidationIssue } from './errors.js';
 import {
   ASSET_META_FILE,
   ASSET_PROVENANCE_FILE,
   canvasPath,
   clipDir,
   cutsPath,
+  exportDir,
   manifestPath,
   repairPath,
   sequenceDir,
@@ -31,6 +32,7 @@ import {
 import { readStoreTree } from './scan.js';
 import { pathExists, readJsonFile } from './store/index.js';
 import { readSchemaSource, type SchemaName } from './store/schemas.js';
+import type { ExportManifest } from './export.js';
 
 /** The artifact kinds the store holds, each backed by one schema file. */
 export type ArtifactKind =
@@ -137,6 +139,113 @@ export async function validateStore(root: string): Promise<StoreValidationReport
     throw new ValidationError(issues);
   }
   return { root, artifacts };
+}
+
+/** What {@link validateExport} checked, on success. */
+export interface ExportValidationReport {
+  root: string;
+  target: string;
+  /** The validated Manifest, ready for a front end to show. */
+  manifest: ExportManifest;
+}
+
+/**
+ * Enforce the **cross-artifact rules of a closed Export** (format-spec §9) against
+ * the store: every animation's sheet must exist inside the Export, every bound id
+ * must exist in `animations`, and the manifest canvas must equal the Character's.
+ *
+ * Schema validation of the manifest runs first (a malformed manifest is a hard
+ * error); the cross-artifact rules are then aggregated into one `ValidationError`.
+ * The "every declared Situation is bound" rule is not checkable from disk — the
+ * declared set is the consumer's and is supplied to `exportCharacter`.
+ */
+export async function validateExport(
+  root: string,
+  target: string,
+): Promise<ExportValidationReport> {
+  const artifactPath = manifestPath(target);
+  if (!(await pathExists(root, artifactPath))) {
+    throw new StoreError(`No Export "${target}" in the store (${artifactPath} is missing).`);
+  }
+  const value = await readJsonFile(root, artifactPath);
+  validateArtifact('manifest', value, { artifact: artifactPath });
+  const manifest = value as ExportManifest;
+
+  const issues: ValidationIssue[] = [];
+  const issue = (path: string, message: string): void => {
+    issues.push({ artifact: artifactPath, path, message });
+  };
+
+  for (const [id, animation] of Object.entries(manifest.animations)) {
+    const sheet = animation.sheet;
+    if (isUnsafeRelPath(sheet)) {
+      issue(
+        `/animations/${id}/sheet`,
+        `sheet "${sheet}" must be a relative POSIX path inside the Export`,
+      );
+      continue;
+    }
+    if (!(await pathExists(root, `${exportDir(target)}/${sheet}`))) {
+      issue(`/animations/${id}/sheet`, `sheet "${sheet}" does not exist in the Export`);
+    }
+  }
+
+  for (const [situation, ids] of Object.entries(manifest.bindings)) {
+    ids.forEach((id, index) => {
+      if (!Object.prototype.hasOwnProperty.call(manifest.animations, id)) {
+        issue(`/bindings/${situation}/${index}`, `animation "${id}" is not in animations`);
+      }
+    });
+  }
+
+  await checkManifestCanvas(root, manifest, issue);
+
+  if (issues.length > 0) {
+    throw new ValidationError(issues);
+  }
+  return { root, target, manifest };
+}
+
+/** Does the manifest canvas equal the Character's `canvas.json`? (format-spec §9) */
+async function checkManifestCanvas(
+  root: string,
+  manifest: ExportManifest,
+  issue: (path: string, message: string) => void,
+): Promise<void> {
+  const artifactPath = canvasPath(manifest.character);
+  if (!(await pathExists(root, artifactPath))) {
+    issue('', `Character "${manifest.character}" has no canvas.json (${artifactPath})`);
+    return;
+  }
+  const characterCanvas = (await readJsonFile(root, artifactPath)) as {
+    width?: unknown;
+    height?: unknown;
+    anchor?: { x?: unknown; y?: unknown };
+  };
+  const canvas = manifest.canvas;
+  const equal =
+    characterCanvas.width === canvas.width &&
+    characterCanvas.height === canvas.height &&
+    characterCanvas.anchor?.x === canvas.anchor.x &&
+    characterCanvas.anchor?.y === canvas.anchor.y;
+  if (!equal) {
+    issue(
+      '/canvas',
+      `manifest canvas does not equal Character "${manifest.character}"'s canvas.json ` +
+        `(${JSON.stringify(characterCanvas)})`,
+    );
+  }
+}
+
+/** Reject absolute, drive-letter, URL or escaping paths a manifest could carry. */
+function isUnsafeRelPath(relPath: string): boolean {
+  return (
+    relPath.length === 0 ||
+    relPath.startsWith('/') ||
+    /^[A-Za-z]:/.test(relPath) ||
+    relPath.includes('://') ||
+    relPath.split('/').includes('..')
+  );
 }
 
 // --- internals ----------------------------------------------------------------

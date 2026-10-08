@@ -120,10 +120,21 @@ export type {
 
 export { ID_PATTERN, isValidId } from './ids.js';
 
-export { validateArtifact, validateStore } from './validate.js';
+export { EXPORT_FORMAT_VERSION, exportCharacter, readExportManifest } from './export.js';
+export type {
+  ExportBindings,
+  ExportCharacterOptions,
+  ExportManifest,
+  ExportResult,
+  Facing,
+  ManifestAnimation,
+} from './export.js';
+
+export { validateArtifact, validateExport, validateStore } from './validate.js';
 export type {
   ArtifactContext,
   ArtifactKind,
+  ExportValidationReport,
   StoreValidationReport,
   ValidatedArtifact,
 } from './validate.js';
