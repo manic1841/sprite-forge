@@ -95,6 +95,32 @@ re-executed and traced — but because Repair is human, the edited result must b
 stored, not regenerated. See
 [ADR-0004](./adr/0004-baked-assets-with-provenance-sidecars.md).
 
+## Web tool surface
+
+The web UI is the primary working surface, and its shape is a **docked
+workbench**, not a wizard: one persistent shell, with a single region swapping per
+task so the working context is never lost.
+
+- **Rail (left, persistent)** — the Library: Recordings and committed Assets,
+  always present; click one to load it.
+- **Stage (centre)** — the active view, chosen by a **mode** switch: *Clip editor*
+  (the frame, segmentation scrub, and the Repair brush), *Alignment* (Clips ghosted
+  on the shared Canvas against the Anchor), or *Export* (Situation bindings and the
+  resulting Manifest).
+- **Inspector (right, contextual)** — whatever the active mode needs: brush colour /
+  size and the Repair operations in the editor; per-Clip placement offsets in
+  alignment; the live `manifest.json` in export.
+- **Filmstrip (bottom, docked)** — the current Segment frame-by-frame, plus the
+  Recording's timeline with its draggable cut ranges.
+
+Switching modes swaps only the stage; the rail, inspector and filmstrip stay put.
+
+This shape was chosen against two alternatives prototyped at equal fidelity — a
+**linear stepper** (one task per screen, heavy Next/Back) and a **timeline-first**
+layout (the Recording timeline as the hero). The full three-variant prototype,
+including the losing variants, is kept as a primary source on the throwaway branch
+`prototype/web-tool-surface` (`prototype/web-tool-surface/index.html`).
+
 ## Core and front ends
 
 - **core** — pure functions (decode, de-background, crop, align, Repair application,
