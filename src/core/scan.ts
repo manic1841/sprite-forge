@@ -10,14 +10,15 @@ import {
   CHARACTERS_DIR,
   EXPORTS_DIR,
   RECORDINGS_DIR,
+  canvasPath,
   characterDir,
   clipDir,
   exportDir,
   recordingDir,
   sequenceDir,
 } from './layout.js';
-import { isDirectory, listDirectories } from './store/index.js';
-import type { ScannedAsset, StoreScan } from './types.js';
+import { isDirectory, listDirectories, pathExists } from './store/index.js';
+import type { ScannedAsset, ScannedCharacter, StoreScan } from './types.js';
 
 /** A Character as found on disk, before it is shaped into a scan result. */
 export interface CharacterTree {
@@ -60,17 +61,27 @@ export async function readStoreTree(root: string): Promise<StoreTree> {
 export async function scan(root: string): Promise<StoreScan> {
   const tree = await readStoreTree(root);
 
-  return {
-    root,
-    recordings: tree.recordings.map((id) => ({ id, dir: recordingDir(id) })),
-    characters: tree.characters.map((character) => ({
+  const characters: ScannedCharacter[] = [];
+  for (const character of tree.characters) {
+    // A Character is recognised by its `canvas.json` (format-spec §3): a bare
+    // folder under `characters/` is not a Character.
+    if (!(await pathExists(root, canvasPath(character.id)))) {
+      continue;
+    }
+    characters.push({
       id: character.id,
       dir: characterDir(character.id),
       assets: [
         ...toAssets('clip', character.id, character.clips),
         ...toAssets('sequence', character.id, character.sequences),
       ],
-    })),
+    });
+  }
+
+  return {
+    root,
+    recordings: tree.recordings.map((id) => ({ id, dir: recordingDir(id) })),
+    characters,
     exports: tree.exports.map((target) => ({ target, dir: exportDir(target) })),
   };
 }
