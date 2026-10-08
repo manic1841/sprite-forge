@@ -2,8 +2,8 @@
 
 A committed Asset stores its **baked** result — `sheet.png` + `meta.json` — and is
 authoritative. *How* it was made (its Recording, Segment, processing settings, and
-Mask) is recorded in a **provenance** sidecar beside it, and the Mask is kept as an
-input sidecar in the store.
+Repair script) is recorded in a **provenance** sidecar beside it, and the Repair
+script is kept as an input sidecar in the store.
 
 The alternative — storing only a recipe and regenerating the sheet on demand — was
 rejected because Repair is a human edit (brush strokes and eyedropper patches) that
@@ -13,5 +13,5 @@ record), while the stored sheet remains the thing that is actually delivered.
 
 ## Consequences
 
-- The store carries both inputs (recordings, Masks) and outputs (sheets).
+- The store carries both inputs (recordings, Repair scripts) and outputs (sheets).
 - Re-running reproduces the pipeline but does not overwrite a committed Asset.
