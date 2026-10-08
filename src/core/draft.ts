@@ -42,6 +42,7 @@ import {
   draftPath,
   sourcePath,
 } from './layout.js';
+import type { RepairFraming } from './repair.js';
 import { readCutList } from './segments.js';
 import type { AssetRef } from './types.js';
 import {
@@ -117,6 +118,13 @@ export interface ClipDraftDescriptor {
    * #27; commit re-homes this reference onto the new Asset's Clip id.
    */
   repair?: string | null;
+  /**
+   * The pixel geometry the Draft's Repair script was authored against, recorded
+   * when the first operation is appended (#27). A later change to the frames or
+   * Canvas is detected by comparing against it (format-spec Rule 4.3). Design-local:
+   * Drafts are not a frozen format (format-spec §11).
+   */
+  repairFraming?: RepairFraming;
 }
 
 /** A read-back Clip Draft: its descriptor plus the paths of its frame PNGs. */
@@ -494,7 +502,7 @@ const DRAFT_KEYS = [
 ] as const;
 
 /** Optional Draft fields added by the fork seam (#24); absent on a fresh extract. */
-const DRAFT_OPTIONAL_KEYS = ['derivedFrom', 'placementOffset', 'repair'] as const;
+const DRAFT_OPTIONAL_KEYS = ['derivedFrom', 'placementOffset', 'repair', 'repairFraming'] as const;
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const HEX_COLOR = /^#[0-9a-f]{6}$/;
@@ -616,6 +624,20 @@ function validateDraftDescriptor(value: unknown, artifact: string, draftId: stri
   if ('repair' in value && value.repair !== null && value.repair !== undefined) {
     if (typeof value.repair !== 'string' || value.repair.length === 0) {
       issue('/repair', 'must be null or a store-relative path');
+    }
+  }
+  if ('repairFraming' in value && value.repairFraming !== undefined) {
+    const framing = value.repairFraming;
+    if (
+      !isRecord(framing) ||
+      !isInteger(framing.frameCount) ||
+      (framing.frameCount as number) < 1 ||
+      !isInteger(framing.width) ||
+      (framing.width as number) < 1 ||
+      !isInteger(framing.height) ||
+      (framing.height as number) < 1
+    ) {
+      issue('/repairFraming', 'must be {frameCount, width, height} of positive integers');
     }
   }
 

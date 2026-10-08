@@ -50,6 +50,40 @@ export type {
   ForkAssetOptions,
 } from './assets.js';
 
+export {
+  appendRepairOperation,
+  applyRepairScript,
+  applyRepairScriptToFrame,
+  checkRepairValidity,
+  copyRepairScript,
+  readDraftRepair,
+  readDraftRepairFrame,
+  readRepairScript,
+  rehomeRepairScript,
+  sampleDraftRepairColor,
+  samplePixelColor,
+  undoRepairOperation,
+  writeRepairScript,
+} from './repair.js';
+export type {
+  AppendRepairOptions,
+  DraftRepairOptions,
+  FrameRange,
+  ReadDraftRepairFrameOptions,
+  RectGeometry,
+  RepairClipOptions,
+  RepairFraming,
+  RepairOperation,
+  RepairOperationInput,
+  RepairScript,
+  RepairState,
+  RepairTool,
+  RepairWarning,
+  RepairWarningCode,
+  SampleDraftRepairColorOptions,
+  StrokeGeometry,
+} from './repair.js';
+
 export { ID_PATTERN, isValidId } from './ids.js';
 
 export { validateArtifact, validateStore } from './validate.js';
