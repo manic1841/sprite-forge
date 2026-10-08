@@ -32,6 +32,19 @@ The persisted overlay that records a Clip's Repair edits and is re-applied on ev
 run.
 _Avoid_: patch, layer
 
+**Commit**:
+The act of promoting a Draft into an immutable, named Asset.
+_Avoid_: save, publish
+
+**Fork**:
+The act of starting a new Draft from an existing Asset and recording its lineage.
+_Avoid_: copy, clone, variant
+
+**Provenance**:
+The record of how an Asset was made — its Recording, Segment, settings, and Mask —
+kept beside the Asset so it can be reproduced and traced.
+_Avoid_: metadata
+
 ## Assets
 
 **Character**:
