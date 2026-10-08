@@ -10,9 +10,11 @@ import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import {
   addSegment,
+  commitDraft,
   createCharacter,
   extractClipDraft,
   ForgeError,
+  forkAsset,
   ingestRecording,
   readCutList,
   removeSegment,
@@ -21,7 +23,7 @@ import {
   validateStore,
   ValidationError,
 } from '../core/index.js';
-import type { CutList } from '../core/index.js';
+import type { AssetKind, CutList } from '../core/index.js';
 
 const USAGE = `forge — sprite-forge CLI
 
@@ -42,7 +44,11 @@ Usage:
        --draft <id>          Draft id (defaults to the cut id)
        --background <#rrggbb>  Explicit background override (default: corner-sampled)
        --tolerance <n>       Per-channel key tolerance (default: 24)
-       --no-loop             Do not loop the Draft`;
+       --no-loop             Do not loop the Draft
+  forge commit           --store <path> --character <id> --draft <id> --name <asset-id> [--kind <clip>]
+                                                                     Commit a Draft into an immutable Asset.
+  forge fork             --store <path> --character <id> --kind <clip> --id <asset-id> [--draft <id>]
+                                                                     Open a committed Asset as a new Draft.`;
 
 /** Run one CLI invocation. Returns the process exit code. */
 export async function runCli(argv: string[]): Promise<number> {
@@ -67,6 +73,8 @@ export async function runCli(argv: string[]): Promise<number> {
   let background: string | undefined;
   let tolerance: string | undefined;
   let noLoop: boolean | undefined;
+  let name: string | undefined;
+  let kind: string | undefined;
   try {
     const { values } = parseArgs({
       args: rest,
@@ -90,6 +98,8 @@ export async function runCli(argv: string[]): Promise<number> {
         background: { type: 'string' },
         tolerance: { type: 'string' },
         'no-loop': { type: 'boolean', default: false },
+        name: { type: 'string' },
+        kind: { type: 'string' },
       },
     });
     store = values.store;
@@ -111,6 +121,8 @@ export async function runCli(argv: string[]): Promise<number> {
     background = values.background;
     tolerance = values.tolerance;
     noLoop = values['no-loop'];
+    name = values.name;
+    kind = values.kind;
   } catch (error) {
     return fail((error as Error).message);
   }
@@ -140,6 +152,10 @@ export async function runCli(argv: string[]): Promise<number> {
         tolerance,
         noLoop: noLoop === true,
       });
+    case 'commit':
+      return runCommit(store, { character, draft, name, kind });
+    case 'fork':
+      return runFork(store, { character, kind, id, draft });
     default:
       return fail(command ? `unknown command "${command}"` : 'no command given', USAGE);
   }
@@ -339,6 +355,90 @@ async function runExtract(store: string, args: ExtractArgs): Promise<number> {
       loop: !noLoop,
     });
     process.stdout.write(`${JSON.stringify(created, null, 2)}\n`);
+    return 0;
+  } catch (error) {
+    return failForgeError(error);
+  }
+}
+
+/** Parse a `--kind` option; only `clip` and `sequence` are recognised. */
+function assetKind(value: string | undefined): AssetKind | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value === 'clip' || value === 'sequence' ? value : undefined;
+}
+
+/** Options for the `commit` command. */
+interface CommitArgs {
+  character?: string;
+  draft?: string;
+  name?: string;
+  kind?: string;
+}
+
+/** `forge commit` — promote a Draft into an immutable Asset. */
+async function runCommit(store: string, args: CommitArgs): Promise<number> {
+  const { character, draft, name, kind } = args;
+  if (!character) {
+    return fail('--character <character-id> is required for commit');
+  }
+  if (!draft) {
+    return fail('--draft <draft-id> is required for commit');
+  }
+  if (!name) {
+    return fail('--name <asset-id> is required for commit');
+  }
+  const parsedKind = assetKind(kind);
+  if (kind !== undefined && parsedKind === undefined) {
+    return fail(`unknown --kind "${kind}" (expected clip or sequence)`);
+  }
+  try {
+    const committed = await commitDraft(store, {
+      characterId: character,
+      draftId: draft,
+      assetId: name,
+      ...(parsedKind !== undefined ? { kind: parsedKind } : {}),
+    });
+    process.stdout.write(`${JSON.stringify(committed, null, 2)}\n`);
+    return 0;
+  } catch (error) {
+    return failForgeError(error);
+  }
+}
+
+/** Options for the `fork` command. */
+interface ForkArgs {
+  character?: string;
+  kind?: string;
+  id?: string;
+  draft?: string;
+}
+
+/** `forge fork` — open a committed Asset as a new Draft. */
+async function runFork(store: string, args: ForkArgs): Promise<number> {
+  const { character, kind, id, draft } = args;
+  if (!character) {
+    return fail('--character <character-id> is required for fork');
+  }
+  if (!kind) {
+    return fail('--kind <clip|sequence> is required for fork');
+  }
+  if (!id) {
+    return fail('--id <asset-id> is required for fork');
+  }
+  const parsedKind = assetKind(kind);
+  if (parsedKind === undefined) {
+    return fail(`unknown --kind "${kind}" (expected clip or sequence)`);
+  }
+  try {
+    const opened = await forkAsset(store, {
+      characterId: character,
+      kind: parsedKind,
+      id,
+      ...(draft !== undefined ? { draftId: draft } : {}),
+    });
+    process.stdout.write(`${JSON.stringify(opened, null, 2)}\n`);
     return 0;
   } catch (error) {
     return failForgeError(error);

@@ -43,6 +43,7 @@ import {
   sourcePath,
 } from './layout.js';
 import { readCutList } from './segments.js';
+import type { AssetRef } from './types.js';
 import {
   pathExists,
   readBinaryFile,
@@ -98,6 +99,24 @@ export interface ClipDraftDescriptor {
   loop: boolean;
   /** The tool version that produced the Draft. */
   spriteForgeVersion: string;
+  /**
+   * The Asset this Draft was forked from, when it came from a fork (format-spec
+   * §8). Absent for a Draft extracted straight from a Recording. It is carried
+   * into the committed Asset's provenance.
+   */
+  derivedFrom?: AssetRef | null;
+  /**
+   * A manual placement offset on top of the automatic Anchor (docs/alignment.md).
+   * Absent when `{0,0}`; carried into the committed Asset's provenance and
+   * inherited by a fork.
+   */
+  placementOffset?: { x: number; y: number };
+  /**
+   * A fork's inherited Repair-script reference (docs/repair.md, format-spec §6).
+   * Absent when there is no Repair. Part of the fork seam: Repair scripts land in
+   * #27; commit re-homes this reference onto the new Asset's Clip id.
+   */
+  repair?: string | null;
 }
 
 /** A read-back Clip Draft: its descriptor plus the paths of its frame PNGs. */
@@ -227,9 +246,21 @@ export async function extractClipDraft(
   };
 
   validateDraftDescriptor(descriptor, draftPath(characterId, draftId), draftId);
-  await writeJsonFile(root, draftPath(characterId, draftId), descriptor);
+  await writeClipDraft(root, descriptor);
 
   return { ...descriptor, dir: draftDir(characterId, draftId), frames: framePaths };
+}
+
+/**
+ * Validate a Draft descriptor and persist it at `.../drafts/<draft-id>/draft.json`.
+ *
+ * A malformed Draft is a hard error, never warn-and-continue. Shared by
+ * `extractClipDraft` and the fork path so both write the same validated shape.
+ */
+export async function writeClipDraft(root: string, descriptor: ClipDraftDescriptor): Promise<void> {
+  const artifactPath = draftPath(descriptor.characterId, descriptor.id);
+  validateDraftDescriptor(descriptor, artifactPath, descriptor.id);
+  await writeJsonFile(root, artifactPath, descriptor);
 }
 
 /** Read a Draft back from the store — the reload path both front ends resume from. */
@@ -416,6 +447,9 @@ const DRAFT_KEYS = [
   'spriteForgeVersion',
 ] as const;
 
+/** Optional Draft fields added by the fork seam (#24); absent on a fresh extract. */
+const DRAFT_OPTIONAL_KEYS = ['derivedFrom', 'placementOffset', 'repair'] as const;
+
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const HEX_COLOR = /^#[0-9a-f]{6}$/;
 
@@ -430,8 +464,9 @@ function validateDraftDescriptor(value: unknown, artifact: string, draftId: stri
     throw new ValidationError([{ artifact, path: '', message: 'must be an object' }]);
   }
 
+  const recognised = new Set<string>([...DRAFT_KEYS, ...DRAFT_OPTIONAL_KEYS]);
   for (const key of Object.keys(value)) {
-    if (!(DRAFT_KEYS as readonly string[]).includes(key)) {
+    if (!recognised.has(key)) {
       issue(`/${key}`, 'is not a recognised Draft field');
     }
   }
@@ -513,6 +548,29 @@ function validateDraftDescriptor(value: unknown, artifact: string, draftId: stri
   }
   if (typeof value.loop !== 'boolean') {
     issue('/loop', 'must be a boolean');
+  }
+
+  // Fork-seam fields are optional; when present they must be well-formed.
+  if ('derivedFrom' in value && value.derivedFrom !== null && value.derivedFrom !== undefined) {
+    const ref = value.derivedFrom;
+    if (!isRecord(ref) || (ref.kind !== 'clip' && ref.kind !== 'sequence')) {
+      issue('/derivedFrom', 'must be null or an Asset reference {kind, id}');
+    } else if (typeof ref.id !== 'string' || !isValidId(ref.id)) {
+      issue('/derivedFrom/id', 'must match /^[a-z][a-z0-9-]*$/');
+    }
+  }
+  if ('placementOffset' in value && value.placementOffset !== undefined) {
+    const offset = value.placementOffset;
+    if (!isRecord(offset) || !isInteger(offset.x) || !isInteger(offset.y)) {
+      issue('/placementOffset', 'must be an object with integer x and y');
+    } else if (offset.x === 0 && offset.y === 0) {
+      issue('/placementOffset', 'must be omitted when {0,0}');
+    }
+  }
+  if ('repair' in value && value.repair !== null && value.repair !== undefined) {
+    if (typeof value.repair !== 'string' || value.repair.length === 0) {
+      issue('/repair', 'must be null or a store-relative path');
+    }
   }
 
   if (issues.length > 0) {

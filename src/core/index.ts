@@ -38,6 +38,15 @@ export type {
   ReadClipDraftOptions,
 } from './draft.js';
 
+export { commitDraft, forkAsset, inheritRepairReference } from './assets.js';
+export type {
+  AssetMeta,
+  ClipProvenance,
+  CommittedAsset,
+  CommitDraftOptions,
+  ForkAssetOptions,
+} from './assets.js';
+
 export { ID_PATTERN, isValidId } from './ids.js';
 
 export { validateArtifact, validateStore } from './validate.js';
@@ -53,6 +62,7 @@ export type { ValidationIssue } from './errors.js';
 
 export type {
   AssetKind,
+  AssetRef,
   ScannedAsset,
   ScannedCharacter,
   ScannedExport,

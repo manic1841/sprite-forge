@@ -46,6 +46,42 @@ export function sequenceDir(characterId: string, sequenceId: string): string {
   return `${sequencesDir(characterId)}/${sequenceId}`;
 }
 
+/** The folder of a committed Asset; a Clip and a Sequence pick different parents. */
+export function assetDir(
+  characterId: string,
+  kind: 'clip' | 'sequence',
+  assetId: string,
+): string {
+  return kind === 'clip' ? clipDir(characterId, assetId) : sequenceDir(characterId, assetId);
+}
+
+/** The baked strip of a committed Asset (`sheet.png`). */
+export function sheetPath(
+  characterId: string,
+  kind: 'clip' | 'sequence',
+  assetId: string,
+): string {
+  return `${assetDir(characterId, kind, assetId)}/${ASSET_SHEET_FILE}`;
+}
+
+/** The `meta.json` of a committed Asset. */
+export function assetMetaPath(
+  characterId: string,
+  kind: 'clip' | 'sequence',
+  assetId: string,
+): string {
+  return `${assetDir(characterId, kind, assetId)}/${ASSET_META_FILE}`;
+}
+
+/** The `provenance.json` of a committed Asset. */
+export function assetProvenancePath(
+  characterId: string,
+  kind: 'clip' | 'sequence',
+  assetId: string,
+): string {
+  return `${assetDir(characterId, kind, assetId)}/${ASSET_PROVENANCE_FILE}`;
+}
+
 export function draftsDir(characterId: string): string {
   return `${characterDir(characterId)}/drafts`;
 }
