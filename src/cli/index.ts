@@ -9,13 +9,18 @@
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import {
+  addSegment,
   createCharacter,
   ForgeError,
   ingestRecording,
+  readCutList,
+  removeSegment,
+  renameSegment,
   scan,
   validateStore,
   ValidationError,
 } from '../core/index.js';
+import type { CutList } from '../core/index.js';
 
 const USAGE = `forge — sprite-forge CLI
 
@@ -24,7 +29,13 @@ Usage:
   forge validate         --store <path>                              Validate every artifact in the store.
   forge ingest           --store <path> --source <file> --id <id>    Register a raw capture as a Recording.
   forge create-character --store <path> --id <id> --width <n> --height <n> --anchor-x <n> --anchor-y <n>
-                                                                     Create a Character and its Canvas/Anchor.`;
+                                                                     Create a Character and its Canvas/Anchor.
+  forge cut              --store <path> --recording <id> --action <add|rename|remove|list> [options]
+                                                                     Edit a Recording's Segment cut list.
+       add:    --id <cut-id> --start <n> --end <n> [--speed <n>]
+       rename: --id <cut-id> --new-id <new-id>
+       remove: --id <cut-id>
+       list:   (no further options)`;
 
 /** Run one CLI invocation. Returns the process exit code. */
 export async function runCli(argv: string[]): Promise<number> {
@@ -37,6 +48,12 @@ export async function runCli(argv: string[]): Promise<number> {
   let height: string | undefined;
   let anchorX: string | undefined;
   let anchorY: string | undefined;
+  let recording: string | undefined;
+  let action: string | undefined;
+  let start: string | undefined;
+  let end: string | undefined;
+  let speed: string | undefined;
+  let newId: string | undefined;
   try {
     const { values } = parseArgs({
       args: rest,
@@ -48,6 +65,12 @@ export async function runCli(argv: string[]): Promise<number> {
         height: { type: 'string' },
         'anchor-x': { type: 'string' },
         'anchor-y': { type: 'string' },
+        recording: { type: 'string' },
+        action: { type: 'string' },
+        start: { type: 'string' },
+        end: { type: 'string' },
+        speed: { type: 'string' },
+        'new-id': { type: 'string' },
       },
     });
     store = values.store;
@@ -57,6 +80,12 @@ export async function runCli(argv: string[]): Promise<number> {
     height = values.height;
     anchorX = values['anchor-x'];
     anchorY = values['anchor-y'];
+    recording = values.recording;
+    action = values.action;
+    start = values.start;
+    end = values.end;
+    speed = values.speed;
+    newId = values['new-id'];
   } catch (error) {
     return fail((error as Error).message);
   }
@@ -74,6 +103,8 @@ export async function runCli(argv: string[]): Promise<number> {
       return runIngest(store, source, id);
     case 'create-character':
       return runCreateCharacter(store, id, width, height, anchorX, anchorY);
+    case 'cut':
+      return runCut(store, { recording, action, id, start, end, speed, newId });
     default:
       return fail(command ? `unknown command "${command}"` : 'no command given', USAGE);
   }
@@ -159,6 +190,79 @@ function integerArg(value: string | undefined): number | undefined {
   }
   const parsed = Number(value);
   return Number.isInteger(parsed) ? parsed : undefined;
+}
+
+/** Options for the `cut` command, one action per invocation. */
+interface CutArgs {
+  recording?: string;
+  action?: string;
+  id?: string;
+  start?: string;
+  end?: string;
+  speed?: string;
+  newId?: string;
+}
+
+/** `forge cut` — add, rename, remove or list a Recording's Segments. */
+async function runCut(store: string, args: CutArgs): Promise<number> {
+  const { recording, action, id, start, end, speed, newId } = args;
+  if (!recording) {
+    return fail('--recording <recording-id> is required for cut');
+  }
+  if (!action) {
+    return fail('--action <add|rename|remove|list> is required for cut');
+  }
+
+  try {
+    let cutList: CutList;
+    switch (action) {
+      case 'list':
+        cutList = await readCutList(store, recording);
+        break;
+      case 'add': {
+        if (!id) {
+          return fail('--id <cut-id> is required for cut --action add');
+        }
+        const startFrame = integerArg(start);
+        const endFrame = integerArg(end);
+        if (startFrame === undefined || endFrame === undefined) {
+          return fail('--start and --end integers are required for cut --action add');
+        }
+        const speedMultiplier = speed === undefined ? undefined : Number(speed);
+        cutList = await addSegment(store, {
+          recordingId: recording,
+          id,
+          startFrame,
+          endFrame,
+          ...(speedMultiplier !== undefined ? { speed: speedMultiplier } : {}),
+        });
+        break;
+      }
+      case 'rename': {
+        if (!id) {
+          return fail('--id <cut-id> is required for cut --action rename');
+        }
+        if (!newId) {
+          return fail('--new-id <cut-id> is required for cut --action rename');
+        }
+        cutList = await renameSegment(store, { recordingId: recording, id, newId });
+        break;
+      }
+      case 'remove': {
+        if (!id) {
+          return fail('--id <cut-id> is required for cut --action remove');
+        }
+        cutList = await removeSegment(store, { recordingId: recording, id });
+        break;
+      }
+      default:
+        return fail(`unknown cut action "${action}"`, USAGE);
+    }
+    process.stdout.write(`${JSON.stringify(cutList, null, 2)}\n`);
+    return 0;
+  } catch (error) {
+    return failForgeError(error);
+  }
 }
 
 function failForgeError(error: unknown): number {

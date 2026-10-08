@@ -19,6 +19,7 @@ import type { Metadata } from 'sharp';
 import { StoreError } from './errors.js';
 import { isValidId } from './ids.js';
 import { cutsPath, recordingDir, sourcePath } from './layout.js';
+import type { CutList } from './segments.js';
 import {
   pathExists,
   readExternalFile,
@@ -48,13 +49,6 @@ export interface IngestedRecording {
   frameCount: number;
   /** Per-frame delays in ms, read from the source; never collapsed. */
   delaysMs: number[];
-}
-
-/** A Recording's cut list as stored in `cuts.json` (format-spec §2). */
-interface CutList {
-  hash: string;
-  frameCount: number;
-  cuts: unknown[];
 }
 
 /**
