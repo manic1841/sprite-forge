@@ -26,6 +26,7 @@ import {
   type DraftSegmentSnapshot,
 } from './draft.js';
 import { StoreError } from './errors.js';
+import { translateOnCanvas } from './frames.js';
 import { isValidId } from './ids.js';
 import {
   assetDir,
@@ -199,10 +200,20 @@ export async function forkAsset(root: string, options: ForkAssetOptions): Promis
   const parent = await readCommittedClip(root, characterId, id);
   const frames = await sliceSheet(root, characterId, id, parent.meta, canvas);
 
+  // A committed sheet already carries the parent's manual placement offset; a
+  // fork's Draft holds the **automatic** placement again (the offset is recorded
+  // on the descriptor and re-applied on the next bake), so un-translate it here.
+  const inheritedOffset = parent.provenance.placementOffset ?? { x: 0, y: 0 };
+
   await removePath(root, draftDir(characterId, draftId));
   const framePaths: string[] = [];
   for (let index = 0; index < frames.length; index++) {
-    const png = await sharp(frames[index]!, {
+    const automatic = translateOnCanvas(
+      { width: canvas.width, height: canvas.height, data: frames[index]! },
+      -inheritedOffset.x,
+      -inheritedOffset.y,
+    );
+    const png = await sharp(Buffer.from(automatic.data), {
       raw: { width: canvas.width, height: canvas.height, channels: 4 },
     })
       .png()
@@ -212,7 +223,6 @@ export async function forkAsset(root: string, options: ForkAssetOptions): Promis
     framePaths.push(relPath);
   }
 
-  const inheritedOffset = parent.provenance.placementOffset;
   const inheritedRepair = parent.provenance.repair;
   const descriptor: ClipDraftDescriptor = {
     id: draftId,
@@ -226,7 +236,16 @@ export async function forkAsset(root: string, options: ForkAssetOptions): Promis
     loop: parent.meta.loop,
     spriteForgeVersion: SPRITE_FORGE_VERSION,
     derivedFrom: { kind: 'clip', id },
-    ...(inheritedOffset ? { placementOffset: { ...inheritedOffset } } : {}),
+    ...(hasOffset(inheritedOffset)
+      ? {
+          placementOffset: { ...inheritedOffset },
+          placementFraming: {
+            frameCount: parent.meta.frameCount,
+            width: canvas.width,
+            height: canvas.height,
+          },
+        }
+      : {}),
     ...(inheritedRepair ? { repair: inheritedRepair } : {}),
   };
 
@@ -246,7 +265,53 @@ export async function forkAsset(root: string, options: ForkAssetOptions): Promis
   return { ...descriptor, dir: draftDir(characterId, draftId), frames: framePaths };
 }
 
+/** A committed Asset's baked strip, read as image bytes for a front end to display. */
+export interface AssetSheet {
+  /** Store-relative POSIX path of the sheet PNG. */
+  path: string;
+  /** The image media type the bytes carry. */
+  contentType: 'image/png';
+  /** The PNG bytes. */
+  data: Buffer;
+}
+
+/** Inputs for {@link readAssetSheet}. */
+export interface ReadAssetSheetOptions {
+  characterId: string;
+  /** Whether the Asset is a Clip or a Sequence. Required: ids are shared. */
+  kind: AssetKind;
+  id: string;
+}
+
+/**
+ * Read a committed Asset's `sheet.png` as image bytes.
+ *
+ * A browser cannot read the store, so the Alignment stage's ghosted Clips are
+ * served these bytes over the front end's own boundary. The Asset's folder is
+ * checked first, so a missing Asset is a hard error rather than an empty image.
+ */
+export async function readAssetSheet(
+  root: string,
+  options: ReadAssetSheetOptions,
+): Promise<AssetSheet> {
+  const { characterId, kind, id } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(id, 'asset', 'id');
+  const relPath = sheetPath(characterId, kind, id);
+  if (!(await pathExists(root, relPath))) {
+    throw new StoreError(
+      `No committed ${kind} "${id}" for Character "${characterId}" (${relPath} is missing).`,
+    );
+  }
+  return { path: relPath, contentType: 'image/png', data: await readBinaryFile(root, relPath) };
+}
+
 // --- internals ----------------------------------------------------------------
+
+/** Is a placement offset non-zero? `{0,0}` is an absent offset (docs/alignment.md). */
+function hasOffset(offset: { x: number; y: number }): boolean {
+  return offset.x !== 0 || offset.y !== 0;
+}
 
 /** Build the committed Clip's provenance (format-spec §6) from a Draft. */
 function buildClipProvenance(
@@ -300,14 +365,20 @@ async function tileFrames(
   const sheetHeight = canvas.height;
   const sheet = Buffer.alloc(sheetWidth * sheetHeight * 4);
 
+  // The manual placement offset is a pure translation on top of the automatic
+  // Anchor placement (docs/alignment.md), re-applied here on every bake.
+  const offset = draft.placementOffset ?? { x: 0, y: 0 };
+
   for (let index = 0; index < draft.frameCount; index++) {
     const decoded = await decodeCanvasFrame(root, draft.frames[index]!, canvas, draft.id);
-    // Baked tiles are the repaired result: replay the script for this frame.
-    const frame = applyRepairScriptToFrame(
+    // Baked tiles are the repaired result: replay the script for this frame,
+    // then place the Clip manually by its offset.
+    const repaired = applyRepairScriptToFrame(
       { width: canvas.width, height: canvas.height, data: new Uint8Array(decoded) },
       index,
       script,
-    ).data;
+    );
+    const frame = translateOnCanvas(repaired, offset.x, offset.y).data;
     const offsetX = index * canvas.width;
     for (let y = 0; y < canvas.height; y++) {
       for (let x = 0; x < canvas.width; x++) {

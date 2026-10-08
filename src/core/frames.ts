@@ -96,3 +96,31 @@ export function placeOnCanvas(
   }
   return { width: canvasWidth, height: canvasHeight, data };
 }
+
+/**
+ * Translate a Canvas-sized image by `(dx, dy)`, keeping the Canvas size. Content
+ * that moves past an edge is dropped; vacated pixels are transparent.
+ *
+ * This is how a Clip's manual **placement offset** is applied (docs/alignment.md):
+ * the offset is a pure translation on top of the automatic Anchor placement, so
+ * the bytes the offset was chosen against never change — only where they land.
+ */
+export function translateOnCanvas(image: RgbaImage, dx: number, dy: number): RgbaImage {
+  const data = new Uint8Array(image.width * image.height * 4);
+  for (let y = 0; y < image.height; y++) {
+    const sy = y - dy;
+    if (sy < 0 || sy >= image.height) {
+      continue;
+    }
+    for (let x = 0; x < image.width; x++) {
+      const sx = x - dx;
+      if (sx < 0 || sx >= image.width) {
+        continue;
+      }
+      const from = (sy * image.width + sx) * 4;
+      const to = (y * image.width + x) * 4;
+      data.set(image.data.subarray(from, from + 4), to);
+    }
+  }
+  return { width: image.width, height: image.height, data };
+}

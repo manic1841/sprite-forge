@@ -113,6 +113,13 @@ export interface ClipDraftDescriptor {
    */
   placementOffset?: { x: number; y: number };
   /**
+   * The pixel geometry the Draft's `placementOffset` was authored against,
+   * recorded when the offset is set. A later change to the Canvas (an expand) is
+   * detected by comparing against it (docs/alignment.md, "Validity").
+   * Design-local: Drafts are not a frozen format (format-spec §11).
+   */
+  placementFraming?: RepairFraming;
+  /**
    * A fork's inherited Repair-script reference (docs/repair.md, format-spec §6).
    * Absent when there is no Repair. Part of the fork seam: Repair scripts land in
    * #27; commit re-homes this reference onto the new Asset's Clip id.
@@ -502,7 +509,13 @@ const DRAFT_KEYS = [
 ] as const;
 
 /** Optional Draft fields added by the fork seam (#24); absent on a fresh extract. */
-const DRAFT_OPTIONAL_KEYS = ['derivedFrom', 'placementOffset', 'repair', 'repairFraming'] as const;
+const DRAFT_OPTIONAL_KEYS = [
+  'derivedFrom',
+  'placementOffset',
+  'placementFraming',
+  'repair',
+  'repairFraming',
+] as const;
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const HEX_COLOR = /^#[0-9a-f]{6}$/;
@@ -638,6 +651,21 @@ function validateDraftDescriptor(value: unknown, artifact: string, draftId: stri
       (framing.height as number) < 1
     ) {
       issue('/repairFraming', 'must be {frameCount, width, height} of positive integers');
+    }
+  }
+
+  if ('placementFraming' in value && value.placementFraming !== undefined) {
+    const framing = value.placementFraming;
+    if (
+      !isRecord(framing) ||
+      !isInteger(framing.frameCount) ||
+      (framing.frameCount as number) < 1 ||
+      !isInteger(framing.width) ||
+      (framing.width as number) < 1 ||
+      !isInteger(framing.height) ||
+      (framing.height as number) < 1
+    ) {
+      issue('/placementFraming', 'must be {frameCount, width, height} of positive integers');
     }
   }
 
