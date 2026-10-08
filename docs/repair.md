@@ -20,10 +20,15 @@ Each operation is:
 {
   "tool": "erase-rect" | "erase-brush" | "paint-brush",
   "frames": { "start": 12, "end": 13 },   // half-open; one frame or a span
-  "geometry": { },                         // rect for erase-rect; a stroke for brushes
+  "geometry": { },                         // rect {x,y,width,height} for erase-rect;
+                                           // stroke {points,size} for the brushes
   "color": "#rrggbb"                       // paint-brush only
 }
 ```
+
+The exact shapes (and the schema) are frozen in
+[`format-spec.md`](./format-spec.md#4-repairjson--the-repair-script) —
+[`schemas/repair.schema.json`](../schemas/repair.schema.json).
 
 - **erase-rect** — clears a rectangle; the bulk-clear fast path. It is the *same kind
   of operation* as the brush, not a separate mechanism, so it shares the frame-range

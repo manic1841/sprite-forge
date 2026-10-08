@@ -33,6 +33,8 @@ The UI is a frame-accurate scrubber over the Recording:
 ```jsonc
 // recordings/<recording-id>/cuts.json
 {
+  "hash": "sha256:…",      // content hash of source.gif
+  "frameCount": 523,        // frame count of source.gif
   "cuts": [
     { "id": "walk", "startFrame": 293, "endFrame": 327, "speed": 1 },
     { "id": "jump", "startFrame": 580, "endFrame": 607, "speed": 1 }

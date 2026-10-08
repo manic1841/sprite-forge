@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-forge.dev/schemas/canvas.schema.json",
+  "title": "Character canvas",
+  "description": "The Canvas and Anchor shared by every Asset of a Character, at characters/<character-id>/canvas.json. See docs/format-spec.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["width", "height", "anchor"],
+  "properties": {
+    "width": { "type": "integer", "minimum": 1 },
+    "height": { "type": "integer", "minimum": 1 },
+    "anchor": {
+      "description": "The foot-base point (first-frame bottom-centre). Must satisfy anchor.x == width/2 and anchor.y == height; see docs/format-spec.md (not expressible in JSON Schema).",
+      "$ref": "#/$defs/point"
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 0 },
+        "y": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

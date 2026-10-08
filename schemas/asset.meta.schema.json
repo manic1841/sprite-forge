@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-forge.dev/schemas/asset.meta.schema.json",
+  "title": "Asset meta",
+  "description": "The meta.json of a Clip or a Sequence (same shape). Frame pixel size is never stored here: it is the Character's Canvas. See docs/format-spec.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "frameCount", "delaysMs", "loop"],
+  "properties": {
+    "id": {
+      "description": "Asset id; must equal the folder name.",
+      "$ref": "#/$defs/id"
+    },
+    "frameCount": {
+      "description": "Number of frames; the sheet is frameCount frames laid out left to right.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "delaysMs": {
+      "description": "Per-frame duration in ms. Either one value (uniform) or exactly frameCount values. See docs/format-spec.md.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "integer", "minimum": 1 }
+    },
+    "loop": { "type": "boolean" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    }
+  }
+}

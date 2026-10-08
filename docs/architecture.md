@@ -2,7 +2,8 @@
 
 sprite-forge is one program with **one core and two front ends** (a web UI and a CLI)
 operating on an **external asset store**. It turns emulator screen recordings into
-pixel-animation assets and owns the format contract the consumer reads.
+pixel-animation assets and owns the format contract the consumer reads
+([`format-spec.md`](./format-spec.md), schemas under [`schemas/`](../schemas)).
 
 This document describes the **stage-level** architecture and the on-disk model.
 Function boundaries *inside* the pipeline are deliberately deferred to implementation:
@@ -54,12 +55,19 @@ A committed Asset folder holds the **contract artifacts** plus its **provenance*
 ```text
 clips/<clip-id>/
 ├─ sheet.png        # baked strip, already aligned to the Character's Canvas
-├─ meta.json        # frameWidth, frameHeight, frameCount, delaysMs, loop, anchor
+├─ meta.json        # id, frameCount, delaysMs, loop  (frame size = the Character Canvas)
 └─ provenance.json  # recordingId+hash, segment{cutId,start,end,speed}, background, repair ref, placementOffset, derivedFrom?, toolVersion
 ```
 
-`sheet.png` + `meta.json` are what the consumer ultimately sees (via the Manifest).
-`provenance.json` makes the Asset reproducible and traceable.
+A Sequence has the same shape (`sheet.png` + `meta.json` + `provenance.json`) with
+a provenance that lists its ordered source Clips. `sheet.png` + `meta.json` are
+what the consumer ultimately sees (via the Manifest); `provenance.json` makes the
+Asset reproducible and traceable.
+
+The **field-level** contract for every artifact is frozen in
+[`format-spec.md`](./format-spec.md), with JSON Schemas under
+[`schemas/`](../schemas) at the repo root (not vendored into the store). Note that
+frame size is **never** stored per Asset: it is always the Character's Canvas.
 
 ## Draft, commit, fork
 

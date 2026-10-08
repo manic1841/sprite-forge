@@ -33,5 +33,7 @@ the shared `Canvas` / `Anchor`, and `Draft → commit → Asset` (edit by `fork`
 ## Where things live
 
 - **Vocabulary:** [`GLOSSARY.md`](./GLOSSARY.md)
+- **Format contract (frozen):** [`docs/format-spec.md`](./docs/format-spec.md) +
+  [`schemas/`](./schemas)
 - **Decisions:** [`docs/adr/`](./docs/adr/)
 - **Open design work:** the wayfinder map, issue #1.

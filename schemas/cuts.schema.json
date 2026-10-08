@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-forge.dev/schemas/cuts.schema.json",
+  "title": "Recording cut list",
+  "description": "A Recording's Segments, stored beside the source at recordings/<recording-id>/cuts.json. See docs/format-spec.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["hash", "frameCount", "cuts"],
+  "properties": {
+    "hash": {
+      "description": "Content hash of source.gif; detects a swapped source.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "frameCount": {
+      "description": "Frame count of source.gif; detects a truncated/replaced file.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "cuts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/cut" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "cut": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "startFrame", "endFrame"],
+      "properties": {
+        "id": {
+          "description": "Cut id; unique within this Recording.",
+          "$ref": "#/$defs/id"
+        },
+        "startFrame": { "type": "integer", "minimum": 0 },
+        "endFrame": {
+          "description": "Exclusive; the range is half-open [startFrame, endFrame).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "speed": {
+          "description": "Playback multiplier applied when generating a Clip; does not change the range. Omitted when 1.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  }
+}
