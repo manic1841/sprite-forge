@@ -9,9 +9,11 @@
 export type {
   AssetKind,
   AssetRef,
+  ClipDraft,
   CutList,
   ScannedAsset,
   ScannedCharacter,
+  ScannedDraft,
   ScannedExport,
   ScannedRecording,
   Segment,

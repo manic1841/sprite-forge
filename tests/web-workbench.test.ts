@@ -2,15 +2,16 @@
 //
 // DOM-level smoke tests for the workbench shell. They pin the **structural
 // contract** later tickets depend on: the four persistent regions, the mode
-// switch that swaps only the stage, the Library list derived from a store scan,
-// and the filmstrip's frame cells + cut ranges from a cut list. Behaviour that
-// cannot be pinned structurally (dragging a range edge, real painting) is
-// verified by running `pnpm web` against a temp store.
+// switch that swaps the stage while the other regions keep their node identity,
+// the Library list derived from a store scan, the filmstrip's frame cells + cut
+// ranges, and — from #26 — the Clip editor stage showing a Draft's frames with a
+// contextual inspector. Behaviour that cannot be pinned structurally (dragging a
+// range edge, real painting) is verified by running `pnpm web` against a temp store.
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clampRange, mountWorkbench } from '../src/web/client/app.js';
 import type { WorkbenchApi } from '../src/web/client/api.js';
-import type { CutList, StoreScan } from '../src/web/client/types.js';
+import type { ClipDraft, CutList, StoreScan } from '../src/web/client/types.js';
 
 const SCAN: StoreScan = {
   root: '/tmp/store',
@@ -26,6 +27,7 @@ const SCAN: StoreScan = {
         { kind: 'clip', id: 'walk', dir: 'characters/hero/clips/walk' },
         { kind: 'sequence', id: 'greeting', dir: 'characters/hero/sequences/greeting' },
       ],
+      drafts: [{ id: 'wip', dir: 'characters/hero/drafts/wip' }],
     },
   ],
   exports: [],
@@ -40,6 +42,25 @@ const CUTS: CutList = {
   ],
 };
 
+const DRAFT: ClipDraft = {
+  id: 'wip',
+  characterId: 'hero',
+  recordingId: 'idle',
+  recordingHash: `sha256:${'a'.repeat(64)}`,
+  segment: { cutId: 'walk', startFrame: 1, endFrame: 4, speed: 1 },
+  background: { hex: '#9421ce', source: 'sampled', tolerance: 24 },
+  frameCount: 3,
+  delaysMs: [50, 60, 70],
+  loop: true,
+  spriteForgeVersion: '0.1.0',
+  dir: 'characters/hero/drafts/wip',
+  frames: [
+    'characters/hero/drafts/wip/frames/000.png',
+    'characters/hero/drafts/wip/frames/001.png',
+    'characters/hero/drafts/wip/frames/002.png',
+  ],
+};
+
 /** A stub API standing in for the HTTP boundary; the UI only ever talks to this. */
 function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
   return {
@@ -48,6 +69,9 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     addSegment: async () => CUTS,
     setSegmentRange: async () => CUTS,
     removeSegment: async () => CUTS,
+    readClipDraft: async () => DRAFT,
+    frameUrl: (characterId, draftId, index) =>
+      `/api/characters/${characterId}/drafts/${draftId}/frames/${index}`,
     ...overrides,
   };
 }
@@ -71,7 +95,7 @@ describe('the workbench shell', () => {
     expect(wb.root.querySelector('[data-region="filmstrip"]')).not.toBeNull();
   });
 
-  it('swaps only the stage when the mode changes', async () => {
+  it('swaps the stage and contextually re-renders the inspector when the mode changes', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
 
@@ -80,26 +104,28 @@ describe('the workbench shell', () => {
     const filmstrip = wb.root.querySelector('[data-region="filmstrip"]');
     const stage = wb.root.querySelector('[data-region="stage"]');
     const railHtml = rail!.innerHTML;
-    const inspectorHtml = inspector!.innerHTML;
     const filmstripHtml = filmstrip!.innerHTML;
 
     expect(wb.mode).toBe('clip');
     expect(stage!.querySelector('[data-stage-view="clip-editor"]')).not.toBeNull();
+    expect((inspector as HTMLElement).dataset.inspectorFor).toBe('clip');
 
     wb.root.querySelector<HTMLElement>('[data-mode="export"]')!.click();
 
-    // Only the stage changed.
+    // The stage is the region whose committed view swaps.
     expect(wb.mode).toBe('export');
     expect(stage!.querySelector('[data-stage-view="export"]')).not.toBeNull();
     expect(stage!.querySelector('[data-stage-view="clip-editor"]')).toBeNull();
 
-    // The other regions keep both their node identity and their content.
+    // Every region persists as a node; rail and filmstrip are never touched.
     expect(wb.root.querySelector('[data-region="rail"]')).toBe(rail);
     expect(wb.root.querySelector('[data-region="inspector"]')).toBe(inspector);
     expect(wb.root.querySelector('[data-region="filmstrip"]')).toBe(filmstrip);
     expect(rail!.innerHTML).toBe(railHtml);
-    expect(inspector!.innerHTML).toBe(inspectorHtml);
     expect(filmstrip!.innerHTML).toBe(filmstripHtml);
+
+    // The inspector region persists, but its content is contextual to the mode.
+    expect((inspector as HTMLElement).dataset.inspectorFor).toBe('export');
   });
 });
 
@@ -185,6 +211,95 @@ describe('the filmstrip', () => {
     ]);
     // Each range exposes edges to drag, wired to the core-backed API.
     expect(wb.root.querySelectorAll('[data-region="filmstrip"] [data-cut-handle]')).toHaveLength(4);
+  });
+});
+
+describe('the Clip editor stage', () => {
+  it('lists Drafts in the Library and makes one active on click', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    const draftItems = wb.root.querySelectorAll('[data-region="rail"] [data-draft]');
+    expect([...draftItems].map((el) => (el as HTMLElement).dataset.draft)).toEqual(['wip']);
+
+    wb.root.querySelector<HTMLElement>('[data-draft="wip"]')!.click();
+    await wb.settled();
+
+    expect(wb.activeDraft).toEqual({ characterId: 'hero', draftId: 'wip' });
+  });
+
+  it("renders a Draft's frames frame-by-frame when it is active", async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const view = wb.root.querySelector('[data-stage-view="clip-editor"]')!;
+    const img = view.querySelector<HTMLImageElement>('[data-draft-frame]')!;
+    expect(img.getAttribute('src')).toBe('/api/characters/hero/drafts/wip/frames/0');
+    expect(view.querySelector('[data-draft-frame-counter]')!.textContent).toBe('frame 0 / 3');
+    expect(view.querySelectorAll('[data-draft-frame-cell]')).toHaveLength(3);
+    expect(wb.activeDraftFrame).toBe(0);
+  });
+
+  it('navigates Draft frames by frame index (the unit)', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    wb.root.querySelector<HTMLElement>('[data-frame-step="next"]')!.click();
+    expect(wb.activeDraftFrame).toBe(1);
+    expect(
+      wb.root.querySelector('[data-draft-frame]')!.getAttribute('src'),
+    ).toBe('/api/characters/hero/drafts/wip/frames/1');
+    expect(
+      wb.root.querySelector('[data-draft-frame-counter]')!.textContent,
+    ).toBe('frame 1 / 3');
+
+    wb.root.querySelector<HTMLElement>('[data-draft-frame-cell="2"]')!.click();
+    expect(wb.activeDraftFrame).toBe(2);
+    expect(
+      wb.root.querySelector('[data-draft-frame]')!.getAttribute('src'),
+    ).toBe('/api/characters/hero/drafts/wip/frames/2');
+  });
+
+  it('renders the contextual Clip-editor inspector with per-frame info and a Repair slot', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const inspector = wb.root.querySelector('[data-region="inspector"]') as HTMLElement;
+    expect(inspector.dataset.inspectorFor).toBe('clip');
+    const draftSection = inspector.querySelector('[data-inspector-section="draft"]');
+    expect(draftSection).not.toBeNull();
+    // Per-frame facts, not just the Draft as a whole.
+    const keys = [...draftSection!.querySelectorAll('dt')].map((el) => el.textContent);
+    expect(keys).toEqual(
+      expect.arrayContaining(['character', 'draft', 'recording', 'frames', 'frame', 'delay']),
+    );
+    // The slot #27 extends (brush colour/size + operation list).
+    expect(
+      inspector.querySelector('[data-inspector-section="repair"] [data-repair-controls]'),
+    ).not.toBeNull();
+  });
+
+  it('keeps the active Draft when the mode changes, swapping only the stage', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const filmstrip = wb.root.querySelector('[data-region="filmstrip"]')!;
+    const railHtml = rail.innerHTML;
+    const filmstripHtml = filmstrip.innerHTML;
+
+    wb.root.querySelector<HTMLElement>('[data-mode="align"]')!.click();
+    expect(wb.activeDraft).toEqual({ characterId: 'hero', draftId: 'wip' });
+    expect(rail.innerHTML).toBe(railHtml);
+    expect(filmstrip.innerHTML).toBe(filmstripHtml);
+
+    wb.root.querySelector<HTMLElement>('[data-mode="clip"]')!.click();
+    const img = wb.root.querySelector<HTMLImageElement>('[data-draft-frame]')!;
+    expect(img.getAttribute('src')).toBe('/api/characters/hero/drafts/wip/frames/0');
   });
 });
 

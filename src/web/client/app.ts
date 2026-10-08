@@ -4,14 +4,16 @@
  *   rail (Library) | [ modes header, stage, filmstrip ] | inspector (contextual)
  *
  * The **mode switch swaps only the stage**; the rail, inspector and filmstrip
- * stay mounted and unchanged. Nothing here holds business logic — loading a
- * Recording and editing a cut both go through {@link WorkbenchApi}, which the
- * Node server turns into core calls. Stages for Clip editor / Alignment / Export
- * are placeholders (#26 / #28 / #30) but the swap contract is real.
+ * regions stay mounted and keep their node identity. The inspector's *content*
+ * is contextual to the active mode (docs/architecture.md, "Inspector (right,
+ * contextual)"): entering the Clip editor shows the Draft's per-frame info and
+ * the Repair slot #27 fills in; Alignment and Export get their own sections
+ * later. Nothing here holds business logic — every read and write goes through
+ * {@link WorkbenchApi}, which the Node server turns into core calls.
  */
 
 import type { WorkbenchApi } from './api.js';
-import type { CutList, Segment, StoreScan } from './types.js';
+import type { ClipDraft, CutList, Segment, StoreScan } from './types.js';
 
 /** The three stage modes. The rail, inspector and filmstrip do not change with them. */
 export const WORKBENCH_MODES = ['clip', 'align', 'export'] as const;
@@ -39,13 +41,19 @@ export interface WorkbenchHandle {
   readonly mode: WorkbenchMode;
   /** The id of the loaded Recording, or `null`. */
   readonly activeRecording: string | null;
-  /** The active frame index (the scrub unit). */
+  /** The active Recording frame index (the scrub unit), or `null` item. */
   readonly activeFrame: number;
-  /** Switch mode; swaps the stage only. */
+  /** The active Draft as `{characterId, draftId}`, or `null`. */
+  readonly activeDraft: { characterId: string; draftId: string } | null;
+  /** The active Draft frame index (the Clip-editor unit); `0` when none. */
+  readonly activeDraftFrame: number;
+  /** Switch mode; swaps the stage and re-renders the contextual inspector. */
   setMode(mode: WorkbenchMode): void;
   /** Load a Recording: read its cut list and show it in the filmstrip. */
   loadRecording(recordingId: string): Promise<void>;
-  /** Await the most recent {@link loadRecording} kicked off by a click. */
+  /** Load a Draft: read its descriptor and show its frames in the Clip editor. */
+  loadDraft(characterId: string, draftId: string): Promise<void>;
+  /** Await the most recent {@link loadRecording}/{@link loadDraft} kicked off by a click. */
   settled(): Promise<void>;
 }
 
@@ -78,7 +86,19 @@ export function mountWorkbench(
     recordingId: string | null;
     frame: number;
     cutList: CutList | null;
-  } = { mode: 'clip', scan: null, recordingId: null, frame: 0, cutList: null };
+    draft: { characterId: string; draftId: string } | null;
+    draftDescriptor: ClipDraft | null;
+    draftFrame: number;
+  } = {
+    mode: 'clip',
+    scan: null,
+    recordingId: null,
+    frame: 0,
+    cutList: null,
+    draft: null,
+    draftDescriptor: null,
+    draftFrame: 0,
+  };
 
   // --- shell ----------------------------------------------------------------
   const root = make('div', 'workbench');
@@ -139,6 +159,30 @@ export function mountWorkbench(
     }
     rail.appendChild(recordings);
 
+    rail.appendChild(subheading('Drafts'));
+    const drafts = make('div', 'list');
+    drafts.dataset.librarySection = 'drafts';
+    for (const character of state.scan?.characters ?? []) {
+      for (const draft of character.drafts) {
+        const item = make('button', 'asset');
+        item.dataset.draft = draft.id;
+        item.dataset.draftCharacter = character.id;
+        item.classList.toggle(
+          'sel',
+          state.draft?.characterId === character.id && state.draft.draftId === draft.id,
+        );
+        item.append(
+          make('span', 'asset-name', draft.id),
+          make('span', 'asset-sub', character.id),
+        );
+        item.addEventListener('click', () => {
+          lastLoad = loadDraft(character.id, draft.id);
+        });
+        drafts.appendChild(item);
+      }
+    }
+    rail.appendChild(drafts);
+
     rail.appendChild(subheading('Committed assets'));
     const assets = make('div', 'list');
     assets.dataset.librarySection = 'assets';
@@ -168,17 +212,7 @@ export function mountWorkbench(
 
   function stageView(mode: WorkbenchMode): HTMLElement {
     if (mode === 'clip') {
-      const view = make('div', 'stage-view');
-      view.dataset.stageView = 'clip-editor';
-      const scrub = make('div', 'scrub');
-      const prev = make('button', 'btn ghost', '◀ frame');
-      const next = make('button', 'btn ghost', 'frame ▶');
-      prev.addEventListener('click', () => stepFrame(-1));
-      next.addEventListener('click', () => stepFrame(1));
-      scrub.append(prev, next);
-      const note = make('p', 'muted', 'Clip editor — the frame, segmentation scrub and Repair brush arrive in #26.');
-      view.append(scrub, note);
-      return view;
+      return clipEditorView();
     }
     if (mode === 'align') {
       const view = make('div', 'stage-view');
@@ -192,6 +226,92 @@ export function mountWorkbench(
     view.dataset.stageView = 'export';
     view.appendChild(make('p', 'muted', 'Export — Situation bindings and the live Manifest (#30).'));
     return view;
+  }
+
+  /**
+   * The Clip-editor stage: the active Draft's frames, frame-by-frame.
+   *
+   * The frame index is the unit; the stage shows the Draft's actual
+   * de-backgrounded PNG (served by the Node boundary) and lets the user step
+   * and jump between frames. With no Draft active it shows an empty state.
+   */
+  function clipEditorView(): HTMLElement {
+    const view = make('div', 'stage-view');
+    view.dataset.stageView = 'clip-editor';
+    const draft = state.draftDescriptor;
+    if (!state.draft || !draft) {
+      view.dataset.emptyState = 'clip-editor';
+      view.appendChild(
+        make('p', 'muted', 'Clip editor — select a Draft in the Library to view its frames.'),
+      );
+      return view;
+    }
+
+    const { characterId, draftId } = state.draft;
+    const viewer = make('div', 'draft-viewer');
+    viewer.dataset.draftViewer = '';
+    viewer.dataset.character = characterId;
+    viewer.dataset.draft = draftId;
+    viewer.dataset.activeFrame = String(state.draftFrame);
+
+    const prev = make('button', 'btn ghost', '◀') as HTMLButtonElement;
+    prev.dataset.frameStep = 'prev';
+    prev.disabled = state.draftFrame <= 0;
+    prev.addEventListener('click', () => stepDraftFrame(-1));
+
+    const img = document.createElement('img');
+    img.className = 'draft-frame';
+    img.dataset.draftFrame = '';
+    img.dataset.frameIndex = String(state.draftFrame);
+    img.src = api.frameUrl(characterId, draftId, state.draftFrame);
+    img.alt = `${draftId} frame ${state.draftFrame}`;
+
+    const next = make('button', 'btn ghost', '▶') as HTMLButtonElement;
+    next.dataset.frameStep = 'next';
+    next.disabled = state.draftFrame >= draft.frameCount - 1;
+    next.addEventListener('click', () => stepDraftFrame(1));
+
+    const counter = make('span', 'pill');
+    counter.dataset.draftFrameCounter = '';
+    counter.textContent = `frame ${state.draftFrame} / ${draft.frameCount}`;
+
+    const row = make('div', 'draft-stage');
+    row.append(prev, img, next);
+
+    const cells = make('div', 'draft-frames');
+    cells.setAttribute('role', 'list');
+    for (let index = 0; index < draft.frameCount; index += 1) {
+      const cell = make('button', 'cell');
+      cell.dataset.draftFrameCell = String(index);
+      cell.setAttribute('role', 'listitem');
+      cell.title = `frame ${index}`;
+      cell.textContent = String(index);
+      cell.classList.toggle('sel', index === state.draftFrame);
+      cell.addEventListener('click', () => selectDraftFrame(index));
+      cells.appendChild(cell);
+    }
+
+    viewer.append(row, counter, cells);
+    view.appendChild(viewer);
+    return view;
+  }
+
+  function selectDraftFrame(index: number): void {
+    state.draftFrame = index;
+    renderStage();
+    renderContext();
+    renderInspector();
+  }
+
+  function stepDraftFrame(delta: number): void {
+    const frameCount = state.draftDescriptor?.frameCount ?? 0;
+    if (frameCount === 0) {
+      return;
+    }
+    state.draftFrame = Math.max(0, Math.min(frameCount - 1, state.draftFrame + delta));
+    renderStage();
+    renderContext();
+    renderInspector();
   }
 
   // --- filmstrip ------------------------------------------------------------
@@ -312,15 +432,6 @@ export function mountWorkbench(
     updateFrame();
   }
 
-  function stepFrame(delta: number): void {
-    const frameCount = state.cutList?.frameCount ?? 0;
-    if (frameCount === 0) {
-      return;
-    }
-    state.frame = Math.max(0, Math.min(frameCount - 1, state.frame + delta));
-    updateFrame();
-  }
-
   /** Reflect the active frame without rebuilding the shell or the rail. */
   function updateFrame(): void {
     filmstrip.dataset.activeFrame = String(state.frame);
@@ -337,26 +448,95 @@ export function mountWorkbench(
 
   // --- inspector & context --------------------------------------------------
   function renderContext(): void {
-    if (!state.recordingId) {
-      contextPill.textContent = 'no Recording loaded';
+    if (state.draft) {
+      contextPill.textContent = `${state.draft.characterId}/${state.draft.draftId} · frame ${state.draftFrame}`;
       return;
     }
-    contextPill.textContent = `${state.recordingId} · frame ${state.frame}`;
+    if (state.recordingId) {
+      contextPill.textContent = `${state.recordingId} · frame ${state.frame}`;
+      return;
+    }
+    contextPill.textContent = 'no item loaded';
   }
 
+  /**
+   * The inspector is **contextual**: its content follows the active mode while
+   * the `[data-region="inspector"]` node persists. The Clip editor is the first
+   * mode with real content; #28/#30 fill in Alignment/Export.
+   */
   function renderInspector(): void {
     inspector.innerHTML = '';
+    inspector.dataset.inspectorFor = state.mode;
     inspector.appendChild(heading('Inspector'));
-    if (!state.recordingId || !state.cutList) {
-      inspector.appendChild(make('p', 'muted', 'Load a Recording to inspect it.'));
+
+    if (state.mode === 'clip') {
+      renderClipInspector();
       return;
     }
-    const list = make('dl', 'kv');
-    addRow(list, 'recording', state.recordingId);
-    addRow(list, 'frame', String(state.frame));
-    addRow(list, 'frames', String(state.cutList.frameCount));
-    addRow(list, 'segments', String(state.cutList.cuts.length));
-    inspector.appendChild(list);
+    if (state.mode === 'align') {
+      inspector.appendChild(
+        make('p', 'muted', 'Alignment inspector — per-Clip placement offsets arrive in #28.'),
+      );
+      return;
+    }
+    inspector.appendChild(
+      make('p', 'muted', 'Export inspector — the live manifest arrives in #30.'),
+    );
+  }
+
+  /**
+   * Clip-editor inspector content: the active Draft's per-frame facts plus a
+   * clearly-marked `[data-inspector-section="repair"]` slot that #27 fills with
+   * the brush colour/size and the Repair operation list. #27 extends this
+   * section; it should not need to rebuild the inspector.
+   */
+  function renderClipInspector(): void {
+    const draftSection = make('section', 'inspector-section');
+    draftSection.dataset.inspectorSection = 'draft';
+    draftSection.appendChild(subheading('Draft'));
+
+    if (!state.draft || !state.draftDescriptor) {
+      draftSection.appendChild(
+        make('p', 'muted', 'Select a Draft to inspect its frames.'),
+      );
+    } else {
+      const { characterId, draftId } = state.draft;
+      const draft = state.draftDescriptor;
+      const list = make('dl', 'kv');
+      addRow(list, 'character', characterId);
+      addRow(list, 'draft', draftId);
+      addRow(list, 'recording', draft.recordingId);
+      addRow(
+        list,
+        'segment',
+        `${draft.segment.cutId} [${draft.segment.startFrame}, ${draft.segment.endFrame})`,
+      );
+      addRow(list, 'frames', String(draft.frameCount));
+      addRow(list, 'frame', String(state.draftFrame));
+      addRow(list, 'delay', `${draftDelayMs(draft, state.draftFrame)} ms`);
+      addRow(list, 'background', draft.background.hex);
+      addRow(list, 'loop', String(draft.loop));
+      draftSection.appendChild(list);
+    }
+    inspector.appendChild(draftSection);
+
+    // Repair slot for #27 — present here from #26 so the layout is stable.
+    const repairSection = make('section', 'inspector-section');
+    repairSection.dataset.inspectorSection = 'repair';
+    repairSection.appendChild(subheading('Repair'));
+    const controls = make('div', 'repair-controls');
+    controls.dataset.repairControls = '';
+    controls.appendChild(
+      make('p', 'muted', 'Brush colour/size and the Repair operation list arrive in #27.'),
+    );
+    repairSection.appendChild(controls);
+    inspector.appendChild(repairSection);
+  }
+
+  /** A Draft frame's delay: `delaysMs` is either uniform (1) or per-frame. */
+  function draftDelayMs(draft: ClipDraft, frame: number): number {
+    const index = Math.min(frame, draft.delaysMs.length - 1);
+    return draft.delaysMs[index] ?? draft.delaysMs[0] ?? 0;
   }
 
   // --- wiring ---------------------------------------------------------------
@@ -366,7 +546,9 @@ export function mountWorkbench(
     for (const button of modeButtons) {
       button.classList.toggle('on', button.dataset.mode === mode);
     }
+    // The stage swaps; the inspector re-renders contextually (same region node).
     renderStage();
+    renderInspector();
   }
 
   async function loadRecording(recordingId: string): Promise<void> {
@@ -375,6 +557,16 @@ export function mountWorkbench(
     state.cutList = await api.readCutList(recordingId);
     renderLibrary();
     renderFilmstrip();
+    renderContext();
+    renderInspector();
+  }
+
+  async function loadDraft(characterId: string, draftId: string): Promise<void> {
+    state.draft = { characterId, draftId };
+    state.draftFrame = 0;
+    state.draftDescriptor = await api.readClipDraft(characterId, draftId);
+    renderLibrary();
+    renderStage();
     renderContext();
     renderInspector();
   }
@@ -404,8 +596,15 @@ export function mountWorkbench(
     get activeFrame() {
       return state.frame;
     },
+    get activeDraft() {
+      return state.draft;
+    },
+    get activeDraftFrame() {
+      return state.draftFrame;
+    },
     setMode,
     loadRecording,
+    loadDraft,
     settled: () => lastLoad,
   };
 }
