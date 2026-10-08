@@ -153,4 +153,59 @@ describe('forge CLI', () => {
       expect(result.stderr).toMatch(/even integer/i);
     });
   });
+
+  it('cut adds a Segment that cut --action list then reads back', async () => {
+    await withSyntheticGif({ frames: 4, delaysMs: [50, 50, 60, 50] }, async (source) => {
+      await withStore(async (store) => {
+        const ingested = await forge([
+          'ingest',
+          '--store',
+          store.root,
+          '--source',
+          source.path,
+          '--id',
+          'mgba-2026-09',
+        ]);
+        expect(ingested.code).toBe(0);
+
+        const added = await forge([
+          'cut',
+          '--store',
+          store.root,
+          '--recording',
+          'mgba-2026-09',
+          '--action',
+          'add',
+          '--id',
+          'walk',
+          '--start',
+          '1',
+          '--end',
+          '3',
+        ]);
+        expect(added.code).toBe(0);
+        expect(JSON.parse(added.stdout)).toMatchObject({
+          frameCount: 4,
+          cuts: [{ id: 'walk', startFrame: 1, endFrame: 3 }],
+        });
+
+        const listed = await forge([
+          'cut',
+          '--store',
+          store.root,
+          '--recording',
+          'mgba-2026-09',
+          '--action',
+          'list',
+        ]);
+        expect(listed.code).toBe(0);
+        expect(JSON.parse(listed.stdout).cuts).toEqual([
+          { id: 'walk', startFrame: 1, endFrame: 3 },
+        ]);
+
+        const validated = await forge(['validate', '--store', store.root]);
+        expect(validated.code).toBe(0);
+      });
+    });
+  });
 });
