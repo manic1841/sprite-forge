@@ -208,4 +208,88 @@ describe('forge CLI', () => {
       });
     });
   });
+
+  it('extract writes a Clip Draft that a reload reads back', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
+      await withStore(async (store) => {
+        expect(
+          (
+            await forge([
+              'ingest',
+              '--store',
+              store.root,
+              '--source',
+              source.path,
+              '--id',
+              'mgba-2026-09',
+            ])
+          ).code,
+        ).toBe(0);
+        expect(
+          (
+            await forge([
+              'cut',
+              '--store',
+              store.root,
+              '--recording',
+              'mgba-2026-09',
+              '--action',
+              'add',
+              '--id',
+              'walk',
+              '--start',
+              '0',
+              '--end',
+              '2',
+            ])
+          ).code,
+        ).toBe(0);
+        expect(
+          (
+            await forge([
+              'create-character',
+              '--store',
+              store.root,
+              '--id',
+              'hero',
+              '--width',
+              '4',
+              '--height',
+              '6',
+              '--anchor-x',
+              '2',
+              '--anchor-y',
+              '6',
+            ])
+          ).code,
+        ).toBe(0);
+
+        const extracted = await forge([
+          'extract',
+          '--store',
+          store.root,
+          '--character',
+          'hero',
+          '--recording',
+          'mgba-2026-09',
+          '--cut',
+          'walk',
+        ]);
+
+        expect(extracted.code).toBe(0);
+        expect(JSON.parse(extracted.stdout)).toMatchObject({
+          id: 'walk',
+          characterId: 'hero',
+          frameCount: 2,
+          delaysMs: [50, 60],
+          background: { hex: '#9421ce', source: 'sampled', tolerance: 24 },
+        });
+
+        // The Draft is on disk and the store is still valid.
+        expect(store.listFiles()).toContain('characters/hero/drafts/walk/draft.json');
+        const validated = await forge(['validate', '--store', store.root]);
+        expect(validated.code).toBe(0);
+      });
+    });
+  });
 });
