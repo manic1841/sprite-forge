@@ -29,13 +29,15 @@ export type {
   SetSegmentRangeOptions,
 } from './segments.js';
 
-export { extractClipDraft, readClipDraft } from './draft.js';
+export { extractClipDraft, readClipDraft, readClipDraftFrame } from './draft.js';
 export type {
   ClipDraft,
   ClipDraftDescriptor,
+  ClipDraftFrame,
   DraftBackground,
   DraftSegmentSnapshot,
   ExtractClipDraftOptions,
+  ReadClipDraftFrameOptions,
   ReadClipDraftOptions,
 } from './draft.js';
 
@@ -66,6 +68,7 @@ export type {
   AssetRef,
   ScannedAsset,
   ScannedCharacter,
+  ScannedDraft,
   ScannedExport,
   ScannedRecording,
   StoreScan,

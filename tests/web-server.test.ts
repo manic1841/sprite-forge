@@ -17,6 +17,34 @@ function seedRecording(store: StoreFixture, frameCount = 100): void {
   store.writeJson(CUTS_PATH, { hash: HASH, frameCount, cuts: [] });
 }
 
+const DRAFT_DIR = 'characters/hero/drafts/wip';
+/** Bytes standing in for a frame PNG; the server serves them opaquely. */
+const PNG_BYTES = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+
+/** Seed a valid 2-frame Draft (descriptor + frame files) and its Character. */
+function seedDraft(store: StoreFixture): void {
+  store.writeJson('characters/hero/canvas.json', {
+    width: 4,
+    height: 6,
+    anchor: { x: 2, y: 6 },
+  });
+  store.writeJson(`${DRAFT_DIR}/draft.json`, {
+    id: 'wip',
+    characterId: 'hero',
+    recordingId: RECORDING_ID,
+    recordingHash: HASH,
+    segment: { cutId: 'walk', startFrame: 0, endFrame: 2, speed: 1 },
+    background: { hex: '#9421ce', source: 'sampled', tolerance: 24 },
+    frameCount: 2,
+    delaysMs: [50, 60],
+    loop: true,
+    spriteForgeVersion: '0.1.0',
+  });
+  for (let index = 0; index < 2; index += 1) {
+    store.writeFile(`${DRAFT_DIR}/frames/${String(index).padStart(3, '0')}.png`, PNG_BYTES);
+  }
+}
+
 describe('handleApiRequest', () => {
   it('lists the store from a scan of its directory tree', async () => {
     await withStore(async (store) => {
@@ -126,6 +154,70 @@ describe('handleApiRequest', () => {
     await withStore(async (store) => {
       const response = await handleApiRequest(store.root, { method: 'GET', url: '/api/nope' });
       expect(response.status).toBe(404);
+    });
+  });
+});
+
+describe('the Draft / Clip-editor routes', () => {
+  it('reads a Draft descriptor and its frame list', async () => {
+    await withStore(async (store) => {
+      seedDraft(store);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/drafts/wip',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        id: 'wip',
+        characterId: 'hero',
+        frameCount: 2,
+        delaysMs: [50, 60],
+        frames: [
+          'characters/hero/drafts/wip/frames/000.png',
+          'characters/hero/drafts/wip/frames/001.png',
+        ],
+      });
+    });
+  });
+
+  it('serves a Draft frame as PNG bytes behind the store boundary', async () => {
+    await withStore(async (store) => {
+      seedDraft(store);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/drafts/wip/frames/1',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.contentType).toBe('image/png');
+      expect(Buffer.isBuffer(response.body)).toBe(true);
+      expect([...(response.body as Buffer)]).toEqual([...PNG_BYTES]);
+    });
+  });
+
+  it('reports an out-of-range Draft frame as a core failure (400)', async () => {
+    await withStore(async (store) => {
+      seedDraft(store);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/drafts/wip/frames/9',
+      });
+
+      expect(response.status).toBe(400);
+    });
+  });
+
+  it('reports a missing Draft as a core failure (400)', async () => {
+    await withStore(async (store) => {
+      const response = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/drafts/nope',
+      });
+      expect(response.status).toBe(400);
     });
   });
 });

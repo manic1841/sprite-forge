@@ -22,6 +22,7 @@ import {
   extractClipDraft,
   ingestRecording,
   readClipDraft,
+  readClipDraftFrame,
   StoreError,
   validateStore,
 } from '../src/core/index.js';
@@ -416,6 +417,65 @@ describe('readClipDraft', () => {
       await expect(
         readClipDraft(store.root, { characterId: CHARACTER_ID, draftId: DRAFT_ID }),
       ).rejects.toThrow(StoreError);
+    });
+  });
+});
+
+describe('readClipDraftFrame', () => {
+  /** Extract the standard 2-frame Draft and return its store. */
+  async function seedDraft(
+    gif: SyntheticGif,
+    store: StoreFixture,
+  ): Promise<void> {
+    await seed(gif, store);
+    await extractClipDraft(store.root, {
+      characterId: CHARACTER_ID,
+      recordingId: RECORDING_ID,
+      cutId: CUT_ID,
+    });
+  }
+
+  it('reads one frame as PNG bytes for a front end to display', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seedDraft(gif, store);
+
+        const frame = await readClipDraftFrame(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          index: 1,
+        });
+
+        expect(frame.path).toBe(`characters/${CHARACTER_ID}/drafts/${DRAFT_ID}/frames/001.png`);
+        expect(frame.contentType).toBe('image/png');
+        // A real PNG the browser can render: signature + the Canvas frame size.
+        expect([...frame.data.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+        const meta = await sharp(frame.data).metadata();
+        expect([meta.width, meta.height]).toEqual([4, 6]);
+      });
+    });
+  });
+
+  it('is a hard error for an index outside the Draft', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seedDraft(gif, store);
+
+        await expect(
+          readClipDraftFrame(store.root, {
+            characterId: CHARACTER_ID,
+            draftId: DRAFT_ID,
+            index: 2,
+          }),
+        ).rejects.toThrow(StoreError);
+        await expect(
+          readClipDraftFrame(store.root, {
+            characterId: CHARACTER_ID,
+            draftId: DRAFT_ID,
+            index: -1,
+          }),
+        ).rejects.toThrow(StoreError);
+      });
     });
   });
 });

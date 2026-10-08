@@ -241,3 +241,65 @@ body {
 .muted {
   color: var(--dim);
 }
+
+/* Clip editor stage ---------------------------------------------------------- */
+
+.draft-viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.draft-stage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.draft-frame {
+  width: 240px;
+  height: auto;
+  /* Pixel art: never smooth the de-backgrounded frames. */
+  image-rendering: pixelated;
+  /* Checkerboard so transparent (erased) pixels are visible. */
+  background-color: #10131c;
+  background-image:
+    linear-gradient(45deg, #1b1f2c 25%, transparent 25%),
+    linear-gradient(-45deg, #1b1f2c 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1b1f2c 75%),
+    linear-gradient(-45deg, transparent 75%, #1b1f2c 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.draft-frames {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Contextual inspector ------------------------------------------------------- */
+
+.inspector-section {
+  margin-bottom: 14px;
+}
+
+.repair-controls {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 8px;
+}
+

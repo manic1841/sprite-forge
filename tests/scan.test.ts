@@ -38,6 +38,24 @@ describe('scan', () => {
     });
   });
 
+  it('reports uncommitted Drafts per Character, kept out of the committed Assets', async () => {
+    await withStore(async (store) => {
+      store.writeJson('characters/hero/canvas.json', validCanvas());
+      store.writeJson('characters/hero/clips/walk/meta.json', validAssetMeta('walk'));
+      store.writeJson('characters/hero/drafts/wip/draft.json', { id: 'wip' });
+      // A bare folder under drafts/ is not a Draft (it has no descriptor).
+      store.mkdir('characters/hero/drafts/scratch');
+
+      const tree = await scan(store.root);
+
+      expect(tree.characters[0]?.drafts).toEqual([
+        { id: 'wip', dir: 'characters/hero/drafts/wip' },
+      ]);
+      // A Draft is working state, never a committed Asset.
+      expect(tree.characters[0]?.assets.map((asset) => asset.id)).toEqual(['walk']);
+    });
+  });
+
   it('reports an empty store as empty rather than failing', async () => {
     await withStore(async (store) => {
       const tree = await scan(store.root);

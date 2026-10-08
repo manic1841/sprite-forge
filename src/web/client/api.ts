@@ -6,11 +6,11 @@
  * store stays the single source of truth.
  */
 
-import type { CutList, StoreScan } from './types.js';
+import type { ClipDraft, CutList, StoreScan } from './types.js';
 
 /** The workbench's calls into the server. A test can stub this wholesale. */
 export interface WorkbenchApi {
-  /** List the store's Recordings and committed Assets. */
+  /** List the store's Recordings, Drafts and committed Assets. */
   scan(): Promise<StoreScan>;
   /** Read a Recording's cut list. */
   readCutList(recordingId: string): Promise<CutList>;
@@ -28,6 +28,13 @@ export interface WorkbenchApi {
   ): Promise<CutList>;
   /** Remove a Segment. */
   removeSegment(recordingId: string, cutId: string): Promise<CutList>;
+  /** Read a Draft descriptor plus the store-relative paths of its frames. */
+  readClipDraft(characterId: string, draftId: string): Promise<ClipDraft>;
+  /**
+   * The URL a Draft frame's PNG is served from, for an `<img src>`. Synchronous:
+   * it is a URL, not a fetch, so the browser loads the image itself.
+   */
+  frameUrl(characterId: string, draftId: string, index: number): string;
 }
 
 /** Build a {@link WorkbenchApi} backed by the dev server's `/api` routes. */
@@ -65,5 +72,9 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
       }),
     removeSegment: (recordingId, cutId) =>
       call<CutList>(`/recordings/${recordingId}/cuts/${cutId}`, { method: 'DELETE' }),
+    readClipDraft: (characterId, draftId) =>
+      call<ClipDraft>(`/characters/${characterId}/drafts/${draftId}`),
+    frameUrl: (characterId, draftId, index) =>
+      `${base}/characters/${characterId}/drafts/${draftId}/frames/${index}`,
   };
 }

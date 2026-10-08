@@ -16,6 +16,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   addSegment,
   ForgeError,
+  readClipDraft,
+  readClipDraftFrame,
   readCutList,
   removeSegment,
   scan,
@@ -36,6 +38,11 @@ export interface ApiRequest {
 export interface ApiResponse {
   status: number;
   body: unknown;
+  /**
+   * When set, `body` is raw bytes for a non-JSON response and this is its
+   * media type (e.g. a Draft frame served as `image/png`). Absent means JSON.
+   */
+  contentType?: string;
 }
 
 /**
@@ -54,6 +61,26 @@ export async function handleApiRequest(
     // GET /api/store
     if (method === 'GET' && matches(segments, ['api', 'store'])) {
       return ok(await scan(storeRoot));
+    }
+
+    // /api/characters/<characterId>/drafts/<draftId>[/frames/<index>]
+    if (
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'drafts' &&
+      segments.length >= 5
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      const draftId = decodeURIComponent(segments[4]!);
+
+      if (method === 'GET' && segments.length === 5) {
+        return ok(await readClipDraft(storeRoot, { characterId, draftId }));
+      }
+      if (method === 'GET' && segments[5] === 'frames' && segments.length === 7) {
+        const index = Number(decodeURIComponent(segments[6]!));
+        const frame = await readClipDraftFrame(storeRoot, { characterId, draftId, index });
+        return { status: 200, body: frame.data, contentType: frame.contentType };
+      }
     }
 
     // /api/recordings/<recordingId>/cuts[/<cutId>]
@@ -139,6 +166,11 @@ async function dispatch(
     body,
   });
   res.statusCode = response.status;
+  if (response.contentType && Buffer.isBuffer(response.body)) {
+    res.setHeader('content-type', response.contentType);
+    res.end(response.body);
+    return;
+  }
   res.setHeader('content-type', 'application/json');
   res.end(JSON.stringify(response.body));
 }
