@@ -6,7 +6,7 @@
  * store stays the single source of truth.
  */
 
-import type { ClipDraft, CutList, StoreScan } from './types.js';
+import type { ClipDraft, CutList, RepairOperationInput, RepairState, StoreScan } from './types.js';
 
 /** The workbench's calls into the server. A test can stub this wholesale. */
 export interface WorkbenchApi {
@@ -32,9 +32,28 @@ export interface WorkbenchApi {
   readClipDraft(characterId: string, draftId: string): Promise<ClipDraft>;
   /**
    * The URL a Draft frame's PNG is served from, for an `<img src>`. Synchronous:
-   * it is a URL, not a fetch, so the browser loads the image itself.
+   * it is a URL, not a fetch, so the browser loads the image itself. `revision`
+   * busts the cache after a Repair so the repaired frame is re-fetched.
    */
-  frameUrl(characterId: string, draftId: string, index: number): string;
+  frameUrl(characterId: string, draftId: string, index: number, revision?: number): string;
+  /** Read a Draft's Repair state: its ordered operations plus validity warnings. */
+  readRepair(characterId: string, draftId: string): Promise<RepairState>;
+  /** Append one Repair operation to the Draft's script. */
+  appendRepairOperation(
+    characterId: string,
+    draftId: string,
+    operation: RepairOperationInput,
+  ): Promise<RepairState>;
+  /** Undo the Draft's last Repair operation. */
+  undoRepairOperation(characterId: string, draftId: string): Promise<RepairState>;
+  /** Sample the colour at a pixel of the Draft's current de-backgrounded frame. */
+  sampleRepairColor(
+    characterId: string,
+    draftId: string,
+    frame: number,
+    x: number,
+    y: number,
+  ): Promise<string>;
 }
 
 /** Build a {@link WorkbenchApi} backed by the dev server's `/api` routes. */
@@ -74,7 +93,26 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
       call<CutList>(`/recordings/${recordingId}/cuts/${cutId}`, { method: 'DELETE' }),
     readClipDraft: (characterId, draftId) =>
       call<ClipDraft>(`/characters/${characterId}/drafts/${draftId}`),
-    frameUrl: (characterId, draftId, index) =>
-      `${base}/characters/${characterId}/drafts/${draftId}/frames/${index}`,
+    frameUrl: (characterId, draftId, index, revision) => {
+      const base = `/api/characters/${characterId}/drafts/${draftId}/frames/${index}`;
+      return revision && revision > 0 ? `${base}?r=${revision}` : base;
+    },
+    readRepair: (characterId, draftId) =>
+      call<RepairState>(`/characters/${characterId}/drafts/${draftId}/repair`),
+    appendRepairOperation: (characterId, draftId, operation) =>
+      call<RepairState>(`/characters/${characterId}/drafts/${draftId}/repair/operations`, {
+        method: 'POST',
+        body: JSON.stringify(operation),
+      }),
+    undoRepairOperation: (characterId, draftId) =>
+      call<RepairState>(`/characters/${characterId}/drafts/${draftId}/repair/undo`, {
+        method: 'POST',
+      }),
+    sampleRepairColor: async (characterId, draftId, frame, x, y) => {
+      const body = await call<{ color: string }>(
+        `/characters/${characterId}/drafts/${draftId}/repair/sample?frame=${frame}&x=${x}&y=${y}`,
+      );
+      return body.color;
+    },
   };
 }

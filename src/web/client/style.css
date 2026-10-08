@@ -303,3 +303,47 @@ body {
   padding: 8px;
 }
 
+
+.repair-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.btn.small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.btn.on {
+  outline: 2px solid var(--accent, #6cf);
+}
+
+.repair-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.repair-settings .field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.repair-ops {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.repair-warning {
+  margin: 6px 0;
+  padding: 4px 6px;
+  border-left: 3px solid #d9822b;
+  background: rgba(217, 130, 43, 0.12);
+  font-size: 12px;
+}

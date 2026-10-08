@@ -11,7 +11,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clampRange, mountWorkbench } from '../src/web/client/app.js';
 import type { WorkbenchApi } from '../src/web/client/api.js';
-import type { ClipDraft, CutList, StoreScan } from '../src/web/client/types.js';
+import type { ClipDraft, CutList, RepairState, StoreScan } from '../src/web/client/types.js';
 
 const SCAN: StoreScan = {
   root: '/tmp/store',
@@ -72,9 +72,15 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     readClipDraft: async () => DRAFT,
     frameUrl: (characterId, draftId, index) =>
       `/api/characters/${characterId}/drafts/${draftId}/frames/${index}`,
+    readRepair: async () => EMPTY_REPAIR,
+    appendRepairOperation: async () => EMPTY_REPAIR,
+    undoRepairOperation: async () => EMPTY_REPAIR,
+    sampleRepairColor: async () => '#ff0000',
     ...overrides,
   };
 }
+
+const EMPTY_REPAIR: RepairState = { operations: [], warnings: [] };
 
 let container: HTMLElement;
 
@@ -300,6 +306,63 @@ describe('the Clip editor stage', () => {
     wb.root.querySelector<HTMLElement>('[data-mode="clip"]')!.click();
     const img = wb.root.querySelector<HTMLImageElement>('[data-draft-frame]')!;
     expect(img.getAttribute('src')).toBe('/api/characters/hero/drafts/wip/frames/0');
+  });
+});
+
+describe('the Clip editor Repair controls', () => {
+  it('renders the brush, eyedropper, scope, undo and operation list in the slot', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const controls = wb.root.querySelector(
+      '[data-inspector-section="repair"] [data-repair-controls]',
+    )!;
+    expect(controls).not.toBeNull();
+    expect(controls.querySelector('[data-repair-tool="paint"]')).not.toBeNull();
+    expect(controls.querySelector('[data-repair-tool="erase"]')).not.toBeNull();
+    expect(controls.querySelector('[data-repair-tool="rect"]')).not.toBeNull();
+    expect(controls.querySelector('[data-repair-tool="eyedropper"]')).not.toBeNull();
+    expect(controls.querySelector('[data-repair-color]')).not.toBeNull();
+    expect(controls.querySelector('[data-repair-size]')).not.toBeNull();
+    expect(controls.querySelector('[data-repair-scope]')).not.toBeNull();
+    expect(controls.querySelector('[data-repair-undo]')).not.toBeNull();
+    expect(controls.querySelector('[data-repair-ops]')).not.toBeNull();
+  });
+
+  it('reflects a Draft’s existing Repair in the operation list', async () => {
+    const repaired: RepairState = {
+      operations: [
+        {
+          tool: 'erase-rect',
+          frames: { start: 0, end: 1 },
+          geometry: { x: 1, y: 4, width: 1, height: 1 },
+        },
+      ],
+      warnings: [],
+    };
+    const wb = mountWorkbench(container, { api: fakeApi({ readRepair: async () => repaired }) });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const ops = wb.root.querySelectorAll('[data-repair-op]');
+    expect(ops).toHaveLength(1);
+    expect((ops[0] as HTMLElement).dataset.repairTool).toBe('erase-rect');
+    expect(wb.repair?.operations).toHaveLength(1);
+  });
+
+  it('surfaces a Repair-validity warning (never a silent misapplication)', async () => {
+    const warned: RepairState = {
+      operations: [],
+      warnings: [{ code: 'framing-changed', message: 'the Canvas changed' }],
+    };
+    const wb = mountWorkbench(container, { api: fakeApi({ readRepair: async () => warned }) });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    expect(
+      wb.root.querySelector('[data-repair-warning="framing-changed"]'),
+    ).not.toBeNull();
   });
 });
 

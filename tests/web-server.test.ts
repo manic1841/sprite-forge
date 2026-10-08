@@ -5,6 +5,7 @@
 // internals.
 
 import { describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 import { handleApiRequest } from '../src/web/server.js';
 import type { StoreFixture } from './harness.js';
 import { withStore } from './harness.js';
@@ -218,6 +219,123 @@ describe('the Draft / Clip-editor routes', () => {
         url: '/api/characters/hero/drafts/nope',
       });
       expect(response.status).toBe(400);
+    });
+  });
+});
+
+/** A real 4x6 opaque-red-on-transparent PNG, so Repair can decode and replay it. */
+async function realFramePng(): Promise<Buffer> {
+  const data = Buffer.alloc(4 * 6 * 4);
+  const at = (4 * 4 + 1) * 4;
+  data[at] = 255;
+  data[at + 3] = 255;
+  return sharp(data, { raw: { width: 4, height: 6, channels: 4 } })
+    .png()
+    .toBuffer();
+}
+
+/** Seed a Draft whose frames are real PNGs (Repair decodes them). */
+async function seedRealDraft(store: StoreFixture): Promise<void> {
+  store.writeJson('characters/hero/canvas.json', {
+    width: 4,
+    height: 6,
+    anchor: { x: 2, y: 6 },
+  });
+  store.writeJson(`${DRAFT_DIR}/draft.json`, {
+    id: 'wip',
+    characterId: 'hero',
+    recordingId: RECORDING_ID,
+    recordingHash: HASH,
+    segment: { cutId: 'walk', startFrame: 0, endFrame: 2, speed: 1 },
+    background: { hex: '#9421ce', source: 'sampled', tolerance: 24 },
+    frameCount: 2,
+    delaysMs: [50, 60],
+    loop: true,
+    spriteForgeVersion: '0.1.0',
+  });
+  const png = await realFramePng();
+  store.writeFile(`${DRAFT_DIR}/frames/000.png`, png);
+  store.writeFile(`${DRAFT_DIR}/frames/001.png`, png);
+}
+
+describe('the Repair routes', () => {
+  it('reads a Draft’s Repair script (empty when there is none)', async () => {
+    await withStore(async (store) => {
+      await seedRealDraft(store);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/drafts/wip/repair',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ operations: [], warnings: [] });
+    });
+  });
+
+  it('appends an operation and serves the repaired frame bytes', async () => {
+    await withStore(async (store) => {
+      await seedRealDraft(store);
+
+      const appended = await handleApiRequest(store.root, {
+        method: 'POST',
+        url: '/api/characters/hero/drafts/wip/repair/operations',
+        body: {
+          tool: 'erase-rect',
+          frames: { start: 0, end: 1 },
+          geometry: { x: 1, y: 4, width: 1, height: 1 },
+        },
+      });
+      expect(appended.status).toBe(200);
+      expect(store.listFiles()).toContain('characters/hero/repairs/wip/repair.json');
+
+      const frame = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/drafts/wip/frames/0',
+      });
+      const { data, info } = await sharp(frame.body as Buffer)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      expect(info.width).toBe(4);
+      expect(data[(4 * 4 + 1) * 4 + 3]).toBe(0);
+    });
+  });
+
+  it('undoes the last operation', async () => {
+    await withStore(async (store) => {
+      await seedRealDraft(store);
+      await handleApiRequest(store.root, {
+        method: 'POST',
+        url: '/api/characters/hero/drafts/wip/repair/operations',
+        body: {
+          tool: 'paint-brush',
+          frames: { start: 0, end: 1 },
+          geometry: { points: [[0, 0]], size: 1 },
+          color: '#00ff00',
+        },
+      });
+
+      const undone = await handleApiRequest(store.root, {
+        method: 'POST',
+        url: '/api/characters/hero/drafts/wip/repair/undo',
+      });
+      expect(undone.status).toBe(200);
+      expect((undone.body as { operations: unknown[] }).operations).toEqual([]);
+    });
+  });
+
+  it('samples a pixel colour for the eyedropper', async () => {
+    await withStore(async (store) => {
+      await seedRealDraft(store);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/drafts/wip/repair/sample?frame=0&x=1&y=4',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ color: '#ff0000' });
     });
   });
 });

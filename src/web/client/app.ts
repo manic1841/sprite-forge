@@ -13,7 +13,16 @@
  */
 
 import type { WorkbenchApi } from './api.js';
-import type { ClipDraft, CutList, Segment, StoreScan } from './types.js';
+import type {
+  ClipDraft,
+  CutList,
+  RepairOperationInput,
+  RepairState,
+  RepairTool,
+  RepairWarning,
+  Segment,
+  StoreScan,
+} from './types.js';
 
 /** The three stage modes. The rail, inspector and filmstrip do not change with them. */
 export const WORKBENCH_MODES = ['clip', 'align', 'export'] as const;
@@ -47,6 +56,8 @@ export interface WorkbenchHandle {
   readonly activeDraft: { characterId: string; draftId: string } | null;
   /** The active Draft frame index (the Clip-editor unit); `0` when none. */
   readonly activeDraftFrame: number;
+  /** The active Draft's Repair state (operations + warnings), or `null`. */
+  readonly repair: RepairState | null;
   /** Switch mode; swaps the stage and re-renders the contextual inspector. */
   setMode(mode: WorkbenchMode): void;
   /** Load a Recording: read its cut list and show it in the filmstrip. */
@@ -89,6 +100,12 @@ export function mountWorkbench(
     draft: { characterId: string; draftId: string } | null;
     draftDescriptor: ClipDraft | null;
     draftFrame: number;
+    repair: RepairState | null;
+    repairRevision: number;
+    tool: 'paint' | 'erase' | 'rect' | 'eyedropper';
+    brushColor: string;
+    brushSize: number;
+    scope: 'frame' | 'clip';
   } = {
     mode: 'clip',
     scan: null,
@@ -98,6 +115,12 @@ export function mountWorkbench(
     draft: null,
     draftDescriptor: null,
     draftFrame: 0,
+    repair: null,
+    repairRevision: 0,
+    tool: 'paint',
+    brushColor: '#ff0000',
+    brushSize: 1,
+    scope: 'frame',
   };
 
   // --- shell ----------------------------------------------------------------
@@ -263,8 +286,9 @@ export function mountWorkbench(
     img.className = 'draft-frame';
     img.dataset.draftFrame = '';
     img.dataset.frameIndex = String(state.draftFrame);
-    img.src = api.frameUrl(characterId, draftId, state.draftFrame);
+    img.src = api.frameUrl(characterId, draftId, state.draftFrame, state.repairRevision);
     img.alt = `${draftId} frame ${state.draftFrame}`;
+    attachPainting(img);
 
     const next = make('button', 'btn ghost', '▶') as HTMLButtonElement;
     next.dataset.frameStep = 'next';
@@ -311,6 +335,127 @@ export function mountWorkbench(
     state.draftFrame = Math.max(0, Math.min(frameCount - 1, state.draftFrame + delta));
     renderStage();
     renderContext();
+    renderInspector();
+  }
+
+  // --- Repair (the Clip editor's brush, eyedropper and operation list) -------
+  //
+  // No Repair logic lives here: every edit goes through {@link WorkbenchApi},
+  // which the Node server turns into a core call. The client only turns pointer
+  // gestures into operations and replays the returned state.
+
+  /** The frame range an edit targets: the current frame, or the whole Clip. */
+  function targetFrames(): { start: number; end: number } {
+    if (state.scope === 'clip') {
+      return { start: 0, end: state.draftDescriptor?.frameCount ?? 0 };
+    }
+    return { start: state.draftFrame, end: state.draftFrame + 1 };
+  }
+
+  /** The pixel under a pointer event, in Canvas coordinates (the frame PNG is the Canvas). */
+  function pointerPixel(event: PointerEvent, img: HTMLImageElement): [number, number] {
+    const rect = img.getBoundingClientRect();
+    const width = img.naturalWidth || rect.width || 1;
+    const height = img.naturalHeight || rect.height || 1;
+    const x = Math.floor((((event.clientX - rect.left) / (rect.width || 1)) * width));
+    const y = Math.floor((((event.clientY - rect.top) / (rect.height || 1)) * height));
+    return [x, y];
+  }
+
+  /** Attach painting / eyedropper gestures to the frame image. */
+  function attachPainting(img: HTMLImageElement): void {
+    img.addEventListener('pointerdown', (event) => {
+      const tool = state.tool;
+      if (tool === 'eyedropper') {
+        void pickColor(event as PointerEvent, img);
+        return;
+      }
+      event.preventDefault();
+      const start = pointerPixel(event as PointerEvent, img);
+      const points: Array<[number, number]> = [start];
+
+      const move = (moveEvent: PointerEvent): void => {
+        const point = pointerPixel(moveEvent, img);
+        const last = points[points.length - 1]!;
+        if (point[0] !== last[0] || point[1] !== last[1]) {
+          points.push(point);
+        }
+      };
+      const up = (): void => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        void commitGesture(tool, start, points);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
+  }
+
+  /** The eyedropper: sample the current frame's pixel and make it the brush colour. */
+  async function pickColor(event: PointerEvent, img: HTMLImageElement): Promise<void> {
+    if (!state.draft) {
+      return;
+    }
+    const [x, y] = pointerPixel(event, img);
+    const { characterId, draftId } = state.draft;
+    const color = await api.sampleRepairColor(characterId, draftId, state.draftFrame, x, y);
+    state.brushColor = color;
+    // Painting with the picked colour patches; switch to the brush so the next
+    // gesture paints rather than sampling again.
+    state.tool = 'paint';
+    renderInspector();
+  }
+
+  /** Turn a gesture into a Repair operation and append it through the API. */
+  async function commitGesture(
+    tool: 'paint' | 'erase' | 'rect',
+    start: [number, number],
+    points: Array<[number, number]>,
+  ): Promise<void> {
+    if (!state.draft) {
+      return;
+    }
+    const frames = targetFrames();
+    let operation: RepairOperationInput;
+    if (tool === 'rect') {
+      const end = points[points.length - 1] ?? start;
+      const x = Math.min(start[0], end[0]);
+      const y = Math.min(start[1], end[1]);
+      operation = {
+        tool: 'erase-rect',
+        frames,
+        geometry: {
+          x,
+          y,
+          width: Math.abs(end[0] - start[0]) + 1,
+          height: Math.abs(end[1] - start[1]) + 1,
+        },
+      };
+    } else {
+      const brushTool: RepairTool = tool === 'paint' ? 'paint-brush' : 'erase-brush';
+      operation = {
+        tool: brushTool,
+        frames,
+        geometry: { points, size: state.brushSize },
+        ...(tool === 'paint' ? { color: state.brushColor } : {}),
+      };
+    }
+    const { characterId, draftId } = state.draft;
+    state.repair = await api.appendRepairOperation(characterId, draftId, operation);
+    state.repairRevision += 1;
+    renderStage();
+    renderContext();
+    renderInspector();
+  }
+
+  async function undoRepair(): Promise<void> {
+    if (!state.draft) {
+      return;
+    }
+    const { characterId, draftId } = state.draft;
+    state.repair = await api.undoRepairOperation(characterId, draftId);
+    state.repairRevision += 1;
+    renderStage();
     renderInspector();
   }
 
@@ -520,17 +665,89 @@ export function mountWorkbench(
     }
     inspector.appendChild(draftSection);
 
-    // Repair slot for #27 — present here from #26 so the layout is stable.
+    // Repair controls (#27): the brush (colour + size), the eraser, the
+    // rectangle clear, the eyedropper, the frame/Clip scope, undo, and the
+    // operation list. This extends the #26 slot; the section node is not rebuilt.
     const repairSection = make('section', 'inspector-section');
     repairSection.dataset.inspectorSection = 'repair';
     repairSection.appendChild(subheading('Repair'));
     const controls = make('div', 'repair-controls');
     controls.dataset.repairControls = '';
-    controls.appendChild(
-      make('p', 'muted', 'Brush colour/size and the Repair operation list arrive in #27.'),
-    );
+    renderRepairControls(controls);
     repairSection.appendChild(controls);
     inspector.appendChild(repairSection);
+  }
+
+  /** Fill the `[data-repair-controls]` slot: tools, brush settings, warnings, op list. */
+  function renderRepairControls(controls: HTMLElement): void {
+    if (!state.draft || !state.draftDescriptor) {
+      controls.appendChild(make('p', 'muted', 'Select a Draft to repair its frames.'));
+      return;
+    }
+
+    const tools = make('div', 'repair-tools');
+    const toolButton = (tool: typeof state.tool, label: string): void => {
+      const button = make('button', 'btn small', label);
+      button.dataset.repairTool = tool;
+      button.classList.toggle('on', state.tool === tool);
+      button.addEventListener('click', () => {
+        state.tool = tool;
+        renderInspector();
+      });
+      tools.appendChild(button);
+    };
+    toolButton('paint', 'Brush');
+    toolButton('erase', 'Eraser');
+    toolButton('rect', 'Rect');
+    toolButton('eyedropper', 'Eyedropper');
+    controls.appendChild(tools);
+
+    const settings = make('div', 'repair-settings');
+    settings.appendChild(
+      labeled('Colour', colorInput(state.brushColor, (value) => {
+        state.brushColor = value;
+        state.tool = 'paint';
+      })),
+    );
+    settings.appendChild(
+      labeled('Size', sizeInput(state.brushSize, (value) => {
+        state.brushSize = Math.max(1, Math.round(value));
+      })),
+    );
+    settings.appendChild(
+      labeled('Scope', scopeSelect(state.scope, (value) => {
+        state.scope = value;
+      })),
+    );
+    controls.appendChild(settings);
+
+    const undo = make('button', 'btn small', 'Undo') as HTMLButtonElement;
+    undo.dataset.repairUndo = '';
+    undo.disabled = (state.repair?.operations.length ?? 0) === 0;
+    undo.addEventListener('click', () => void undoRepair());
+    controls.appendChild(undo);
+
+    for (const warning of state.repair?.warnings ?? []) {
+      controls.appendChild(warningRow(warning));
+    }
+
+    controls.appendChild(make('h4', 'ttl sub', 'Operations'));
+    const list = make('ol', 'repair-ops');
+    list.dataset.repairOps = '';
+    const operations = state.repair?.operations ?? [];
+    if (operations.length === 0) {
+      list.appendChild(make('li', 'muted', 'No Repair operations yet.'));
+    }
+    operations.forEach((operation, index) => {
+      const item = make('li', 'repair-op');
+      item.dataset.repairOp = '';
+      item.dataset.repairOpIndex = String(index);
+      item.dataset.repairTool = operation.tool;
+      const frames = `${operation.frames.start}–${operation.frames.end}`;
+      item.textContent = `${operation.tool} · frames [${frames})`;
+      list.appendChild(item);
+    });
+    controls.appendChild(list);
   }
 
   /** A Draft frame's delay: `delaysMs` is either uniform (1) or per-frame. */
@@ -564,7 +781,9 @@ export function mountWorkbench(
   async function loadDraft(characterId: string, draftId: string): Promise<void> {
     state.draft = { characterId, draftId };
     state.draftFrame = 0;
+    state.repairRevision = 0;
     state.draftDescriptor = await api.readClipDraft(characterId, draftId);
+    state.repair = await api.readRepair(characterId, draftId);
     renderLibrary();
     renderStage();
     renderContext();
@@ -602,6 +821,9 @@ export function mountWorkbench(
     get activeDraftFrame() {
       return state.draftFrame;
     },
+    get repair() {
+      return state.repair;
+    },
     setMode,
     loadRecording,
     loadDraft,
@@ -636,4 +858,57 @@ function addRow(list: HTMLElement, key: string, value: string): void {
   const k = make('dt', 'k', key);
   const v = make('dd', 'v', value);
   list.append(k, v);
+}
+
+/** A labelled form field wrapper. */
+function labeled(text: string, control: HTMLElement): HTMLElement {
+  const wrap = make('label', 'field');
+  wrap.append(make('span', 'field-label', text), control);
+  return wrap;
+}
+
+/** The brush colour input (`[data-repair-color]`). */
+function colorInput(value: string, onChange: (value: string) => void): HTMLInputElement {
+  const input = document.createElement('input');
+  input.type = 'color';
+  input.setAttribute('data-repair-color', '');
+  input.value = value;
+  input.addEventListener('input', () => onChange(input.value));
+  return input;
+}
+
+/** The brush size input (`[data-repair-size]`). */
+function sizeInput(value: number, onChange: (value: number) => void): HTMLInputElement {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '1';
+  input.setAttribute('data-repair-size', '');
+  input.value = String(value);
+  input.addEventListener('input', () => onChange(Number(input.value)));
+  return input;
+}
+
+/** The edit scope select (`[data-repair-scope]`): the current frame or the whole Clip. */
+function scopeSelect(
+  value: 'frame' | 'clip',
+  onChange: (value: 'frame' | 'clip') => void,
+): HTMLSelectElement {
+  const select = document.createElement('select');
+  select.setAttribute('data-repair-scope', '');
+  for (const scope of ['frame', 'clip'] as const) {
+    const option = document.createElement('option');
+    option.value = scope;
+    option.textContent = scope === 'frame' ? 'Current frame' : 'Whole Clip';
+    option.selected = scope === value;
+    select.appendChild(option);
+  }
+  select.addEventListener('change', () => onChange(select.value as 'frame' | 'clip'));
+  return select;
+}
+
+/** A Repair-validity warning row (`[data-repair-warning="<code>"]`). */
+function warningRow(warning: RepairWarning): HTMLElement {
+  const row = make('p', 'repair-warning', warning.message);
+  row.setAttribute('data-repair-warning', warning.code);
+  return row;
 }
