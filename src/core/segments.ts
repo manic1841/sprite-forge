@@ -177,6 +177,49 @@ export async function removeSegment(
   return next;
 }
 
+/** Inputs for {@link setSegmentRange}. */
+export interface SetSegmentRangeOptions {
+  recordingId: string;
+  /** The cut id whose range is retargeted. */
+  id: string;
+  /** Inclusive first frame of the new range. */
+  startFrame: number;
+  /** Exclusive end of the new range; must be `> startFrame` and `<= frameCount`. */
+  endFrame: number;
+}
+
+/**
+ * Retarget an existing Segment to a new half-open frame range, returning the
+ * updated cut list. The cut id and its `speed` are kept; only the range moves.
+ * Dragging a range edge in the web timeline lands here. The new range is checked
+ * against the same rules as {@link addSegment}: an empty or out-of-bounds range
+ * fails validation and writes nothing.
+ */
+export async function setSegmentRange(
+  root: string,
+  options: SetSegmentRangeOptions,
+): Promise<CutList> {
+  assertValidId(options.recordingId, 'recording', 'recordingId');
+  assertValidId(options.id, 'cut', 'cut id');
+
+  const cutList = await readCutList(root, options.recordingId);
+  const index = cutList.cuts.findIndex((cut) => cut.id === options.id);
+  if (index === -1) {
+    throw new StoreError(
+      `No Segment "${options.id}" in Recording "${options.recordingId}".`,
+    );
+  }
+
+  const cuts = cutList.cuts.map((cut, at) =>
+    at === index
+      ? { ...cut, startFrame: options.startFrame, endFrame: options.endFrame }
+      : cut,
+  );
+  const next = withCuts(cutList, cuts);
+  await writeCutList(root, options.recordingId, next);
+  return next;
+}
+
 /** A new cut list carrying the same `hash` and `frameCount`, with cuts in frame order. */
 function withCuts(cutList: CutList, cuts: Segment[]): CutList {
   return {

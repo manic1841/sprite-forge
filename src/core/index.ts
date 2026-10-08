@@ -19,13 +19,14 @@ export type {
   CreatedCharacter,
 } from './character.js';
 
-export { addSegment, readCutList, removeSegment, renameSegment } from './segments.js';
+export { addSegment, readCutList, removeSegment, renameSegment, setSegmentRange } from './segments.js';
 export type {
   AddSegmentOptions,
   CutList,
   RemoveSegmentOptions,
   RenameSegmentOptions,
   Segment,
+  SetSegmentRangeOptions,
 } from './segments.js';
 
 export { extractClipDraft, readClipDraft } from './draft.js';
