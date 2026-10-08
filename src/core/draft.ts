@@ -295,6 +295,52 @@ export async function readClipDraft(
   return { ...descriptor, dir: draftDir(characterId, draftId), frames: framePaths };
 }
 
+/** Inputs for {@link readClipDraftFrame}. */
+export interface ReadClipDraftFrameOptions {
+  /** The Character that owns the Draft. */
+  characterId: string;
+  /** The Draft id. */
+  draftId: string;
+  /** Zero-based frame index within the Draft. */
+  index: number;
+}
+
+/** One Draft frame, read as image bytes for a front end to display. */
+export interface ClipDraftFrame {
+  /** Store-relative POSIX path of the frame PNG. */
+  path: string;
+  /** The image media type the bytes carry. */
+  contentType: 'image/png';
+  /** The PNG bytes. */
+  data: Buffer;
+}
+
+/**
+ * Read a single Draft frame as image bytes.
+ *
+ * The Clip editor shows a Draft frame-by-frame, but a browser cannot read the
+ * store; a front end serves these bytes over its own boundary. The descriptor is
+ * read and validated first, so an out-of-range or missing frame is a hard error.
+ */
+export async function readClipDraftFrame(
+  root: string,
+  options: ReadClipDraftFrameOptions,
+): Promise<ClipDraftFrame> {
+  const { characterId, draftId, index } = options;
+  if (!Number.isInteger(index) || index < 0) {
+    throw new StoreError(`Draft frame index must be an integer >= 0; got ${index}.`);
+  }
+  const draft = await readClipDraft(root, { characterId, draftId });
+  if (index >= draft.frameCount) {
+    throw new StoreError(
+      `Draft "${draftId}" has ${draft.frameCount} frame(s); frame ${index} is out of range.`,
+    );
+  }
+  const relPath = draft.frames[index]!;
+  const data = await readBinaryFile(root, relPath);
+  return { path: relPath, contentType: 'image/png', data };
+}
+
 // --- internals ----------------------------------------------------------------
 
 /** Read and validate the Character's Canvas; its frame size is the Draft's too. */

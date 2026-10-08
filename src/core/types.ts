@@ -29,13 +29,23 @@ export interface ScannedAsset {
   dir: string;
 }
 
-/** A Character discovered in the store, with its committed Assets. */
+/** An uncommitted Draft discovered in the store (editable working state). */
+export interface ScannedDraft {
+  /** The Draft id (its folder name). */
+  id: string;
+  /** Store-relative POSIX directory. */
+  dir: string;
+}
+
+/** A Character discovered in the store, with its committed Assets and Drafts. */
 export interface ScannedCharacter {
   id: string;
   /** Store-relative POSIX directory. */
   dir: string;
   /** Committed Clips and Sequences, Clips first, each alphabetical. */
   assets: ScannedAsset[];
+  /** Uncommitted Drafts, alphabetical. */
+  drafts: ScannedDraft[];
 }
 
 /** An Export target discovered in the store. */
