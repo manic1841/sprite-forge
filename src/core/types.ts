@@ -3,6 +3,16 @@
 /** A committed Asset is a Clip or a Sequence; the two share one id namespace. */
 export type AssetKind = 'clip' | 'sequence';
 
+/**
+ * A reference to a committed Asset (format-spec §8). The `kind` is required
+ * because a Clip and a Sequence share one id namespace, so an id alone is
+ * ambiguous.
+ */
+export interface AssetRef {
+  kind: AssetKind;
+  id: string;
+}
+
 /** A Recording discovered in the store. */
 export interface ScannedRecording {
   /** The recording id (its folder name). */
