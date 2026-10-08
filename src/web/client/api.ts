@@ -6,7 +6,17 @@
  * store stays the single source of truth.
  */
 
-import type { ClipDraft, CutList, RepairOperationInput, RepairState, StoreScan } from './types.js';
+import type {
+  AlignmentState,
+  CharacterAlignment,
+  ClipDraft,
+  CutList,
+  ExpandCanvasResult,
+  PlacementOffset,
+  RepairOperationInput,
+  RepairState,
+  StoreScan,
+} from './types.js';
 
 /** The workbench's calls into the server. A test can stub this wholesale. */
 export interface WorkbenchApi {
@@ -54,6 +64,23 @@ export interface WorkbenchApi {
     x: number,
     y: number,
   ): Promise<string>;
+  /** Read a Character's Canvas and every Clip/Draft placement offset (Alignment stage). */
+  readCharacterAlignment(characterId: string): Promise<CharacterAlignment>;
+  /** Read a Draft's placement offset plus alignment-validity warnings. */
+  readDraftAlignment(characterId: string, draftId: string): Promise<AlignmentState>;
+  /** Set (or clear) a Draft's manual placement offset. */
+  setPlacementOffset(
+    characterId: string,
+    draftId: string,
+    offset: PlacementOffset,
+  ): Promise<ClipDraft>;
+  /** Grow a Character's Canvas and re-bake its committed Clips. */
+  expandCanvas(characterId: string, width: number, height: number): Promise<ExpandCanvasResult>;
+  /**
+   * The URL a committed Asset's sheet is served from, for an `<img src>` (the
+   * Alignment stage ghosts Clips on the Canvas with it).
+   */
+  sheetUrl(characterId: string, kind: 'clip' | 'sequence', id: string): string;
 }
 
 /** Build a {@link WorkbenchApi} backed by the dev server's `/api` routes. */
@@ -114,5 +141,21 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
       );
       return body.color;
     },
+    readCharacterAlignment: (characterId) =>
+      call<CharacterAlignment>(`/characters/${characterId}/alignment`),
+    readDraftAlignment: (characterId, draftId) =>
+      call<AlignmentState>(`/characters/${characterId}/drafts/${draftId}/alignment`),
+    setPlacementOffset: (characterId, draftId, offset) =>
+      call<ClipDraft>(`/characters/${characterId}/drafts/${draftId}/alignment/offset`, {
+        method: 'POST',
+        body: JSON.stringify(offset),
+      }),
+    expandCanvas: (characterId, width, height) =>
+      call<ExpandCanvasResult>(`/characters/${characterId}/expand-canvas`, {
+        method: 'POST',
+        body: JSON.stringify({ width, height }),
+      }),
+    sheetUrl: (characterId, kind, id) =>
+      `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet`,
   };
 }

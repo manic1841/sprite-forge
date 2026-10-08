@@ -41,14 +41,35 @@ export type {
   ReadClipDraftOptions,
 } from './draft.js';
 
-export { commitDraft, forkAsset, inheritRepairReference } from './assets.js';
+export { commitDraft, forkAsset, inheritRepairReference, readAssetSheet } from './assets.js';
 export type {
   AssetMeta,
+  AssetSheet,
   ClipProvenance,
   CommittedAsset,
   CommitDraftOptions,
   ForkAssetOptions,
+  ReadAssetSheetOptions,
 } from './assets.js';
+
+export {
+  expandCanvas,
+  readCharacterAlignment,
+  readDraftAlignment,
+  setPlacementOffset,
+} from './alignment.js';
+export type {
+  AlignmentState,
+  AlignmentWarning,
+  AlignmentWarningCode,
+  CharacterAlignment,
+  CharacterScopedOptions,
+  ExpandCanvasOptions,
+  ExpandCanvasResult,
+  PlacementOffset,
+  ReadDraftAlignmentOptions,
+  SetPlacementOffsetOptions,
+} from './alignment.js';
 
 export {
   appendRepairOperation,
