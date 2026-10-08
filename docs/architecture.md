@@ -38,7 +38,7 @@ scanning. See [ADR-0003](./adr/0003-external-asset-store-discovered-by-scanning.
 
 ```text
 <store root>/
-├─ recordings/                  # raw inputs (read-only)
+├─ recordings/<recording-id>/   # raw inputs (read-only): source.gif + cuts.json
 ├─ characters/
 │  └─ <character-id>/
 │     ├─ canvas.json            # the shared Canvas / Anchor
@@ -55,7 +55,7 @@ A committed Asset folder holds the **contract artifacts** plus its **provenance*
 clips/<clip-id>/
 ├─ sheet.png        # baked strip, already aligned to the Character's Canvas
 ├─ meta.json        # frameWidth, frameHeight, frameCount, delaysMs, loop, anchor
-└─ provenance.json  # recording, segment, background, repair ref, placementOffset, derivedFrom?, params
+└─ provenance.json  # recordingId+hash, segment{cutId,start,end,speed}, background, repair ref, placementOffset, derivedFrom?, toolVersion
 ```
 
 `sheet.png` + `meta.json` are what the consumer ultimately sees (via the Manifest).
