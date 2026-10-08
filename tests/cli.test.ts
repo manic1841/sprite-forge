@@ -292,4 +292,58 @@ describe('forge CLI', () => {
       });
     });
   });
+
+  it('commit promotes a Draft and fork opens an Asset (round-trip)', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
+      await withStore(async (store) => {
+        const seed = [
+          ['ingest', '--store', store.root, '--source', source.path, '--id', 'mgba-2026-09'],
+          [
+            'create-character', '--store', store.root, '--id', 'hero',
+            '--width', '4', '--height', '6', '--anchor-x', '2', '--anchor-y', '6',
+          ],
+          [
+            'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+            '--action', 'add', '--id', 'walk', '--start', '0', '--end', '2',
+          ],
+          ['extract', '--store', store.root, '--character', 'hero', '--recording', 'mgba-2026-09', '--cut', 'walk'],
+        ];
+        for (const args of seed) {
+          expect((await forge(args)).code).toBe(0);
+        }
+
+        const committed = await forge([
+          'commit', '--store', store.root, '--character', 'hero', '--draft', 'walk', '--name', 'walk-run',
+        ]);
+        expect(committed.code).toBe(0);
+        expect(JSON.parse(committed.stdout)).toMatchObject({ kind: 'clip', id: 'walk-run' });
+
+        const scanned = await forge(['scan', '--store', store.root]);
+        expect(JSON.parse(scanned.stdout).characters[0].assets.map((a: { id: string }) => a.id)).toEqual([
+          'walk-run',
+        ]);
+
+        const forked = await forge([
+          'fork', '--store', store.root, '--character', 'hero', '--kind', 'clip', '--id', 'walk-run',
+        ]);
+        expect(forked.code).toBe(0);
+        expect(JSON.parse(forked.stdout)).toMatchObject({
+          derivedFrom: { kind: 'clip', id: 'walk-run' },
+        });
+
+        const recommitted = await forge([
+          'commit', '--store', store.root, '--character', 'hero', '--draft', 'walk-run', '--name', 'walk-run-2',
+        ]);
+        expect(recommitted.code).toBe(0);
+
+        const after = await forge(['scan', '--store', store.root]);
+        expect(JSON.parse(after.stdout).characters[0].assets.map((a: { id: string }) => a.id)).toEqual([
+          'walk-run',
+          'walk-run-2',
+        ]);
+        const validated = await forge(['validate', '--store', store.root]);
+        expect(validated.code).toBe(0);
+      });
+    });
+  });
 });
