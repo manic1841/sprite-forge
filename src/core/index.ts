@@ -28,6 +28,16 @@ export type {
   Segment,
 } from './segments.js';
 
+export { extractClipDraft, readClipDraft } from './draft.js';
+export type {
+  ClipDraft,
+  ClipDraftDescriptor,
+  DraftBackground,
+  DraftSegmentSnapshot,
+  ExtractClipDraftOptions,
+  ReadClipDraftOptions,
+} from './draft.js';
+
 export { ID_PATTERN, isValidId } from './ids.js';
 
 export { validateArtifact, validateStore } from './validate.js';
