@@ -55,7 +55,7 @@ A committed Asset folder holds the **contract artifacts** plus its **provenance*
 clips/<clip-id>/
 ├─ sheet.png        # baked strip, already aligned to the Character's Canvas
 ├─ meta.json        # frameWidth, frameHeight, frameCount, delaysMs, loop, anchor
-└─ provenance.json  # recording, segment, background, repair ref, derivedFrom?, params
+└─ provenance.json  # recording, segment, background, repair ref, placementOffset, derivedFrom?, params
 ```
 
 `sheet.png` + `meta.json` are what the consumer ultimately sees (via the Manifest).
