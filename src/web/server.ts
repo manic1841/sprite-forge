@@ -15,14 +15,19 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   addSegment,
+  appendRepairOperation,
   ForgeError,
   readClipDraft,
-  readClipDraftFrame,
+  readDraftRepair,
+  readDraftRepairFrame,
   readCutList,
   removeSegment,
+  sampleDraftRepairColor,
   scan,
   setSegmentRange,
+  undoRepairOperation,
 } from '../core/index.js';
+import type { RepairOperationInput } from '../core/index.js';
 
 /** One request to the workbench API, decoupled from Node's request object. */
 export interface ApiRequest {
@@ -53,7 +58,9 @@ export async function handleApiRequest(
   storeRoot: string,
   request: ApiRequest,
 ): Promise<ApiResponse> {
-  const { pathname } = new URL(request.url, 'http://workbench.local');
+  const url = new URL(request.url, 'http://workbench.local');
+  const { pathname } = url;
+  const params = url.searchParams;
   const method = request.method.toUpperCase();
   const segments = pathname.split('/').filter((part) => part.length > 0);
 
@@ -78,8 +85,39 @@ export async function handleApiRequest(
       }
       if (method === 'GET' && segments[5] === 'frames' && segments.length === 7) {
         const index = Number(decodeURIComponent(segments[6]!));
-        const frame = await readClipDraftFrame(storeRoot, { characterId, draftId, index });
+        // The Clip editor shows the repaired result: replay the script on read.
+        const frame = await readDraftRepairFrame(storeRoot, { characterId, draftId, index });
         return { status: 200, body: frame.data, contentType: frame.contentType };
+      }
+
+      // /api/characters/<c>/drafts/<d>/repair[/operations|/undo|/sample]
+      if (segments[5] === 'repair') {
+        if (method === 'GET' && segments.length === 6) {
+          return ok(await readDraftRepair(storeRoot, { characterId, draftId }));
+        }
+        if (method === 'POST' && segments[6] === 'operations' && segments.length === 7) {
+          const body = asRecord(request.body);
+          return ok(
+            await appendRepairOperation(storeRoot, {
+              characterId,
+              draftId,
+              operation: body as unknown as RepairOperationInput,
+            }),
+          );
+        }
+        if (method === 'POST' && segments[6] === 'undo' && segments.length === 7) {
+          return ok(await undoRepairOperation(storeRoot, { characterId, draftId }));
+        }
+        if (method === 'GET' && segments[6] === 'sample' && segments.length === 7) {
+          const color = await sampleDraftRepairColor(storeRoot, {
+            characterId,
+            draftId,
+            index: Number(params.get('frame') ?? '0'),
+            x: Number(params.get('x')),
+            y: Number(params.get('y')),
+          });
+          return ok({ color });
+        }
       }
     }
 

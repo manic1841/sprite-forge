@@ -50,6 +50,14 @@ import {
 import type { AssetKind, AssetRef } from './types.js';
 import { validateArtifact } from './validate.js';
 import { SPRITE_FORGE_VERSION } from './version.js';
+import {
+  applyRepairScriptToFrame,
+  copyRepairScript,
+  readRepairScript,
+  rehomeRepairScript,
+  type RepairFraming,
+  type RepairScript,
+} from './repair.js';
 
 /** The `meta.json` of a committed Clip or Sequence (format-spec §5). */
 export interface AssetMeta {
@@ -125,14 +133,23 @@ export async function commitDraft(
   const draft = await readClipDraft(root, { characterId, draftId });
   await assertIdFree(root, characterId, assetId);
 
-  const sheet = await tileFrames(root, draft, canvas);
+  // Commit replays the Draft's Repair script and bakes the **repaired** frames.
+  const script = await readRepairScript(root, { characterId, clipId: draftId });
+  const sheet = await tileFrames(root, draft, canvas, script);
+  // The Draft's script is re-homed onto the committed Asset id (the fork seam
+  // #24 opened); provenance points at the re-homed script.
+  const repairRel =
+    script.operations.length > 0 || draft.repair ? repairPath(characterId, assetId) : null;
+  if (script.operations.length > 0) {
+    await rehomeRepairScript(root, characterId, draftId, assetId);
+  }
   const meta: AssetMeta = {
     id: assetId,
     frameCount: draft.frameCount,
     delaysMs: [...draft.delaysMs],
     loop: draft.loop,
   };
-  const provenance = buildClipProvenance(characterId, assetId, draft);
+  const provenance = buildClipProvenance(characterId, draft, repairRel);
 
   const metaRel = assetMetaPath(characterId, kind, assetId);
   const provenanceRel = assetProvenancePath(characterId, kind, assetId);
@@ -213,6 +230,18 @@ export async function forkAsset(root: string, options: ForkAssetOptions): Promis
     ...(inheritedRepair ? { repair: inheritedRepair } : {}),
   };
 
+  // A fork copies the parent's Repair script so the new branch starts from it.
+  if (inheritedRepair) {
+    const copied = await copyRepairScript(root, characterId, id, draftId);
+    if (copied) {
+      descriptor.repairFraming = {
+        frameCount: parent.meta.frameCount,
+        width: canvas.width,
+        height: canvas.height,
+      };
+    }
+  }
+
   await writeClipDraft(root, descriptor);
   return { ...descriptor, dir: draftDir(characterId, draftId), frames: framePaths };
 }
@@ -222,15 +251,15 @@ export async function forkAsset(root: string, options: ForkAssetOptions): Promis
 /** Build the committed Clip's provenance (format-spec §6) from a Draft. */
 function buildClipProvenance(
   characterId: string,
-  assetId: string,
   draft: ClipDraftDescriptor,
+  repair: string | null,
 ): ClipProvenance {
   const provenance: ClipProvenance = {
     recordingId: draft.recordingId,
     recordingHash: draft.recordingHash,
     segment: { ...draft.segment },
     background: { ...draft.background },
-    repair: inheritRepairReference(characterId, assetId, draft.repair),
+    repair,
     derivedFrom: draft.derivedFrom ?? null,
     spriteForgeVersion: SPRITE_FORGE_VERSION,
   };
@@ -261,13 +290,24 @@ export function inheritRepairReference(
 }
 
 /** Tile the Draft's canvas-sized frames left to right into one PNG strip. */
-async function tileFrames(root: string, draft: ClipDraft, canvas: Canvas): Promise<Buffer> {
+async function tileFrames(
+  root: string,
+  draft: ClipDraft,
+  canvas: Canvas,
+  script: RepairScript,
+): Promise<Buffer> {
   const sheetWidth = draft.frameCount * canvas.width;
   const sheetHeight = canvas.height;
   const sheet = Buffer.alloc(sheetWidth * sheetHeight * 4);
 
   for (let index = 0; index < draft.frameCount; index++) {
-    const frame = await decodeCanvasFrame(root, draft.frames[index]!, canvas, draft.id);
+    const decoded = await decodeCanvasFrame(root, draft.frames[index]!, canvas, draft.id);
+    // Baked tiles are the repaired result: replay the script for this frame.
+    const frame = applyRepairScriptToFrame(
+      { width: canvas.width, height: canvas.height, data: new Uint8Array(decoded) },
+      index,
+      script,
+    ).data;
     const offsetX = index * canvas.width;
     for (let y = 0; y < canvas.height; y++) {
       for (let x = 0; x < canvas.width; x++) {
