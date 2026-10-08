@@ -89,7 +89,7 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     expandCanvas: async () => ({
       canvas: ALIGNMENT.canvas,
       rebakedClips: [],
-      pendingSequenceRebake: [],
+      rebakedSequences: [],
       repairWarnings: [],
     }),
     sheetUrl: (characterId, kind, id) =>

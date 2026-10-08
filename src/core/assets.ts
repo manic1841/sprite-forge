@@ -1,14 +1,16 @@
 /**
- * `assets` — commit a Draft into an immutable Asset, and fork an Asset.
+ * `assets` — commit Assets (a Draft into a Clip, or Clips into a Sequence), read
+ * them back, and fork them.
  *
- * **Commit** promotes a Draft (editable working state) into a named, immutable
- * Asset (GLOSSARY.md): it bakes the Draft's frames into a `sheet.png` strip and
- * writes the contract artifacts beside it (format-spec §1, §5, §6). The stored
- * sheet is authoritative and re-running never replaces it (ADR-0004); editing an
- * Asset means **forking** it (ADR-0002).
+ * **Commit** promotes editable working state into a named, immutable Asset
+ * (GLOSSARY.md): a **Clip** is baked from a Draft's frames, a **Sequence** is
+ * concatenated from an ordered list of committed Clips. Either way the baked
+ * `sheet.png` is authoritative and re-running never replaces it (ADR-0004);
+ * editing an Asset means **forking** it (ADR-0002).
  *
- * **Fork** opens a committed Asset as a new Draft. On commit, the new Asset's
- * provenance records its lineage (`derivedFrom`) and the original is kept.
+ * **Fork** opens a committed Asset as a new Draft (a Clip) or as its ordered Clip
+ * list (a Sequence). On commit, the new Asset's provenance records its lineage
+ * (`derivedFrom`) and the original is kept.
  *
  * Frame size is **always** the Character's Canvas (Rule 3.2): a committed Asset
  * stores no width or height, and the sheet is `frameCount` canvas-sized frames
@@ -106,8 +108,62 @@ export interface CommitDraftOptions {
   draftId: string;
   /** The new Asset's id (its name); also the folder name. */
   assetId: string;
-  /** The Asset kind; defaults to `clip`. Sequence commit is #29. */
+  /**
+   * The Asset kind a Draft commits to. A Draft bakes into a **Clip**; a Sequence
+   * is committed from an ordered Clip list via {@link commitSequence}. Passing
+   * `sequence` is a hard error that names the right verb.
+   */
   kind?: AssetKind;
+}
+
+/** The `provenance.json` of a committed Sequence (format-spec §7). */
+export interface SequenceProvenance {
+  /** The ordered source Clip ids, concatenated end to end. */
+  clips: string[];
+  /** The forked-from Asset, or null. */
+  derivedFrom: AssetRef | null;
+  spriteForgeVersion: string;
+}
+
+/** A committed Sequence as returned by {@link commitSequence}. */
+export interface CommittedSequence {
+  kind: 'sequence';
+  id: string;
+  /** Store-relative POSIX directory. */
+  dir: string;
+  meta: AssetMeta;
+  provenance: SequenceProvenance;
+}
+
+/** Inputs for {@link commitSequence}. */
+export interface CommitSequenceOptions {
+  /** The Character that owns the source Clips and the new Sequence. */
+  characterId: string;
+  /** The new Sequence's id (its name); also the folder name. */
+  sequenceId: string;
+  /**
+   * The **ordered** source Clip ids, concatenated end to end (Rule 7.1). There is
+   * no per-clip offset and no repeat count — a Clip that plays twice is listed twice.
+   */
+  clips: string[];
+  /** The forked-from Asset to record (`derivedFrom`); omitted means `null`. */
+  derivedFrom?: AssetRef;
+}
+
+/**
+ * The editable state a Sequence fork yields: the parent's ordered Clip list,
+ * which a front end edits and re-concatenates by calling {@link commitSequence}
+ * with this {@link SequenceFork.derivedFrom} (ADR-0002). A Sequence has no frame
+ * Draft — its recipe *is* the ordered Clip list (Rule 7.2).
+ */
+export interface SequenceFork {
+  kind: 'sequence';
+  /** The forked-from Sequence id. */
+  id: string;
+  /** The parent's ordered source Clip ids, to edit and re-concatenate. */
+  clips: string[];
+  /** The lineage to record on the next commit. */
+  derivedFrom: AssetRef;
 }
 
 /**
@@ -128,7 +184,7 @@ export async function commitDraft(
   assertValidId(characterId, 'character', 'characterId');
   assertValidId(draftId, 'draft', 'draftId');
   assertValidId(assetId, 'asset', 'assetId');
-  assertKindImplemented(kind);
+  assertDraftKind(kind);
 
   const canvas = await readCanvas(root, characterId);
   const draft = await readClipDraft(root, { characterId, draftId });
@@ -167,34 +223,181 @@ export async function commitDraft(
   return { kind, id: assetId, dir: assetDir(characterId, kind, assetId), meta, provenance };
 }
 
+/**
+ * Commit a Sequence: concatenate an ordered list of committed Clips into one
+ * immutable Asset (format-spec §7, GLOSSARY *Sequence*).
+ *
+ * A Sequence is **pure concatenation** (Rule 7.1): the Clips play back to back in
+ * the order listed, with no per-clip offset and no repeat count. Its `sheet.png`
+ * is the source Clips' strips tiled end to end, its `meta.json` is the sum of
+ * their frame counts with their per-frame delays concatenated, and its
+ * `provenance.json` lists the source Clip ids in order. Ids are shared with Clips,
+ * so an id held by either kind is refused; a committed Sequence is immutable.
+ */
+export async function commitSequence(
+  root: string,
+  options: CommitSequenceOptions,
+): Promise<CommittedSequence> {
+  const { characterId, sequenceId, clips, derivedFrom } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(sequenceId, 'asset', 'sequenceId');
+  if (!Array.isArray(clips) || clips.length === 0) {
+    throw new StoreError('A Sequence needs at least one source Clip id.');
+  }
+  for (const clipId of clips) {
+    assertValidId(clipId, 'clip', 'a source clip id');
+  }
+
+  const canvas = await readCanvas(root, characterId);
+  await assertIdFree(root, characterId, sequenceId);
+
+  // Read each source Clip in order: missing or non-Clip ids are hard errors.
+  const sources: Array<{ id: string; meta: AssetMeta }> = [];
+  for (const clipId of clips) {
+    const clip = await readCommittedClip(root, characterId, clipId);
+    sources.push({ id: clipId, meta: clip.meta });
+  }
+
+  const meta = deriveSequenceMeta(sequenceId, sources.map((source) => source.meta));
+  const provenance: SequenceProvenance = {
+    clips: [...clips],
+    derivedFrom: derivedFrom ?? null,
+    spriteForgeVersion: SPRITE_FORGE_VERSION,
+  };
+  const sheet = await concatenateClipSheets(root, characterId, sources, canvas);
+
+  const metaRel = assetMetaPath(characterId, 'sequence', sequenceId);
+  const provenanceRel = assetProvenancePath(characterId, 'sequence', sequenceId);
+  validateArtifact('asset-meta', meta, { artifact: metaRel, folderId: sequenceId });
+  validateArtifact('sequence-provenance', provenance, { artifact: provenanceRel });
+
+  await writeBinaryFile(root, sheetPath(characterId, 'sequence', sequenceId), sheet);
+  await writeJsonFile(root, metaRel, meta);
+  await writeJsonFile(root, provenanceRel, provenance);
+
+  return {
+    kind: 'sequence',
+    id: sequenceId,
+    dir: assetDir(characterId, 'sequence', sequenceId),
+    meta,
+    provenance,
+  };
+}
+
+/**
+ * Read a committed Sequence: its validated meta and provenance, plus the ordered
+ * Clip ids. Broken provenance (a schema or contract violation) is a hard error.
+ */
+export async function readSequence(
+  root: string,
+  options: { characterId: string; sequenceId: string },
+): Promise<CommittedSequence> {
+  const { characterId, sequenceId } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(sequenceId, 'asset', 'sequenceId');
+  const { meta, provenance } = await readCommittedSequence(root, characterId, sequenceId);
+  return {
+    kind: 'sequence',
+    id: sequenceId,
+    dir: assetDir(characterId, 'sequence', sequenceId),
+    meta,
+    provenance,
+  };
+}
+
+/**
+ * Regenerate a committed Sequence's `sheet.png` from its provenance (Rule 7.2).
+ *
+ * Clips are immutable, so the concatenation is deterministic; this is used by the
+ * explicit expand-canvas re-bake (ADR-0006) to re-place a Sequence's frames after
+ * the Character's Canvas has grown. `meta.json` and `provenance.json` are
+ * unchanged — only the pixels move.
+ */
+export async function rebakeSequenceSheet(
+  root: string,
+  options: { characterId: string; sequenceId: string; canvas?: Canvas },
+): Promise<void> {
+  const { characterId, sequenceId } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(sequenceId, 'asset', 'sequenceId');
+  // A caller mid-expand passes the new Canvas before it is written to disk.
+  const canvas = options.canvas ?? (await readCanvas(root, characterId));
+  const { provenance } = await readCommittedSequence(root, characterId, sequenceId);
+
+  const sources: Array<{ id: string; meta: AssetMeta }> = [];
+  for (const clipId of provenance.clips) {
+    const clip = await readCommittedClip(root, characterId, clipId);
+    sources.push({ id: clipId, meta: clip.meta });
+  }
+  const sheet = await concatenateClipSheets(root, characterId, sources, canvas);
+  await writeBinaryFile(root, sheetPath(characterId, 'sequence', sequenceId), sheet);
+}
+
+/**
+ * Fork a Sequence: yield its ordered Clip list to edit and re-concatenate.
+ *
+ * A Sequence has no frame Draft — its recipe is the ordered Clip list (Rule 7.2)
+ * — so forking yields that list plus the lineage to record. Re-commit the edited
+ * list with {@link commitSequence}, passing `derivedFrom` as `{kind:"sequence", id}`;
+ * the parent is never modified.
+ */
+export async function forkSequence(
+  root: string,
+  options: { characterId: string; id: string },
+): Promise<SequenceFork> {
+  const { characterId, id } = options;
+  const parent = await readSequence(root, { characterId, sequenceId: id });
+  return {
+    kind: 'sequence',
+    id,
+    clips: [...parent.provenance.clips],
+    derivedFrom: { kind: 'sequence', id },
+  };
+}
+
 /** Inputs for {@link forkAsset}. */
 export interface ForkAssetOptions {
-  /** The Character that owns the Asset and the new Draft. */
+  /** The Character that owns the Asset and the fork. */
   characterId: string;
   /** Whether the existing Asset is a Clip or a Sequence. Required: ids are shared. */
   kind: AssetKind;
   /** The existing Asset to open. */
   id: string;
-  /** The new Draft id; defaults to the parent Asset id. */
+  /** The new Draft id for a Clip fork; defaults to the parent Asset id. */
   draftId?: string;
 }
 
 /**
  * Fork an existing Asset: open it as a new Draft (ADR-0002).
  *
- * The committed Asset is read, validated and **sliced back** into canvas-sized
- * frames; its Segment, background, Recording, delays, loop, `placementOffset` and
- * Repair-script reference are inherited so the new branch starts from it. The
- * parent is never modified. On the following commit the new Asset records its
- * `derivedFrom` lineage.
+ * A **Clip** is read, validated and **sliced back** into canvas-sized frames; its
+ * Segment, background, Recording, delays, loop, `placementOffset` and
+ * Repair-script reference are inherited so the new branch starts from it. A
+ * **Sequence** has no frame Draft, so its fork yields the ordered Clip list to
+ * edit and re-concatenate ({@link SequenceFork}). The parent is never modified. On
+ * the following commit the new Asset records its `derivedFrom` lineage.
  */
-export async function forkAsset(root: string, options: ForkAssetOptions): Promise<ClipDraft> {
+export function forkAsset(
+  root: string,
+  options: ForkAssetOptions & { kind: 'clip' },
+): Promise<ClipDraft>;
+export function forkAsset(
+  root: string,
+  options: ForkAssetOptions & { kind: 'sequence' },
+): Promise<SequenceFork>;
+export async function forkAsset(
+  root: string,
+  options: ForkAssetOptions,
+): Promise<ClipDraft | SequenceFork> {
   const { characterId, kind, id } = options;
   const draftId = options.draftId ?? id;
   assertValidId(characterId, 'character', 'characterId');
   assertValidId(id, 'asset', 'id');
   assertValidId(draftId, 'draft', 'draftId');
-  assertKindImplemented(kind);
+
+  if (kind === 'sequence') {
+    return forkSequence(root, { characterId, id });
+  }
 
   const canvas = await readCanvas(root, characterId);
   const parent = await readCommittedClip(root, characterId, id);
@@ -510,13 +713,93 @@ async function assertIdFree(root: string, characterId: string, assetId: string):
   }
 }
 
-/** Sequence commit/fork is in scope conceptually but tracked by ticket #29. */
-function assertKindImplemented(kind: AssetKind): void {
+/** A Draft bakes into a Clip; a Sequence is built from Clips, not a Draft. */
+function assertDraftKind(kind: AssetKind): void {
   if (kind !== 'clip') {
     throw new StoreError(
-      `Committing or forking a ${kind} is not implemented yet; Sequence work is tracked by ticket #29.`,
+      `A Draft commits into a Clip; to commit a Sequence, pass its ordered Clip ids to ` +
+        `commitSequence (a Sequence has no frame Draft).`,
     );
   }
+}
+
+/** Derive a Sequence's meta (§5) from its source Clips: sum frames, concat delays. */
+function deriveSequenceMeta(id: string, clipMetas: AssetMeta[]): AssetMeta {
+  const frameCount = clipMetas.reduce((total, meta) => total + meta.frameCount, 0);
+  // Each source's per-frame delays (expanding a uniform-1 value first, Rule 5.1),
+  // concatenated, so the result is exactly frameCount long.
+  const delaysMs = clipMetas.flatMap((meta) => expandDelays(meta.delaysMs, meta.frameCount));
+  const uniform = delaysMs.every((delay) => delay === delaysMs[0]);
+  return { id, frameCount, delaysMs: uniform ? [delaysMs[0]!] : delaysMs, loop: true };
+}
+
+/** Tile the source Clips' baked strips end to end into one canvas-tall PNG strip. */
+async function concatenateClipSheets(
+  root: string,
+  characterId: string,
+  sources: Array<{ id: string; meta: AssetMeta }>,
+  canvas: Canvas,
+): Promise<Buffer> {
+  const totalFrames = sources.reduce((total, source) => total + source.meta.frameCount, 0);
+  const sheetWidth = totalFrames * canvas.width;
+  const out = Buffer.alloc(sheetWidth * canvas.height * 4);
+  let frameOffset = 0;
+  for (const source of sources) {
+    const sheetRel = sheetPath(characterId, 'clip', source.id);
+    if (!(await pathExists(root, sheetRel))) {
+      throw new StoreError(`Source Clip "${source.id}" has no sheet.png (${sheetRel}).`);
+    }
+    const { data, info } = await sharp(await readBinaryFile(root, sheetRel))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const expectedWidth = source.meta.frameCount * canvas.width;
+    if (info.width !== expectedWidth || info.height !== canvas.height) {
+      throw new StoreError(
+        `Source Clip "${source.id}" sheet is ${info.width}x${info.height}; expected ` +
+          `${expectedWidth}x${canvas.height} (frameCount × Canvas).`,
+      );
+    }
+    const offsetX = frameOffset * canvas.width;
+    for (let y = 0; y < canvas.height; y++) {
+      const from = y * info.width * 4;
+      const to = (y * sheetWidth + offsetX) * 4;
+      out.set(data.subarray(from, from + info.width * 4), to);
+    }
+    frameOffset += source.meta.frameCount;
+  }
+  return sharp(out, { raw: { width: sheetWidth, height: canvas.height, channels: 4 } })
+    .png()
+    .toBuffer();
+}
+
+/** Read and validate a committed Sequence's meta and provenance. */
+async function readCommittedSequence(
+  root: string,
+  characterId: string,
+  sequenceId: string,
+): Promise<{ meta: AssetMeta; provenance: SequenceProvenance }> {
+  const dir = sequenceDir(characterId, sequenceId);
+  if (!(await pathExists(root, dir))) {
+    throw new StoreError(
+      `No committed Sequence "${sequenceId}" for Character "${characterId}" (${dir} is missing).`,
+    );
+  }
+  const metaRel = assetMetaPath(characterId, 'sequence', sequenceId);
+  const provenanceRel = assetProvenancePath(characterId, 'sequence', sequenceId);
+  if (!(await pathExists(root, metaRel))) {
+    throw new StoreError(`Committed Sequence "${sequenceId}" has no meta.json (${metaRel}).`);
+  }
+  if (!(await pathExists(root, provenanceRel))) {
+    throw new StoreError(
+      `Committed Sequence "${sequenceId}" has no provenance.json (${provenanceRel}).`,
+    );
+  }
+  const meta = await readJsonFile(root, metaRel);
+  validateArtifact('asset-meta', meta, { artifact: metaRel, folderId: sequenceId });
+  const provenance = await readJsonFile(root, provenanceRel);
+  validateArtifact('sequence-provenance', provenance, { artifact: provenanceRel });
+  return { meta: meta as AssetMeta, provenance: provenance as SequenceProvenance };
 }
 
 /** Read and validate the Character's Canvas; its frame size is the Asset's too. */
