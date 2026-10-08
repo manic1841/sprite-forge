@@ -41,15 +41,28 @@ export type {
   ReadClipDraftOptions,
 } from './draft.js';
 
-export { commitDraft, forkAsset, inheritRepairReference, readAssetSheet } from './assets.js';
+export {
+  commitDraft,
+  commitSequence,
+  forkAsset,
+  forkSequence,
+  inheritRepairReference,
+  readAssetSheet,
+  readSequence,
+  rebakeSequenceSheet,
+} from './assets.js';
 export type {
   AssetMeta,
   AssetSheet,
   ClipProvenance,
   CommittedAsset,
+  CommittedSequence,
   CommitDraftOptions,
+  CommitSequenceOptions,
   ForkAssetOptions,
   ReadAssetSheetOptions,
+  SequenceFork,
+  SequenceProvenance,
 } from './assets.js';
 
 export {

@@ -440,12 +440,14 @@ describe('forkAsset', () => {
     });
   });
 
-  it('reports Sequence commit/fork as an explicit gap', async () => {
+  it('refuses to commit a Draft as a Sequence (Sequences come from Clips, not a Draft)', async () => {
     await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
       await withStore(async (store) => {
         await commitStandardClip(gif, store);
         await extract(store);
 
+        // A Sequence is committed from an ordered Clip list via `commitSequence`;
+        // `commitDraft` only ever bakes a Draft into a Clip.
         await expect(
           commitDraft(store.root, {
             characterId: CHARACTER_ID,
@@ -453,10 +455,10 @@ describe('forkAsset', () => {
             assetId: 'combo',
             kind: 'sequence',
           }),
-        ).rejects.toThrow(/not implemented/i);
+        ).rejects.toThrow(/commitSequence/);
         await expect(
-          forkAsset(store.root, { characterId: CHARACTER_ID, kind: 'sequence', id: ASSET_ID }),
-        ).rejects.toThrow(/not implemented/i);
+          forkAsset(store.root, { characterId: CHARACTER_ID, kind: 'sequence', id: 'missing' }),
+        ).rejects.toThrow(StoreError);
       });
     });
   });

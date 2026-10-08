@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url';
 import {
   addSegment,
   commitDraft,
+  commitSequence,
   createCharacter,
   extractClipDraft,
   ForgeError,
@@ -46,9 +47,11 @@ Usage:
        --tolerance <n>       Per-channel key tolerance (default: 24)
        --no-loop             Do not loop the Draft
   forge commit           --store <path> --character <id> --draft <id> --name <asset-id> [--kind <clip>]
-                                                                     Commit a Draft into an immutable Asset.
-  forge fork             --store <path> --character <id> --kind <clip> --id <asset-id> [--draft <id>]
-                                                                     Open a committed Asset as a new Draft.`;
+                                                                     Commit a Draft into an immutable Clip.
+  forge commit           --store <path> --character <id> --name <sequence-id> --kind sequence --clips <a,b,c> [--fork-from <seq-id>]
+                                                                     Concatenate committed Clips into a Sequence.
+  forge fork             --store <path> --character <id> --kind <clip|sequence> --id <asset-id> [--draft <id>]
+                                                                     Open a Clip as a Draft, or a Sequence as its ordered Clip list.`;
 
 /** Run one CLI invocation. Returns the process exit code. */
 export async function runCli(argv: string[]): Promise<number> {
@@ -75,6 +78,8 @@ export async function runCli(argv: string[]): Promise<number> {
   let noLoop: boolean | undefined;
   let name: string | undefined;
   let kind: string | undefined;
+  let clips: string | undefined;
+  let forkFrom: string | undefined;
   try {
     const { values } = parseArgs({
       args: rest,
@@ -100,6 +105,8 @@ export async function runCli(argv: string[]): Promise<number> {
         'no-loop': { type: 'boolean', default: false },
         name: { type: 'string' },
         kind: { type: 'string' },
+        clips: { type: 'string' },
+        'fork-from': { type: 'string' },
       },
     });
     store = values.store;
@@ -123,6 +130,8 @@ export async function runCli(argv: string[]): Promise<number> {
     noLoop = values['no-loop'];
     name = values.name;
     kind = values.kind;
+    clips = values.clips;
+    forkFrom = values['fork-from'];
   } catch (error) {
     return fail((error as Error).message);
   }
@@ -153,7 +162,7 @@ export async function runCli(argv: string[]): Promise<number> {
         noLoop: noLoop === true,
       });
     case 'commit':
-      return runCommit(store, { character, draft, name, kind });
+      return runCommit(store, { character, draft, name, kind, clips, forkFrom });
     case 'fork':
       return runFork(store, { character, kind, id, draft });
     default:
@@ -375,16 +384,17 @@ interface CommitArgs {
   draft?: string;
   name?: string;
   kind?: string;
+  /** Comma-separated source Clip ids; required when `--kind sequence`. */
+  clips?: string;
+  /** The Sequence id to record `derivedFrom` for (a Sequence fork). */
+  forkFrom?: string;
 }
 
-/** `forge commit` — promote a Draft into an immutable Asset. */
+/** `forge commit` — promote a Draft into a Clip, or Clips into a Sequence. */
 async function runCommit(store: string, args: CommitArgs): Promise<number> {
-  const { character, draft, name, kind } = args;
+  const { character, draft, name, kind, clips, forkFrom } = args;
   if (!character) {
     return fail('--character <character-id> is required for commit');
-  }
-  if (!draft) {
-    return fail('--draft <draft-id> is required for commit');
   }
   if (!name) {
     return fail('--name <asset-id> is required for commit');
@@ -392,6 +402,34 @@ async function runCommit(store: string, args: CommitArgs): Promise<number> {
   const parsedKind = assetKind(kind);
   if (kind !== undefined && parsedKind === undefined) {
     return fail(`unknown --kind "${kind}" (expected clip or sequence)`);
+  }
+
+  if (parsedKind === 'sequence') {
+    const sourceClips = (clips ?? '')
+      .split(',')
+      .map((clip) => clip.trim())
+      .filter((clip) => clip.length > 0);
+    if (sourceClips.length === 0) {
+      return fail('--clips <a,b,c> is required for commit --kind sequence');
+    }
+    try {
+      const committed = await commitSequence(store, {
+        characterId: character,
+        sequenceId: name,
+        clips: sourceClips,
+        ...(forkFrom !== undefined
+          ? { derivedFrom: { kind: 'sequence' as const, id: forkFrom } }
+          : {}),
+      });
+      process.stdout.write(`${JSON.stringify(committed, null, 2)}\n`);
+      return 0;
+    } catch (error) {
+      return failForgeError(error);
+    }
+  }
+
+  if (!draft) {
+    return fail('--draft <draft-id> is required for commit');
   }
   try {
     const committed = await commitDraft(store, {
@@ -432,12 +470,15 @@ async function runFork(store: string, args: ForkArgs): Promise<number> {
     return fail(`unknown --kind "${kind}" (expected clip or sequence)`);
   }
   try {
-    const opened = await forkAsset(store, {
-      characterId: character,
-      kind: parsedKind,
-      id,
-      ...(draft !== undefined ? { draftId: draft } : {}),
-    });
+    const opened =
+      parsedKind === 'sequence'
+        ? await forkAsset(store, { characterId: character, kind: 'sequence', id })
+        : await forkAsset(store, {
+            characterId: character,
+            kind: 'clip',
+            id,
+            ...(draft !== undefined ? { draftId: draft } : {}),
+          });
     process.stdout.write(`${JSON.stringify(opened, null, 2)}\n`);
     return 0;
   } catch (error) {

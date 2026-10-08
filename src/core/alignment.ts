@@ -19,6 +19,7 @@
  */
 
 import sharp from 'sharp';
+import { rebakeSequenceSheet } from './assets.js';
 import type { RgbaImage } from './background.js';
 import type { Canvas } from './character.js';
 import { readClipDraft, writeClipDraft, type ClipDraft } from './draft.js';
@@ -105,11 +106,12 @@ export interface ExpandCanvasResult {
   /** The committed Clip ids that were re-baked to the new Canvas. */
   rebakedClips: string[];
   /**
-   * Committed Sequence ids that need re-baking. Sequences have no committed form
-   * yet (ticket #29), so this is the explicit seam that ticket fills; it is never
+   * The committed Sequence ids that were re-baked to the new Canvas. A Sequence's
+   * frames are the concatenation of its source Clips' frames, so re-placing the
+   * Clips (above) and re-concatenating keeps the Sequence correct; it is never
    * silently skipped.
    */
-  pendingSequenceRebake: string[];
+  rebakedSequences: string[];
   /**
    * Repair-validity warnings for the Character's committed Clips: an expand moves
    * the pixels a committed Clip's Repair script was authored against. Draft
@@ -184,8 +186,9 @@ export async function readDraftAlignment(
  * Asset, growing the Canvas is a pure translation of the existing content: every
  * committed Clip's sheet frames and every Draft's frames are moved by
  * `((newWidth - oldWidth)/2, newHeight - oldHeight)`, with content otherwise
- * unchanged. Old sheets are overwritten — the store is working data, and git is
- * the history.
+ * unchanged, and every committed Sequence is re-concatenated from its re-placed
+ * Clips. Old sheets are overwritten — the store is working data, and git is the
+ * history.
  */
 export async function expandCanvas(
   root: string,
@@ -248,13 +251,18 @@ export async function expandCanvas(
     await replaceDraftFrames(root, characterId, draftId, old, canvas, dx, dy);
   }
 
-  // 3. Sequences have no committed form yet (#29); surface the gap, never skip it.
-  const pendingSequenceRebake = await listDirectories(root, sequencesDir(characterId));
+  // 3. Re-bake every committed Sequence now its source Clips have been re-placed:
+  //    a Sequence's sheet is the concatenation of its Clips' (now expanded) strips.
+  const rebakedSequences: string[] = [];
+  for (const sequenceId of await listDirectories(root, sequencesDir(characterId))) {
+    await rebakeSequenceSheet(root, { characterId, sequenceId, canvas });
+    rebakedSequences.push(sequenceId);
+  }
 
   // The Canvas is written last, so a failed re-bake leaves the old Canvas intact.
   await writeJsonFile(root, canvasPath(characterId), canvas);
 
-  return { canvas, rebakedClips, pendingSequenceRebake, repairWarnings };
+  return { canvas, rebakedClips, rebakedSequences, repairWarnings };
 }
 
 /** Read every Clip/Draft offset for a Character — the Alignment stage's view model. */
