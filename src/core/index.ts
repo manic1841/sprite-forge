@@ -11,6 +11,14 @@ export type { CharacterTree, StoreTree } from './scan.js';
 export { ingestRecording } from './ingest.js';
 export type { IngestRecordingOptions, IngestedRecording } from './ingest.js';
 
+export { createCharacter } from './character.js';
+export type {
+  Canvas,
+  CanvasAnchor,
+  CreateCharacterOptions,
+  CreatedCharacter,
+} from './character.js';
+
 export { ID_PATTERN, isValidId } from './ids.js';
 
 export { validateArtifact, validateStore } from './validate.js';

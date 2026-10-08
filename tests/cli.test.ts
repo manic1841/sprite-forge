@@ -99,4 +99,58 @@ describe('forge CLI', () => {
       });
     });
   });
+
+  it('create-character writes a Character that scan then lists', async () => {
+    await withStore(async (store) => {
+      const result = await forge([
+        'create-character',
+        '--store',
+        store.root,
+        '--id',
+        'hero',
+        '--width',
+        '60',
+        '--height',
+        '84',
+        '--anchor-x',
+        '30',
+        '--anchor-y',
+        '84',
+      ]);
+
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        id: 'hero',
+        canvas: { width: 60, height: 84, anchor: { x: 30, y: 84 } },
+      });
+
+      const listed = await forge(['scan', '--store', store.root]);
+      expect(JSON.parse(listed.stdout).characters.map((c: { id: string }) => c.id)).toEqual([
+        'hero',
+      ]);
+    });
+  });
+
+  it('create-character fails hard on a broken Anchor', async () => {
+    await withStore(async (store) => {
+      const result = await forge([
+        'create-character',
+        '--store',
+        store.root,
+        '--id',
+        'hero',
+        '--width',
+        '61',
+        '--height',
+        '84',
+        '--anchor-x',
+        '30',
+        '--anchor-y',
+        '84',
+      ]);
+
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).toMatch(/even integer/i);
+    });
+  });
 });
