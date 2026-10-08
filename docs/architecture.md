@@ -21,7 +21,7 @@ Recording ─▶ (extract Segment) ─▶ Clip ─▶ (concatenate) ─▶ Seque
 | 2 | **Extract** | Select a Segment — a half-open frame range — by hand, frame-accurately. |
 | 3 | **De-background** | Colour-key the corner-sampled background colour to RGBA. |
 | 4 | **Crop + align** | Crop to the union bounds, then place the frames on the Character's shared Canvas via the Anchor. |
-| 5 | **Repair** | Apply the Clip's Mask (brush/eyedropper edits). |
+| 5 | **Repair** | Replay the Clip's Repair script (brush/eyedropper edits). |
 | 6 | **Compose** | Concatenate Clips into a Sequence. |
 | 7 | **Commit** | Promote a Draft into an immutable, named Asset. |
 | 8 | **Export** | Gather an Asset subset for a `(Character, target)` into a Manifest plus sheets. |
@@ -43,7 +43,7 @@ scanning. See [ADR-0003](./adr/0003-external-asset-store-discovered-by-scanning.
 │  └─ <character-id>/
 │     ├─ canvas.json            # the shared Canvas / Anchor
 │     ├─ drafts/<draft-id>/     # editable, not-yet-committed work
-│     ├─ masks/<clip-id>/       # Repair sidecars (input, not asset content)
+│     ├─ repairs/<clip-id>/     # Repair scripts (input, not asset content)
 │     ├─ clips/<clip-id>/       # committed Clip assets
 │     └─ sequences/<seq-id>/    # committed Sequence assets
 └─ exports/<target>/            # Manifest + sheets for a consumer
@@ -55,7 +55,7 @@ A committed Asset folder holds the **contract artifacts** plus its **provenance*
 clips/<clip-id>/
 ├─ sheet.png        # baked strip, already aligned to the Character's Canvas
 ├─ meta.json        # frameWidth, frameHeight, frameCount, delaysMs, loop, anchor
-└─ provenance.json  # recording, segment, background, mask ref, derivedFrom?, params
+└─ provenance.json  # recording, segment, background, repair ref, derivedFrom?, params
 ```
 
 `sheet.png` + `meta.json` are what the consumer ultimately sees (via the Manifest).
@@ -71,22 +71,26 @@ clips/<clip-id>/
   provenance records `derivedFrom` pointing at the Asset it came from. The original is
   kept. See [ADR-0002](./adr/0002-immutable-assets-fork-to-edit.md).
 
-## Mask
+## Repair script
 
-- There is **one Mask per editable Clip state** — the accumulation of that Clip's
-  Repair edits. Forking copies the parent's Mask so the new branch starts from it.
-- Masks live under `characters/<id>/masks/<clip-id>/`, as an **input sidecar**, not as
-  part of a committed Asset; the Asset's provenance points at its Mask.
-- ⚠️ **Validity.** A Mask is pixel-coordinate-valid only for the *same frames and the
-  same Canvas alignment*. Changing a Clip's Segment or re-aligning the Canvas can
-  invalidate an existing Mask; the tool must warn rather than silently misapply it.
-  (Alignment itself is settled in ticket #6.)
+- There is **one Repair script per editable Clip state** — the ordered accumulation
+  of that Clip's Repair operations. Forking copies the parent's script so the new
+  branch starts from it.
+- A Repair script is a list of operations (`erase-rect`, `erase-brush`, `paint-brush`),
+  each tied to a frame range, so the same edit can target one frame or a whole span;
+  re-running replays them. Rectangular erase is one operation kind, not a separate
+  mechanism. It lives under `characters/<id>/repairs/<clip-id>/repair.json` as an
+  **input sidecar**, not part of a committed Asset; the Asset's provenance points at it.
+- ⚠️ **Validity.** Repair operations are pixel-coordinate-valid only for the *same
+  frames and the same Canvas alignment*. Changing a Clip's Segment or re-aligning the
+  Canvas can invalidate an existing Repair script; the tool must warn rather than
+  silently misapply it. (Alignment itself is settled in ticket #6.)
 
 ## Reproducibility
 
 A committed Asset is a **baked snapshot**: the stored `sheet.png` is authoritative,
 and re-running does not replace it. Reproducibility is carried by the provenance
-sidecar (Recording + Segment + settings + Mask reference), so any run can be
+sidecar (Recording + Segment + settings + Repair-script reference), so any run can be
 re-executed and traced — but because Repair is human, the edited result must be
 stored, not regenerated. See
 [ADR-0004](./adr/0004-baked-assets-with-provenance-sidecars.md).

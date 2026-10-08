@@ -27,10 +27,9 @@ Editing a Clip's de-backgrounded frames by hand with a brush and eyedropper —
 painting transparent to erase, or painting a picked colour to patch.
 _Avoid_: patch, retouch, cleanup
 
-**Mask**:
-The persisted overlay that records a Clip's Repair edits and is re-applied on every
-run.
-_Avoid_: patch, layer
+**Repair script**:
+The persisted, ordered list of Repair operations for a Clip, replayed on every run.
+_Avoid_: mask, patch, layer
 
 **Commit**:
 The act of promoting a Draft into an immutable, named Asset.
@@ -41,8 +40,8 @@ The act of starting a new Draft from an existing Asset and recording its lineage
 _Avoid_: copy, clone, variant
 
 **Provenance**:
-The record of how an Asset was made — its Recording, Segment, settings, and Mask —
-kept beside the Asset so it can be reproduced and traced.
+The record of how an Asset was made — its Recording, Segment, settings, and Repair
+script — kept beside the Asset so it can be reproduced and traced.
 _Avoid_: metadata
 
 ## Assets
