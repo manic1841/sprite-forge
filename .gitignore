@@ -2,3 +2,9 @@
 discussions/
 
 .vscode/
+
+# Node build artifacts
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
