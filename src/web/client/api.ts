@@ -12,6 +12,9 @@ import type {
   ClipDraft,
   CutList,
   ExpandCanvasResult,
+  ExportBindings,
+  ExportResult,
+  Facing,
   PlacementOffset,
   RepairOperationInput,
   RepairState,
@@ -81,6 +84,24 @@ export interface WorkbenchApi {
    * Alignment stage ghosts Clips on the Canvas with it).
    */
   sheetUrl(characterId: string, kind: 'clip' | 'sequence', id: string): string;
+  /** Run an Export: gather an Asset subset into a closed Manifest plus sheets. */
+  exportCharacter(
+    characterId: string,
+    target: string,
+    request: ExportRequest,
+  ): Promise<ExportResult>;
+  /** Read an existing Export's live, validated Manifest (the Export stage). */
+  readManifest(target: string): Promise<ExportResult>;
+}
+
+/** The Export stage's inputs; the server passes them straight to `exportCharacter`. */
+export interface ExportRequest {
+  animations?: string[];
+  bindings: ExportBindings;
+  situations?: string[];
+  flipsFacing?: string[];
+  authoredFacing?: Facing;
+  exportedAt?: string;
 }
 
 /** Build a {@link WorkbenchApi} backed by the dev server's `/api` routes. */
@@ -157,5 +178,11 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
       }),
     sheetUrl: (characterId, kind, id) =>
       `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet`,
+    exportCharacter: (characterId, target, request) =>
+      call<ExportResult>(`/characters/${characterId}/exports/${target}`, {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }),
+    readManifest: (target) => call<ExportResult>(`/exports/${target}/manifest`),
   };
 }

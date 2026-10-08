@@ -6,9 +6,17 @@
 
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
+import {
+  addSegment,
+  commitDraft,
+  createCharacter,
+  extractClipDraft,
+  ingestRecording,
+} from '../src/core/index.js';
 import { handleApiRequest } from '../src/web/server.js';
 import type { StoreFixture } from './harness.js';
 import { withStore } from './harness.js';
+import { withSyntheticGif } from './synthetic-gif.js';
 
 const RECORDING_ID = 'mgba-2026-09';
 const CUTS_PATH = `recordings/${RECORDING_ID}/cuts.json`;
@@ -409,5 +417,62 @@ describe('the Alignment routes', () => {
       expect(response.contentType).toBe('image/png');
       expect([...(response.body as Buffer)]).toEqual([...PNG_BYTES]);
     });
+  });
+});
+
+describe('the Export routes', () => {
+  it('exports by delegating to the core verb and reads the live manifest back', async () => {
+    await withSyntheticGif(
+      { frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#ff0000' },
+      async (gif) => {
+        await withStore(async (store) => {
+          await createCharacter(store.root, {
+            characterId: 'hero',
+            width: 4,
+            height: 6,
+            anchor: { x: 2, y: 6 },
+          });
+          await ingestRecording(store.root, { recordingId: 'rec', sourcePath: gif.path });
+          await addSegment(store.root, { recordingId: 'rec', id: 'red', startFrame: 0, endFrame: 2 });
+          await extractClipDraft(store.root, { characterId: 'hero', recordingId: 'rec', cutId: 'red' });
+          await commitDraft(store.root, {
+            characterId: 'hero',
+            draftId: 'red',
+            assetId: 'red-run',
+          });
+
+          const created = await handleApiRequest(store.root, {
+            method: 'POST',
+            url: '/api/characters/hero/exports/pixel-pet',
+            body: {
+              animations: ['red-run'],
+              bindings: { idle: ['red-run'] },
+              situations: ['idle'],
+            },
+          });
+          expect(created.status).toBe(200);
+          expect(store.listFiles()).toEqual(
+            expect.arrayContaining([
+              'exports/pixel-pet/manifest.json',
+              'exports/pixel-pet/clips/red-run.png',
+            ]),
+          );
+
+          const read = await handleApiRequest(store.root, {
+            method: 'GET',
+            url: '/api/exports/pixel-pet/manifest',
+          });
+          expect(read.status).toBe(200);
+          expect(read.body).toMatchObject({
+            target: 'pixel-pet',
+            manifest: {
+              target: 'pixel-pet',
+              character: 'hero',
+              animations: { 'red-run': { sheet: 'clips/red-run.png' } },
+            },
+          });
+        });
+      },
+    );
   });
 });

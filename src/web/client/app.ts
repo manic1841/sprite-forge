@@ -19,6 +19,8 @@ import type {
   CharacterAlignment,
   ClipDraft,
   CutList,
+  ExportBindings,
+  ExportResult,
   PlacementOffset,
   RepairOperationInput,
   RepairState,
@@ -64,6 +66,10 @@ export interface WorkbenchHandle {
   readonly repair: RepairState | null;
   /** The active Character's Canvas and per-Clip offsets (Alignment stage), or `null`. */
   readonly alignment: CharacterAlignment | null;
+  /** The loaded Export target, or `null`. */
+  readonly activeExport: string | null;
+  /** The live Export Manifest (Export stage), or `null`. */
+  readonly manifest: ExportResult | null;
   /** Switch mode; swaps the stage and re-renders the contextual inspector. */
   setMode(mode: WorkbenchMode): void;
   /** Load a Recording: read its cut list and show it in the filmstrip. */
@@ -72,6 +78,8 @@ export interface WorkbenchHandle {
   loadDraft(characterId: string, draftId: string): Promise<void>;
   /** Load a Character's alignment view: its Canvas and every Clip/Draft offset. */
   loadAlignment(characterId: string): Promise<void>;
+  /** Load an Export: read and show its live, validated Manifest. */
+  loadExport(target: string): Promise<void>;
   /** Await the most recent {@link loadRecording}/{@link loadDraft} kicked off by a click. */
   settled(): Promise<void>;
 }
@@ -119,6 +127,8 @@ export function mountWorkbench(
     alignmentWarnings: AlignmentWarning[];
     expandWidth: number;
     expandHeight: number;
+    exportTarget: string | null;
+    manifest: ExportResult | null;
   } = {
     mode: 'clip',
     scan: null,
@@ -139,6 +149,8 @@ export function mountWorkbench(
     alignmentWarnings: [],
     expandWidth: 0,
     expandHeight: 0,
+    exportTarget: null,
+    manifest: null,
   };
 
   // --- shell ----------------------------------------------------------------
@@ -245,6 +257,24 @@ export function mountWorkbench(
       }
     }
     rail.appendChild(assets);
+
+    rail.appendChild(subheading('Exports'));
+    const exports = make('div', 'list');
+    exports.dataset.librarySection = 'exports';
+    for (const exported of state.scan?.exports ?? []) {
+      const item = make('button', 'asset');
+      item.dataset.exportTarget = exported.target;
+      item.classList.toggle('sel', exported.target === state.exportTarget);
+      item.append(
+        make('span', 'asset-name', exported.target),
+        make('span', 'asset-sub', exported.dir),
+      );
+      item.addEventListener('click', () => {
+        lastLoad = loadExport(exported.target);
+      });
+      exports.appendChild(item);
+    }
+    rail.appendChild(exports);
   }
 
   // --- stage ----------------------------------------------------------------
@@ -262,10 +292,116 @@ export function mountWorkbench(
     if (mode === 'align') {
       return alignmentStageView();
     }
+    return exportStageView();
+  }
+
+  /**
+   * The Export stage: the Situation bindings and the resulting Manifest. No export
+   * logic lives here — the bindings are passed straight to {@link WorkbenchApi},
+   * which the Node server turns into the `exportCharacter` core verb.
+   */
+  function exportStageView(): HTMLElement {
     const view = make('div', 'stage-view');
     view.dataset.stageView = 'export';
-    view.appendChild(make('p', 'muted', 'Export — Situation bindings and the live Manifest (#30).'));
+
+    const manifest = state.manifest?.manifest ?? null;
+    const summary = make('div', 'export-summary');
+    summary.dataset.exportSummary = '';
+    if (manifest) {
+      summary.append(
+        make('p', 'ttl', `${manifest.target} · ${manifest.character}`),
+        make(
+          'p',
+          'muted',
+          `${Object.keys(manifest.animations).length} animation(s) · ` +
+            `canvas ${manifest.canvas.width}×${manifest.canvas.height} · ` +
+            `bindings: ${Object.keys(manifest.bindings).join(', ') || 'none'}`,
+        ),
+      );
+    } else {
+      summary.appendChild(
+        make('p', 'muted', 'Export — select an Export in the Library, or run one below.'),
+      );
+    }
+    view.append(summary, exportForm());
     return view;
+  }
+
+  /** Build the Export form: pick a Character, a target and bindings, then export. */
+  function exportForm(): HTMLElement {
+    const form = make('form', 'export-form');
+    form.dataset.exportForm = '';
+
+    const characterRow = make('label', 'field');
+    characterRow.append(make('span', 'k', 'character'));
+    const characterSelect = document.createElement('select');
+    characterSelect.dataset.exportCharacter = '';
+    for (const character of state.scan?.characters ?? []) {
+      const option = document.createElement('option');
+      option.value = character.id;
+      option.textContent = character.id;
+      characterSelect.appendChild(option);
+    }
+    characterRow.appendChild(characterSelect);
+
+    const targetRow = make('label', 'field');
+    targetRow.append(make('span', 'k', 'target'));
+    const targetInput = document.createElement('input');
+    targetInput.dataset.exportTargetInput = '';
+    targetInput.placeholder = 'pixel-pet';
+    targetRow.appendChild(targetInput);
+
+    const bindingsRow = make('label', 'field');
+    bindingsRow.append(make('span', 'k', 'bindings'));
+    const bindingsInput = document.createElement('textarea');
+    bindingsInput.dataset.exportBindings = '';
+    bindingsInput.rows = 3;
+    bindingsInput.value = '{ "idle": [] }';
+    bindingsRow.appendChild(bindingsInput);
+
+    const button = make('button', 'btn', 'Export') as HTMLButtonElement;
+    button.type = 'submit';
+    button.dataset.exportRun = '';
+    const message = make('p', 'muted');
+    message.dataset.exportMessage = '';
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void runExportFromForm(characterSelect.value, targetInput.value, bindingsInput.value, message);
+    });
+
+    form.append(characterRow, targetRow, bindingsRow, button, message);
+    return form;
+  }
+
+  async function runExportFromForm(
+    characterId: string,
+    target: string,
+    bindingsJson: string,
+    message: HTMLElement,
+  ): Promise<void> {
+    if (!characterId || !target) {
+      message.textContent = 'character and target are required';
+      return;
+    }
+    let bindings: ExportBindings;
+    try {
+      bindings = JSON.parse(bindingsJson) as ExportBindings;
+    } catch {
+      message.textContent = 'bindings must be valid JSON';
+      return;
+    }
+    try {
+      const result = await api.exportCharacter(characterId, target, { bindings });
+      state.exportTarget = target;
+      state.manifest = result;
+      message.textContent = `exported ${target}`;
+      renderLibrary();
+      renderStage();
+      renderInspector();
+    } catch (error) {
+      message.textContent = (error as Error).message;
+    }
   }
 
   /**
@@ -716,9 +852,35 @@ export function mountWorkbench(
       renderAlignInspector();
       return;
     }
-    inspector.appendChild(
-      make('p', 'muted', 'Export inspector — the live manifest arrives in #30.'),
-    );
+    renderExportInspector();
+  }
+
+  /**
+   * Export inspector: the **live Manifest** (docs/architecture.md, "the live
+   * `manifest.json` in export"). The JSON is whatever the server read back and
+   * validated, so the stage shows exactly what the consumer would see.
+   */
+  function renderExportInspector(): void {
+    const section = make('section', 'inspector-section');
+    section.dataset.inspectorSection = 'export';
+    section.appendChild(subheading('Manifest'));
+
+    const manifest = state.manifest?.manifest;
+    if (!manifest) {
+      section.appendChild(
+        make('p', 'muted', 'The live manifest appears once an Export is loaded.'),
+      );
+      inspector.appendChild(section);
+      return;
+    }
+
+    const pre = document.createElement('pre');
+    pre.className = 'manifest';
+    pre.dataset.manifest = '';
+    pre.dataset.manifestTarget = manifest.target;
+    pre.textContent = JSON.stringify(manifest, null, 2);
+    section.appendChild(pre);
+    inspector.appendChild(section);
   }
 
   /**
@@ -993,6 +1155,10 @@ export function mountWorkbench(
         lastLoad = loadAlignment(characterId);
       }
     }
+    // Entering Export refreshes the live manifest of the loaded target.
+    if (mode === 'export' && state.exportTarget) {
+      lastLoad = loadExport(state.exportTarget);
+    }
   }
 
   async function loadRecording(recordingId: string): Promise<void> {
@@ -1036,6 +1202,15 @@ export function mountWorkbench(
     renderInspector();
   }
 
+  /** Load an Export's live Manifest (validated server-side) for the Export stage. */
+  async function loadExport(target: string): Promise<void> {
+    state.exportTarget = target;
+    state.manifest = await api.readManifest(target);
+    renderLibrary();
+    renderStage();
+    renderInspector();
+  }
+
   // --- initial render -------------------------------------------------------
   setMode('clip');
   renderLibrary();
@@ -1073,10 +1248,17 @@ export function mountWorkbench(
     get alignment() {
       return state.alignment;
     },
+    get activeExport() {
+      return state.exportTarget;
+    },
+    get manifest() {
+      return state.manifest;
+    },
     setMode,
     loadRecording,
     loadDraft,
     loadAlignment,
+    loadExport,
     settled: () => lastLoad,
   };
 }
