@@ -19,6 +19,15 @@ export type {
   CreatedCharacter,
 } from './character.js';
 
+export { addSegment, readCutList, removeSegment, renameSegment } from './segments.js';
+export type {
+  AddSegmentOptions,
+  CutList,
+  RemoveSegmentOptions,
+  RenameSegmentOptions,
+  Segment,
+} from './segments.js';
+
 export { ID_PATTERN, isValidId } from './ids.js';
 
 export { validateArtifact, validateStore } from './validate.js';

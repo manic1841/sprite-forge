@@ -161,7 +161,7 @@ function collectArtifactIssues(
   return issues;
 }
 
-/** Cross-file rules that JSON Schema cannot express (format-spec §3.1, §5.1, §0). */
+/** Cross-file rules that JSON Schema cannot express (format-spec §2, §3.1, §5.1, §0). */
 function crossArtifactIssues(
   kind: ArtifactKind,
   value: unknown,
@@ -172,6 +172,39 @@ function crossArtifactIssues(
   const issue = (path: string, message: string): void => {
     issues.push({ artifact, path, message });
   };
+
+  if (kind === 'cuts' && isRecord(value)) {
+    const { frameCount, cuts } = value;
+    if (Array.isArray(cuts)) {
+      const seenIds = new Set<string>();
+      cuts.forEach((cut, index) => {
+        if (!isRecord(cut)) {
+          return;
+        }
+        const { id, startFrame, endFrame } = cut;
+        if (isNumber(startFrame) && isNumber(endFrame)) {
+          if (!(endFrame > startFrame)) {
+            issue(
+              `/cuts/${index}/endFrame`,
+              `endFrame (${endFrame}) must be greater than startFrame (${startFrame})`,
+            );
+          }
+          if (isNumber(frameCount) && endFrame > frameCount) {
+            issue(
+              `/cuts/${index}/endFrame`,
+              `endFrame (${endFrame}) must not exceed the Recording frameCount (${frameCount})`,
+            );
+          }
+        }
+        if (typeof id === 'string') {
+          if (seenIds.has(id)) {
+            issue(`/cuts/${index}/id`, `cut id "${id}" is not unique within the Recording`);
+          }
+          seenIds.add(id);
+        }
+      });
+    }
+  }
 
   if (kind === 'canvas' && isRecord(value)) {
     const { width, height, anchor } = value;
