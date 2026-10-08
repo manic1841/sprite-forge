@@ -46,6 +46,32 @@ export function sequenceDir(characterId: string, sequenceId: string): string {
   return `${sequencesDir(characterId)}/${sequenceId}`;
 }
 
+export function draftsDir(characterId: string): string {
+  return `${characterDir(characterId)}/drafts`;
+}
+
+export function draftDir(characterId: string, draftId: string): string {
+  return `${draftsDir(characterId)}/${draftId}`;
+}
+
+/** The Draft's descriptor (`draft.json`); an implementation detail, not frozen (format-spec §11). */
+export function draftPath(characterId: string, draftId: string): string {
+  return `${draftDir(characterId, draftId)}/draft.json`;
+}
+
+export function draftFramesDir(characterId: string, draftId: string): string {
+  return `${draftDir(characterId, draftId)}/frames`;
+}
+
+/** The zero-padded PNG file name for frame `index` within a Draft. */
+export function draftFrameFileName(index: number): string {
+  return `${String(index).padStart(3, '0')}.png`;
+}
+
+export function draftFramePath(characterId: string, draftId: string, index: number): string {
+  return `${draftFramesDir(characterId, draftId)}/${draftFrameFileName(index)}`;
+}
+
 export function repairsDir(characterId: string): string {
   return `${characterDir(characterId)}/repairs`;
 }

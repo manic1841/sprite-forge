@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url';
 import {
   addSegment,
   createCharacter,
+  extractClipDraft,
   ForgeError,
   ingestRecording,
   readCutList,
@@ -35,7 +36,13 @@ Usage:
        add:    --id <cut-id> --start <n> --end <n> [--speed <n>]
        rename: --id <cut-id> --new-id <new-id>
        remove: --id <cut-id>
-       list:   (no further options)`;
+       list:   (no further options)
+  forge extract          --store <path> --character <id> --recording <id> --cut <id> [options]
+                                                                     Extract a Segment into a Clip Draft.
+       --draft <id>          Draft id (defaults to the cut id)
+       --background <#rrggbb>  Explicit background override (default: corner-sampled)
+       --tolerance <n>       Per-channel key tolerance (default: 24)
+       --no-loop             Do not loop the Draft`;
 
 /** Run one CLI invocation. Returns the process exit code. */
 export async function runCli(argv: string[]): Promise<number> {
@@ -54,6 +61,12 @@ export async function runCli(argv: string[]): Promise<number> {
   let end: string | undefined;
   let speed: string | undefined;
   let newId: string | undefined;
+  let character: string | undefined;
+  let cut: string | undefined;
+  let draft: string | undefined;
+  let background: string | undefined;
+  let tolerance: string | undefined;
+  let noLoop: boolean | undefined;
   try {
     const { values } = parseArgs({
       args: rest,
@@ -71,6 +84,12 @@ export async function runCli(argv: string[]): Promise<number> {
         end: { type: 'string' },
         speed: { type: 'string' },
         'new-id': { type: 'string' },
+        character: { type: 'string' },
+        cut: { type: 'string' },
+        draft: { type: 'string' },
+        background: { type: 'string' },
+        tolerance: { type: 'string' },
+        'no-loop': { type: 'boolean', default: false },
       },
     });
     store = values.store;
@@ -86,6 +105,12 @@ export async function runCli(argv: string[]): Promise<number> {
     end = values.end;
     speed = values.speed;
     newId = values['new-id'];
+    character = values.character;
+    cut = values.cut;
+    draft = values.draft;
+    background = values.background;
+    tolerance = values.tolerance;
+    noLoop = values['no-loop'];
   } catch (error) {
     return fail((error as Error).message);
   }
@@ -105,6 +130,16 @@ export async function runCli(argv: string[]): Promise<number> {
       return runCreateCharacter(store, id, width, height, anchorX, anchorY);
     case 'cut':
       return runCut(store, { recording, action, id, start, end, speed, newId });
+    case 'extract':
+      return runExtract(store, {
+        character,
+        recording,
+        cut,
+        draft,
+        background,
+        tolerance,
+        noLoop: noLoop === true,
+      });
     default:
       return fail(command ? `unknown command "${command}"` : 'no command given', USAGE);
   }
@@ -259,6 +294,51 @@ async function runCut(store: string, args: CutArgs): Promise<number> {
         return fail(`unknown cut action "${action}"`, USAGE);
     }
     process.stdout.write(`${JSON.stringify(cutList, null, 2)}\n`);
+    return 0;
+  } catch (error) {
+    return failForgeError(error);
+  }
+}
+
+/** Options for the `extract` command. */
+interface ExtractArgs {
+  character?: string;
+  recording?: string;
+  cut?: string;
+  draft?: string;
+  background?: string;
+  tolerance?: string;
+  noLoop: boolean;
+}
+
+/** `forge extract` — turn a Segment into a Clip Draft. */
+async function runExtract(store: string, args: ExtractArgs): Promise<number> {
+  const { character, recording, cut, draft, background, tolerance, noLoop } = args;
+  if (!character) {
+    return fail('--character <character-id> is required for extract');
+  }
+  if (!recording) {
+    return fail('--recording <recording-id> is required for extract');
+  }
+  if (!cut) {
+    return fail('--cut <cut-id> is required for extract');
+  }
+  const toleranceValue = tolerance === undefined ? undefined : integerArg(tolerance);
+  if (tolerance !== undefined && toleranceValue === undefined) {
+    return fail('--tolerance must be an integer');
+  }
+
+  try {
+    const created = await extractClipDraft(store, {
+      characterId: character,
+      recordingId: recording,
+      cutId: cut,
+      ...(draft !== undefined ? { draftId: draft } : {}),
+      ...(background !== undefined ? { background } : {}),
+      ...(toleranceValue !== undefined ? { tolerance: toleranceValue } : {}),
+      loop: !noLoop,
+    });
+    process.stdout.write(`${JSON.stringify(created, null, 2)}\n`);
     return 0;
   } catch (error) {
     return failForgeError(error);
