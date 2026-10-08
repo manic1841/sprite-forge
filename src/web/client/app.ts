@@ -14,8 +14,12 @@
 
 import type { WorkbenchApi } from './api.js';
 import type {
+  AlignmentState,
+  AlignmentWarning,
+  CharacterAlignment,
   ClipDraft,
   CutList,
+  PlacementOffset,
   RepairOperationInput,
   RepairState,
   RepairTool,
@@ -58,12 +62,16 @@ export interface WorkbenchHandle {
   readonly activeDraftFrame: number;
   /** The active Draft's Repair state (operations + warnings), or `null`. */
   readonly repair: RepairState | null;
+  /** The active Character's Canvas and per-Clip offsets (Alignment stage), or `null`. */
+  readonly alignment: CharacterAlignment | null;
   /** Switch mode; swaps the stage and re-renders the contextual inspector. */
   setMode(mode: WorkbenchMode): void;
   /** Load a Recording: read its cut list and show it in the filmstrip. */
   loadRecording(recordingId: string): Promise<void>;
   /** Load a Draft: read its descriptor and show its frames in the Clip editor. */
   loadDraft(characterId: string, draftId: string): Promise<void>;
+  /** Load a Character's alignment view: its Canvas and every Clip/Draft offset. */
+  loadAlignment(characterId: string): Promise<void>;
   /** Await the most recent {@link loadRecording}/{@link loadDraft} kicked off by a click. */
   settled(): Promise<void>;
 }
@@ -106,6 +114,11 @@ export function mountWorkbench(
     brushColor: string;
     brushSize: number;
     scope: 'frame' | 'clip';
+    activeCharacterId: string | null;
+    alignment: CharacterAlignment | null;
+    alignmentWarnings: AlignmentWarning[];
+    expandWidth: number;
+    expandHeight: number;
   } = {
     mode: 'clip',
     scan: null,
@@ -121,6 +134,11 @@ export function mountWorkbench(
     brushColor: '#ff0000',
     brushSize: 1,
     scope: 'frame',
+    activeCharacterId: null,
+    alignment: null,
+    alignmentWarnings: [],
+    expandWidth: 0,
+    expandHeight: 0,
   };
 
   // --- shell ----------------------------------------------------------------
@@ -219,6 +237,10 @@ export function mountWorkbench(
           make('span', 'asset-name', asset.id),
           make('span', 'tag', asset.kind),
         );
+        item.addEventListener('click', () => {
+          state.activeCharacterId = character.id;
+          lastLoad = loadAlignment(character.id);
+        });
         assets.appendChild(item);
       }
     }
@@ -238,12 +260,7 @@ export function mountWorkbench(
       return clipEditorView();
     }
     if (mode === 'align') {
-      const view = make('div', 'stage-view');
-      view.dataset.stageView = 'alignment';
-      view.appendChild(
-        make('p', 'muted', 'Alignment — Clips ghosted on the shared Canvas against the Anchor (#28).'),
-      );
-      return view;
+      return alignmentStageView();
     }
     const view = make('div', 'stage-view');
     view.dataset.stageView = 'export';
@@ -336,6 +353,83 @@ export function mountWorkbench(
     renderStage();
     renderContext();
     renderInspector();
+  }
+
+  // --- Alignment stage (Clips ghosted on the shared Canvas against the Anchor) --
+  //
+  // No alignment logic lives here: the Canvas, the Anchor and every offset come
+  // from {@link WorkbenchApi} (the Node server turns them into core calls). The
+  // stage only lays them out so placement is visible.
+
+  /** Display pixels per Canvas pixel, so a small Canvas is legible. */
+  const ALIGN_SCALE = 4;
+
+  function alignmentStageView(): HTMLElement {
+    const view = make('div', 'stage-view');
+    view.dataset.stageView = 'alignment';
+    const alignment = state.alignment;
+    if (!alignment) {
+      view.dataset.emptyState = 'alignment';
+      view.appendChild(
+        make('p', 'muted', 'Alignment — select a Character or one of its assets in the Library.'),
+      );
+      return view;
+    }
+
+    const { canvas } = alignment;
+    const board = make('div', 'align-board');
+    board.dataset.alignmentCanvas = '';
+    board.dataset.canvasWidth = String(canvas.width);
+    board.dataset.canvasHeight = String(canvas.height);
+    board.style.width = `${canvas.width * ALIGN_SCALE}px`;
+    board.style.height = `${canvas.height * ALIGN_SCALE}px`;
+
+    const anchor = make('span', 'align-anchor');
+    anchor.dataset.anchor = '';
+    anchor.dataset.anchorX = String(canvas.anchor.x);
+    anchor.dataset.anchorY = String(canvas.anchor.y);
+    anchor.style.left = `${canvas.anchor.x * ALIGN_SCALE}px`;
+    anchor.style.top = `${canvas.anchor.y * ALIGN_SCALE}px`;
+    board.appendChild(anchor);
+
+    const characterId = state.activeCharacterId ?? '';
+    const addGhost = (
+      label: string,
+      src: string,
+      offset: PlacementOffset | undefined,
+    ): HTMLElement => {
+      const off = offset ?? { x: 0, y: 0 };
+      const ghost = make('div', 'align-ghost');
+      ghost.dataset.alignGhost = '';
+      ghost.dataset.alignLabel = label;
+      ghost.dataset.offsetX = String(off.x);
+      ghost.dataset.offsetY = String(off.y);
+      ghost.style.transform = `translate(${off.x * ALIGN_SCALE}px, ${off.y * ALIGN_SCALE}px)`;
+      const img = document.createElement('img');
+      img.className = 'align-ghost-image';
+      img.dataset.alignGhostImage = '';
+      img.src = src;
+      img.alt = label;
+      img.style.width = `${canvas.width * ALIGN_SCALE}px`;
+      img.style.height = `${canvas.height * ALIGN_SCALE}px`;
+      ghost.appendChild(img);
+      board.appendChild(ghost);
+      return ghost;
+    };
+
+    for (const clip of alignment.clips) {
+      const ghost = addGhost(clip.id, api.sheetUrl(characterId, 'clip', clip.id), clip.placementOffset);
+      ghost.dataset.kind = 'clip';
+      ghost.dataset.asset = clip.id;
+    }
+    for (const draft of alignment.drafts) {
+      const ghost = addGhost(draft.id, api.frameUrl(characterId, draft.id, 0), draft.placementOffset);
+      ghost.dataset.kind = 'draft';
+      ghost.dataset.draft = draft.id;
+    }
+
+    view.appendChild(board);
+    return view;
   }
 
   // --- Repair (the Clip editor's brush, eyedropper and operation list) -------
@@ -619,14 +713,139 @@ export function mountWorkbench(
       return;
     }
     if (state.mode === 'align') {
-      inspector.appendChild(
-        make('p', 'muted', 'Alignment inspector — per-Clip placement offsets arrive in #28.'),
-      );
+      renderAlignInspector();
       return;
     }
     inspector.appendChild(
       make('p', 'muted', 'Export inspector — the live manifest arrives in #30.'),
     );
+  }
+
+  /**
+   * Alignment inspector: the active Character's per-Clip placement offsets and the
+   * explicit Character-wide **expand canvas** action. The offset edit targets the
+   * active Draft (a committed Asset is immutable — fork it to change its offset);
+   * committed Clips' offsets are shown read-only.
+   */
+  function renderAlignInspector(): void {
+    const section = make('section', 'inspector-section');
+    section.dataset.inspectorSection = 'alignment';
+    section.appendChild(subheading('Placement'));
+
+    if (!state.alignment) {
+      section.appendChild(make('p', 'muted', 'Select a Character or asset to align.'));
+      inspector.appendChild(section);
+      return;
+    }
+
+    // The active Draft's editable offset.
+    if (state.draft && state.draft.characterId === state.activeCharacterId) {
+      const offset = currentDraftOffset();
+      const x = numberInput(offset.x, 'x', (value) => {
+        void applyOffset({ x: value, y: currentDraftOffset().y });
+      });
+      x.dataset.alignOffsetX = '';
+      const y = numberInput(offset.y, 'y', (value) => {
+        void applyOffset({ x: currentDraftOffset().x, y: value });
+      });
+      y.dataset.alignOffsetY = '';
+      const row = make('div', 'align-offsets');
+      row.append(labeled('Offset x', x), labeled('Offset y', y));
+      section.appendChild(row);
+
+      const apply = make('button', 'btn small', 'Set offset');
+      apply.dataset.alignApply = '';
+      apply.addEventListener('click', () => void applyOffset(currentDraftOffset()));
+      section.appendChild(apply);
+    } else {
+      section.appendChild(
+        make('p', 'muted', 'Select a Draft to edit its placement offset (fork an Asset to edit it).'),
+      );
+    }
+
+    for (const warning of state.alignmentWarnings) {
+      const node = make('p', 'warning');
+      node.dataset.alignmentWarning = warning.code;
+      node.textContent = warning.message;
+      section.appendChild(node);
+    }
+
+    // Committed Clips' offsets, read-only (immutable; fork to change).
+    if (state.alignment.clips.length > 0) {
+      section.appendChild(make('h4', 'ttl sub', 'Committed Clips'));
+      const list = make('ul', 'align-clips');
+      for (const clip of state.alignment.clips) {
+        const item = make('li', 'align-clip');
+        item.dataset.alignClipOffset = clip.id;
+        const off = clip.placementOffset ?? { x: 0, y: 0 };
+        item.dataset.offsetX = String(off.x);
+        item.dataset.offsetY = String(off.y);
+        item.textContent = `${clip.id} · (${off.x}, ${off.y})`;
+        list.appendChild(item);
+      }
+      section.appendChild(list);
+    }
+
+    // The explicit expand-canvas action.
+    const expandRow = make('div', 'align-expand');
+    const width = numberInput(state.expandWidth, 'width', (value) => {
+      state.expandWidth = value;
+    });
+    width.dataset.expandWidth = '';
+    const height = numberInput(state.expandHeight, 'height', (value) => {
+      state.expandHeight = value;
+    });
+    height.dataset.expandHeight = '';
+    expandRow.append(labeled('Width', width), labeled('Height', height));
+    const expand = make('button', 'btn small', 'Expand canvas');
+    expand.dataset.expandCanvasAction = '';
+    expand.addEventListener('click', () => void applyExpand());
+    section.appendChild(expandRow);
+    section.appendChild(expand);
+
+    inspector.appendChild(section);
+  }
+
+  /** The active Draft's offset as currently known to the client. */
+  function currentDraftOffset(): PlacementOffset {
+    if (!state.draft || !state.alignment) {
+      return { x: 0, y: 0 };
+    }
+    const draft = state.alignment.drafts.find((entry) => entry.id === state.draft!.draftId);
+    return draft?.placementOffset ?? { x: 0, y: 0 };
+  }
+
+  /** Persist the active Draft's offset and refresh the alignment read (warnings). */
+  async function applyOffset(offset: PlacementOffset): Promise<void> {
+    if (!state.draft) {
+      return;
+    }
+    const { characterId, draftId } = state.draft;
+    await api.setPlacementOffset(characterId, draftId, offset);
+    const alignment = await api.readDraftAlignment(characterId, draftId);
+    state.alignmentWarnings = alignment.warnings;
+    await refreshAlignment(characterId);
+  }
+
+  /** Run the explicit Character-wide expand and refresh everything drawn on it. */
+  async function applyExpand(): Promise<void> {
+    const characterId = state.activeCharacterId;
+    if (!characterId) {
+      return;
+    }
+    const canvas = state.alignment?.canvas;
+    const width = state.expandWidth || canvas?.width || 0;
+    const height = state.expandHeight || canvas?.height || 0;
+    await api.expandCanvas(characterId, width, height);
+    state.alignmentWarnings = [];
+    await refreshAlignment(characterId);
+  }
+
+  /** Re-read a Character's alignment view and re-render the stage/inspector. */
+  async function refreshAlignment(characterId: string): Promise<void> {
+    state.alignment = await api.readCharacterAlignment(characterId);
+    renderStage();
+    renderInspector();
   }
 
   /**
@@ -766,6 +985,14 @@ export function mountWorkbench(
     // The stage swaps; the inspector re-renders contextually (same region node).
     renderStage();
     renderInspector();
+    // Entering Alignment loads the Character's Canvas and offsets.
+    if (mode === 'align') {
+      const characterId =
+        state.activeCharacterId ?? state.scan?.characters[0]?.id ?? null;
+      if (characterId) {
+        lastLoad = loadAlignment(characterId);
+      }
+    }
   }
 
   async function loadRecording(recordingId: string): Promise<void> {
@@ -780,6 +1007,7 @@ export function mountWorkbench(
 
   async function loadDraft(characterId: string, draftId: string): Promise<void> {
     state.draft = { characterId, draftId };
+    state.activeCharacterId = characterId;
     state.draftFrame = 0;
     state.repairRevision = 0;
     state.draftDescriptor = await api.readClipDraft(characterId, draftId);
@@ -787,6 +1015,24 @@ export function mountWorkbench(
     renderLibrary();
     renderStage();
     renderContext();
+    renderInspector();
+  }
+
+  /** Load a Character's alignment view (Canvas + Clip/Draft offsets) for the stage. */
+  async function loadAlignment(characterId: string): Promise<void> {
+    state.activeCharacterId = characterId;
+    state.alignment = await api.readCharacterAlignment(characterId);
+    if (state.alignment) {
+      state.expandWidth = state.alignment.canvas.width;
+      state.expandHeight = state.alignment.canvas.height;
+    }
+    if (state.draft && state.draft.characterId === characterId) {
+      const alignment = await api.readDraftAlignment(characterId, state.draft.draftId);
+      state.alignmentWarnings = alignment.warnings;
+    } else {
+      state.alignmentWarnings = [];
+    }
+    renderStage();
     renderInspector();
   }
 
@@ -824,9 +1070,13 @@ export function mountWorkbench(
     get repair() {
       return state.repair;
     },
+    get alignment() {
+      return state.alignment;
+    },
     setMode,
     loadRecording,
     loadDraft,
+    loadAlignment,
     settled: () => lastLoad,
   };
 }
@@ -883,6 +1133,20 @@ function sizeInput(value: number, onChange: (value: number) => void): HTMLInputE
   input.type = 'number';
   input.min = '1';
   input.setAttribute('data-repair-size', '');
+  input.value = String(value);
+  input.addEventListener('input', () => onChange(Number(input.value)));
+  return input;
+}
+
+/** A generic integer input for the Alignment inspector (offset x/y, expand width/height). */
+function numberInput(
+  value: number,
+  label: string,
+  onChange: (value: number) => void,
+): HTMLInputElement {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.setAttribute('aria-label', label);
   input.value = String(value);
   input.addEventListener('input', () => onChange(Number(input.value)));
   return input;

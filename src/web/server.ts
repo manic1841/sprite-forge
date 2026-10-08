@@ -16,18 +16,23 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   addSegment,
   appendRepairOperation,
+  expandCanvas,
   ForgeError,
+  readAssetSheet,
+  readCharacterAlignment,
   readClipDraft,
+  readDraftAlignment,
   readDraftRepair,
   readDraftRepairFrame,
   readCutList,
   removeSegment,
   sampleDraftRepairColor,
   scan,
+  setPlacementOffset,
   setSegmentRange,
   undoRepairOperation,
 } from '../core/index.js';
-import type { RepairOperationInput } from '../core/index.js';
+import type { AssetKind, RepairOperationInput } from '../core/index.js';
 
 /** One request to the workbench API, decoupled from Node's request object. */
 export interface ApiRequest {
@@ -70,6 +75,53 @@ export async function handleApiRequest(
       return ok(await scan(storeRoot));
     }
 
+    // /api/characters/<characterId>/alignment — the Alignment stage's view model.
+    if (
+      method === 'GET' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'alignment' &&
+      segments.length === 4
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      return ok(await readCharacterAlignment(storeRoot, { characterId }));
+    }
+
+    // /api/characters/<characterId>/expand-canvas — the explicit Character-wide re-bake.
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'expand-canvas' &&
+      segments.length === 4
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      const body = asRecord(request.body);
+      return ok(
+        await expandCanvas(storeRoot, {
+          characterId,
+          width: requiredNumber(body, 'width'),
+          height: requiredNumber(body, 'height'),
+        }),
+      );
+    }
+
+    // /api/characters/<characterId>/(clips|sequences)/<assetId>/sheet — the baked strip.
+    if (
+      method === 'GET' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      (segments[3] === 'clips' || segments[3] === 'sequences') &&
+      segments[5] === 'sheet' &&
+      segments.length === 6
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      const kind: AssetKind = segments[3] === 'clips' ? 'clip' : 'sequence';
+      const id = decodeURIComponent(segments[4]!);
+      const sheet = await readAssetSheet(storeRoot, { characterId, kind, id });
+      return { status: 200, body: sheet.data, contentType: sheet.contentType };
+    }
+
     // /api/characters/<characterId>/drafts/<draftId>[/frames/<index>]
     if (
       segments[0] === 'api' &&
@@ -90,9 +142,28 @@ export async function handleApiRequest(
         return { status: 200, body: frame.data, contentType: frame.contentType };
       }
 
-      // /api/characters/<c>/drafts/<d>/repair[/operations|/undo|/sample]
-      if (segments[5] === 'repair') {
+      // /api/characters/<c>/drafts/<d>/alignment[/offset]
+      if (segments[5] === 'alignment') {
         if (method === 'GET' && segments.length === 6) {
+          return ok(await readDraftAlignment(storeRoot, { characterId, draftId }));
+        }
+        if (method === 'POST' && segments[6] === 'offset' && segments.length === 7) {
+          const body = asRecord(request.body);
+          return ok(
+            await setPlacementOffset(storeRoot, {
+              characterId,
+              draftId,
+              offset: {
+                x: requiredNumber(body, 'x'),
+                y: requiredNumber(body, 'y'),
+              },
+            }),
+          );
+        }
+      }
+
+      // /api/characters/<c>/drafts/<d>/repair[/operations|/undo|/sample]
+      if (segments[5] === 'repair') {        if (method === 'GET' && segments.length === 6) {
           return ok(await readDraftRepair(storeRoot, { characterId, draftId }));
         }
         if (method === 'POST' && segments[6] === 'operations' && segments.length === 7) {

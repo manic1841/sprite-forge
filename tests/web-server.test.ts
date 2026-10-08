@@ -339,3 +339,75 @@ describe('the Repair routes', () => {
     });
   });
 });
+
+describe('the Alignment routes', () => {
+  it('reads a Character’s Canvas and its Clip/Draft offsets', async () => {
+    await withStore(async (store) => {
+      seedDraft(store);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/alignment',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
+        clips: [],
+        drafts: [{ id: 'wip' }],
+      });
+    });
+  });
+
+  it('sets a Draft’s placement offset by delegating to the core verb', async () => {
+    await withStore(async (store) => {
+      seedDraft(store);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'POST',
+        url: '/api/characters/hero/drafts/wip/alignment/offset',
+        body: { x: 0, y: -2 },
+      });
+
+      expect(response.status).toBe(200);
+      expect(store.readJson(`${DRAFT_DIR}/draft.json`)).toMatchObject({
+        placementOffset: { x: 0, y: -2 },
+      });
+    });
+  });
+
+  it('expands the Canvas by delegating to the core verb', async () => {
+    await withStore(async (store) => {
+      await seedRealDraft(store);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'POST',
+        url: '/api/characters/hero/expand-canvas',
+        body: { width: 8, height: 8 },
+      });
+
+      expect(response.status).toBe(200);
+      expect(store.readJson('characters/hero/canvas.json')).toEqual({
+        width: 8,
+        height: 8,
+        anchor: { x: 4, y: 8 },
+      });
+    });
+  });
+
+  it('serves a committed Asset’s sheet behind the store boundary', async () => {
+    await withStore(async (store) => {
+      seedDraft(store);
+      store.writeFile('characters/hero/clips/walk/sheet.png', PNG_BYTES);
+
+      const response = await handleApiRequest(store.root, {
+        method: 'GET',
+        url: '/api/characters/hero/clips/walk/sheet',
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.contentType).toBe('image/png');
+      expect([...(response.body as Buffer)]).toEqual([...PNG_BYTES]);
+    });
+  });
+});

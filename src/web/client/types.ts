@@ -7,11 +7,17 @@
  */
 
 export type {
+  AlignmentState,
+  AlignmentWarning,
+  AlignmentWarningCode,
   AssetKind,
   AssetRef,
+  CharacterAlignment,
   ClipDraft,
   CutList,
+  ExpandCanvasResult,
   FrameRange,
+  PlacementOffset,
   RectGeometry,
   RepairOperation,
   RepairOperationInput,

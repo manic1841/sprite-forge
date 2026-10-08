@@ -11,7 +11,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clampRange, mountWorkbench } from '../src/web/client/app.js';
 import type { WorkbenchApi } from '../src/web/client/api.js';
-import type { ClipDraft, CutList, RepairState, StoreScan } from '../src/web/client/types.js';
+import type {
+  AlignmentState,
+  CharacterAlignment,
+  ClipDraft,
+  CutList,
+  RepairState,
+  StoreScan,
+} from '../src/web/client/types.js';
 
 const SCAN: StoreScan = {
   root: '/tmp/store',
@@ -76,11 +83,28 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     appendRepairOperation: async () => EMPTY_REPAIR,
     undoRepairOperation: async () => EMPTY_REPAIR,
     sampleRepairColor: async () => '#ff0000',
+    readCharacterAlignment: async () => ALIGNMENT,
+    readDraftAlignment: async () => EMPTY_ALIGNMENT,
+    setPlacementOffset: async () => DRAFT,
+    expandCanvas: async () => ({
+      canvas: ALIGNMENT.canvas,
+      rebakedClips: [],
+      pendingSequenceRebake: [],
+      repairWarnings: [],
+    }),
+    sheetUrl: (characterId, kind, id) =>
+      `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet`,
     ...overrides,
   };
 }
 
 const EMPTY_REPAIR: RepairState = { operations: [], warnings: [] };
+const EMPTY_ALIGNMENT: AlignmentState = { offset: { x: 0, y: 0 }, warnings: [] };
+const ALIGNMENT: CharacterAlignment = {
+  canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
+  clips: [{ id: 'walk', placementOffset: { x: 0, y: -1 } }],
+  drafts: [{ id: 'wip' }],
+};
 
 let container: HTMLElement;
 
@@ -362,6 +386,77 @@ describe('the Clip editor Repair controls', () => {
 
     expect(
       wb.root.querySelector('[data-repair-warning="framing-changed"]'),
+    ).not.toBeNull();
+  });
+});
+
+describe('the Alignment stage', () => {
+  it('ghosts Clips on the shared Canvas against the Anchor', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    wb.setMode('align');
+    await wb.settled();
+
+    const view = wb.root.querySelector('[data-stage-view="alignment"]')!;
+    const canvas = view.querySelector('[data-alignment-canvas]') as HTMLElement;
+    expect(canvas.dataset.canvasWidth).toBe('4');
+    expect(canvas.dataset.canvasHeight).toBe('6');
+    const anchor = view.querySelector('[data-anchor]') as HTMLElement;
+    expect(anchor.dataset.anchorX).toBe('2');
+    expect(anchor.dataset.anchorY).toBe('6');
+
+    const ghosts = [...view.querySelectorAll('[data-align-ghost]')].map((el) => {
+      const node = el as HTMLElement;
+      return {
+        kind: node.dataset.kind,
+        id: node.dataset.asset ?? node.dataset.draft,
+        ox: node.dataset.offsetX,
+        oy: node.dataset.offsetY,
+      };
+    });
+    expect(ghosts).toEqual([
+      { kind: 'clip', id: 'walk', ox: '0', oy: '-1' },
+      { kind: 'draft', id: 'wip', ox: '0', oy: '0' },
+    ]);
+    // Each ghost carries a Canvas-sized image (the Clip's baked sheet).
+    expect(view.querySelectorAll('[data-align-ghost-image]')).toHaveLength(2);
+  });
+
+  it('shows per-Clip offsets and an explicit expand-canvas action in the inspector', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const inspector = wb.root.querySelector('[data-region="inspector"]') as HTMLElement;
+    expect(inspector.dataset.inspectorFor).toBe('align');
+    expect(inspector.querySelector('[data-inspector-section="alignment"]')).not.toBeNull();
+    // Per-Clip offsets (the committed Clip is read-only; the Draft is editable).
+    expect(inspector.querySelector('[data-align-clip-offset="walk"]')).not.toBeNull();
+    expect(inspector.querySelector('[data-align-offset-x]')).not.toBeNull();
+    expect(inspector.querySelector('[data-align-offset-y]')).not.toBeNull();
+    // The explicit Character-wide expand action exists.
+    expect(inspector.querySelector('[data-expand-canvas-action]')).not.toBeNull();
+    expect(inspector.querySelector('[data-expand-width]')).not.toBeNull();
+    expect(inspector.querySelector('[data-expand-height]')).not.toBeNull();
+  });
+
+  it('surfaces a stale-alignment warning from the server rather than hiding it', async () => {
+    const warned = fakeApi({
+      readDraftAlignment: async () => ({
+        offset: { x: 0, y: -1 },
+        warnings: [{ code: 'alignment-framing-changed', message: 'the Canvas changed' }],
+      }),
+    });
+    const wb = mountWorkbench(container, { api: warned });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    expect(
+      wb.root.querySelector('[data-alignment-warning="alignment-framing-changed"]'),
     ).not.toBeNull();
   });
 });
