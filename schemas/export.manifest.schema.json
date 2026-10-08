@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sprite-forge.dev/schemas/export.manifest.schema.json",
+  "title": "Export manifest",
+  "description": "The single file a consumer reads, at exports/<target>/manifest.json. See docs/export-contract.md and docs/format-spec.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["formatVersion", "target", "character", "authoredFacing", "canvas", "animations", "bindings", "lock"],
+  "properties": {
+    "formatVersion": {
+      "description": "Semver of this contract. A major bump is a breaking change for the consumer.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "target": { "type": "string", "minLength": 1 },
+    "character": { "$ref": "#/$defs/id" },
+    "authoredFacing": {
+      "description": "The direction the art was drawn in.",
+      "enum": ["right", "left"]
+    },
+    "canvas": {
+      "description": "The shared frame size and its Anchor; every animation uses it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "anchor"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "anchor": { "$ref": "#/$defs/point" }
+      }
+    },
+    "animations": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": { "$ref": "#/$defs/animation" }
+    },
+    "bindings": {
+      "description": "Situation id -> one or more animation ids.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/id" },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "$ref": "#/$defs/id" }
+      }
+    },
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spriteForgeVersion", "exportedAt"],
+      "properties": {
+        "spriteForgeVersion": { "type": "string" },
+        "exportedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "relPath": {
+      "type": "string",
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*://).+$"
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 0 },
+        "y": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "animation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sheet", "frameCount", "delaysMs", "loop"],
+      "properties": {
+        "sheet": {
+          "description": "Path to the strip, relative to the manifest.",
+          "$ref": "#/$defs/relPath"
+        },
+        "frameCount": { "type": "integer", "minimum": 1 },
+        "delaysMs": {
+          "description": "Per-frame duration in ms; one value means uniform.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "loop": { "type": "boolean" },
+        "flipsFacing": {
+          "description": "When true, the animation flips the consumer's Facing on completion.",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
