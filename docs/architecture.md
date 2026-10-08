@@ -46,7 +46,7 @@ scanning. See [ADR-0003](./adr/0003-external-asset-store-discovered-by-scanning.
 │     ├─ repairs/<clip-id>/     # Repair scripts (input, not asset content)
 │     ├─ clips/<clip-id>/       # committed Clip assets
 │     └─ sequences/<seq-id>/    # committed Sequence assets
-└─ exports/<target>/            # Manifest + sheets for a consumer
+└─ exports/<target>/            # manifest.json + clips/<asset-id>.png (see docs/export-contract.md)
 ```
 
 A committed Asset folder holds the **contract artifacts** plus its **provenance**:

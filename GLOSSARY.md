@@ -95,10 +95,16 @@ The single file a consumer reads; it inlines the metadata of each exported anima
 _Avoid_: index, catalog
 
 **Bindings**:
-The map from a consumer's Situations to Asset ids.
+The map from a consumer's Situations to the Asset ids each may play.
 _Avoid_: mapping, aliases
 
 **Situation**:
-A named state the consumer presents to trigger one animation (e.g. `idle`, `happy`);
-it exists only in Bindings, never in the asset layer.
+A named state the consumer presents to trigger animation (e.g. `idle`, `happy`); it
+exists only in Bindings, never in the asset layer. A Situation may bind several Assets.
 _Avoid_: reaction, event, trigger
+
+**Facing**:
+The direction the consumer is currently drawing the Character (`right` or `left`),
+mirrored against the direction the art was authored in. It belongs to the consumer,
+not the Asset store.
+_Avoid_: direction, orientation, side
