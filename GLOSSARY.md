@@ -12,9 +12,13 @@ A single screen capture from an emulator, stored as one animated image file.
 _Avoid_: source, take, video
 
 **Segment**:
-A half-open frame range (`[startFrame, endFrame)`) selected from one Recording,
-covering one action's worth of footage.
-_Avoid_: slice, span, cut
+A named cut in a Recording's cut list: a half-open frame range
+(`[startFrame, endFrame)`) covering one action's worth of footage.
+_Avoid_: slice, span, take
+
+**Cut list**:
+A Recording's own record of its Segments, stored beside the Recording.
+_Avoid_: chapter list, index
 
 ## Authoring and repair
 
