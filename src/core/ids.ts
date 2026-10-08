@@ -1,0 +1,15 @@
+/**
+ * The store's id grammar.
+ *
+ * Ids are lowercase ASCII kebab-case (format-spec §0): a folder name must equal
+ * the id it holds, so an id is also a safe path segment. One place defines the
+ * pattern so ids are checked identically wherever they enter the store.
+ */
+
+/** The id grammar, exactly as the frozen schemas encode it. */
+export const ID_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+/** Is `value` a valid store id? */
+export function isValidId(value: string): boolean {
+  return ID_PATTERN.test(value);
+}

@@ -108,6 +108,16 @@ export async function writeBinaryFile(root: string, relPath: RelPath, data: Uint
   await fs.writeFile(abs, data);
 }
 
+/**
+ * Read a file that lives **outside** the store — the one deliberate external
+ * read. Ingest takes a raw capture from an arbitrary path, hashes it and copies
+ * it in; the path is used as given and is not confined to the store root. Every
+ * other read/write here is store-relative.
+ */
+export async function readExternalFile(absPath: string): Promise<Buffer> {
+  return fs.readFile(absPath);
+}
+
 /** Create a directory (and parents). */
 export async function ensureDirectory(root: string, relPath: RelPath): Promise<void> {
   await fs.mkdir(resolveInStore(root, relPath), { recursive: true });

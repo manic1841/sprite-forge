@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { validCanvas, validCuts, withStore } from './harness.js';
+import { withSyntheticGif } from './synthetic-gif.js';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -68,6 +69,34 @@ describe('forge CLI', () => {
       expect(JSON.parse(result.stdout).recordings.map((r: { id: string }) => r.id)).toEqual([
         'mgba-2026-09',
       ]);
+    });
+  });
+
+  it('ingest registers a Recording that scan then lists', async () => {
+    await withSyntheticGif({ frames: 4, delaysMs: [50, 50, 60, 50] }, async (source) => {
+      await withStore(async (store) => {
+        const result = await forge([
+          'ingest',
+          '--store',
+          store.root,
+          '--source',
+          source.path,
+          '--id',
+          'mgba-2026-09',
+        ]);
+
+        expect(result.code).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          id: 'mgba-2026-09',
+          frameCount: 4,
+          delaysMs: [50, 50, 60, 50],
+        });
+
+        const listed = await forge(['scan', '--store', store.root]);
+        expect(JSON.parse(listed.stdout).recordings.map((r: { id: string }) => r.id)).toEqual([
+          'mgba-2026-09',
+        ]);
+      });
     });
   });
 });
