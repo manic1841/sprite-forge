@@ -13,6 +13,7 @@
  */
 
 import type { WorkbenchApi } from './api.js';
+import { clampRange } from './timeline.js';
 import type {
   AlignmentState,
   AlignmentWarning,
@@ -82,21 +83,6 @@ export interface WorkbenchHandle {
   loadExport(target: string): Promise<void>;
   /** Await the most recent {@link loadRecording}/{@link loadDraft} kicked off by a click. */
   settled(): Promise<void>;
-}
-
-/** Clamp a drag on a cut edge to a valid half-open range inside the Recording. */
-export function clampRange(
-  edge: 'start' | 'end',
-  frame: number,
-  cut: Segment,
-  frameCount: number,
-): { startFrame: number; endFrame: number } {
-  if (edge === 'start') {
-    const startFrame = Math.max(0, Math.min(Math.round(frame), cut.endFrame - 1));
-    return { startFrame, endFrame: cut.endFrame };
-  }
-  const endFrame = Math.min(frameCount, Math.max(Math.round(frame), cut.startFrame + 1));
-  return { startFrame: cut.startFrame, endFrame };
 }
 
 /** Mount the workbench into `container`, returning a handle to it. */
