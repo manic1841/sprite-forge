@@ -29,11 +29,13 @@ export type {
   SetSegmentRangeOptions,
 } from './segments.js';
 
-export { extractClipDraft, readClipDraft, readClipDraftFrame, renderSegmentFrames } from './draft.js';
+export { extractClipDraft, readClipDraft, readClipDraftFrame, renderSegmentFrames, deriveAnchor } from './draft.js';
 export type {
   ClipDraft,
   ClipDraftDescriptor,
   ClipDraftFrame,
+  DeriveAnchorOptions,
+  DerivedAnchor,
   DraftBackground,
   DraftSegmentSnapshot,
   ExtractClipDraftOptions,

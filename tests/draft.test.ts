@@ -345,6 +345,82 @@ describe('extractClipDraft', () => {
       },
     );
   });
+
+  it('applies the Segment speed to the Clip delays without moving the range', async () => {
+    await withSyntheticGif(
+      { frames: 4, width: 8, height: 6, delaysMs: [50, 60, 80, 100] },
+      async (gif) => {
+        await withStore(async (store) => {
+          await ingestRecording(store.root, { recordingId: RECORDING_ID, sourcePath: gif.path });
+          await addSegment(store.root, {
+            recordingId: RECORDING_ID,
+            id: CUT_ID,
+            startFrame: 1,
+            endFrame: 3,
+            speed: 2,
+          });
+          await createCharacter(store.root, {
+            characterId: CHARACTER_ID,
+            width: 4,
+            height: 6,
+            anchor: { x: 2, y: 6 },
+          });
+
+          const draft = await extractClipDraft(store.root, {
+            characterId: CHARACTER_ID,
+            recordingId: RECORDING_ID,
+            cutId: CUT_ID,
+          });
+
+          // `speed` is a playback multiplier: 2 plays twice as fast, halving each
+          // frame's duration. It is applied when the Clip is generated.
+          expect(draft.delaysMs).toEqual([30, 40]);
+          // The Segment's frame *range* is untouched by `speed`.
+          expect(draft.frameCount).toBe(2);
+          expect(draft.segment).toEqual({
+            cutId: CUT_ID,
+            startFrame: 1,
+            endFrame: 3,
+            speed: 2,
+          });
+        });
+      },
+    );
+  });
+
+  it('rounds a sped-up delay and clamps it to at least 1ms', async () => {
+    await withSyntheticGif(
+      { frames: 2, width: 8, height: 6, delaysMs: [10, 20] },
+      async (gif) => {
+        await withStore(async (store) => {
+          await ingestRecording(store.root, { recordingId: RECORDING_ID, sourcePath: gif.path });
+          await addSegment(store.root, {
+            recordingId: RECORDING_ID,
+            id: CUT_ID,
+            startFrame: 0,
+            endFrame: 2,
+            speed: 3,
+          });
+          await createCharacter(store.root, {
+            characterId: CHARACTER_ID,
+            width: 4,
+            height: 6,
+            anchor: { x: 2, y: 6 },
+          });
+
+          const draft = await extractClipDraft(store.root, {
+            characterId: CHARACTER_ID,
+            recordingId: RECORDING_ID,
+            cutId: CUT_ID,
+          });
+
+          // 10/3 -> 3, 20/3 -> 7: rounded to the nearest integer millisecond.
+          expect(draft.delaysMs).toEqual([3, 7]);
+          expect(draft.delaysMs.every((delay) => delay >= 1)).toBe(true);
+        });
+      },
+    );
+  });
 });
 
 describe('extractClipDraft failures', () => {

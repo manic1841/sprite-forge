@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addSegment,
   createCharacter,
+  deriveAnchor,
+  ingestRecording,
   scan,
   StoreError,
   validateArtifact,
@@ -8,6 +11,7 @@ import {
   validateStore,
 } from '../src/core/index.js';
 import { withStore } from './harness.js';
+import { withSyntheticGif } from './synthetic-gif.js';
 
 describe('createCharacter', () => {
   it('writes the Character canvas artifact at characters/<id>/canvas.json', async () => {
@@ -107,6 +111,56 @@ describe('createCharacter', () => {
       const tree = await scan(store.root);
       expect(tree.characters.map((c) => c.id)).toEqual(['hero']);
       expect(tree.characters[0]?.dir).toBe('characters/hero');
+    });
+  });
+});
+
+describe('deriveAnchor', () => {
+  it("derives the Anchor as the first frame's content-box bottom-centre, with a symmetric Canvas", async () => {
+    // Fixture frame 0 content box = { x: 1, y: 3, w: 2, h: 2 }; bottom-centre = (2, 5).
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await ingestRecording(store.root, { recordingId: 'rec', sourcePath: gif.path });
+
+        const derived = await deriveAnchor(store.root, { recordingId: 'rec' });
+
+        expect(derived.frame).toBe(0);
+        expect(derived.bounds).toEqual({ x: 1, y: 3, width: 2, height: 2 });
+        expect(derived.anchor).toEqual({ x: 2, y: 5 });
+        // The Canvas is derived to stay symmetric about the Anchor (Rule 3.1).
+        expect(derived.canvas).toEqual({ width: 4, height: 5, anchor: { x: 2, y: 5 } });
+        expect(derived.canvas.anchor.x).toBe(derived.canvas.width / 2);
+        expect(derived.canvas.anchor.y).toBe(derived.canvas.height);
+
+        // The derived Canvas is valid and directly usable to create a Character.
+        validateArtifact('canvas', derived.canvas);
+        const created = await createCharacter(store.root, {
+          characterId: 'hero',
+          ...derived.canvas,
+        });
+        expect(created.canvas).toEqual(derived.canvas);
+      });
+    });
+  });
+
+  it("uses a Segment's first frame when a cut is given", async () => {
+    // Fixture frame 1 content box = { x: 2, y: 3, w: 2, h: 2 }; bottom-centre = (3, 5).
+    await withSyntheticGif({ frames: 4, width: 8, height: 6, delaysMs: [50, 50, 60, 50] }, async (gif) => {
+      await withStore(async (store) => {
+        await ingestRecording(store.root, { recordingId: 'rec', sourcePath: gif.path });
+        await addSegment(store.root, {
+          recordingId: 'rec',
+          id: 'walk',
+          startFrame: 1,
+          endFrame: 3,
+        });
+
+        const derived = await deriveAnchor(store.root, { recordingId: 'rec', cutId: 'walk' });
+
+        expect(derived.frame).toBe(1);
+        expect(derived.anchor).toEqual({ x: 3, y: 5 });
+        expect(derived.canvas).toEqual({ width: 6, height: 5, anchor: { x: 3, y: 5 } });
+      });
     });
   });
 });
