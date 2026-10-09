@@ -24,7 +24,8 @@ import type { RgbaImage } from './background.js';
 import type { Canvas } from './character.js';
 import { readClipDraft, writeClipDraft, type ClipDraft } from './draft.js';
 import { StoreError } from './errors.js';
-import { placeOnCanvas } from './frames.js';import { isValidId } from './ids.js';
+import { placeOnCanvas } from './frames.js';
+import { assertValidId } from './ids.js';
 import {
   assetMetaPath,
   assetProvenancePath,
@@ -469,8 +470,3 @@ function assertOffset(offset: PlacementOffset): void {
   }
 }
 
-function assertValidId(id: string, noun: string, label: string): void {
-  if (!isValidId(id)) {
-    throw new StoreError(`Invalid ${label} "${id}" (${noun} id): must match /^[a-z][a-z0-9-]*$/.`);
-  }
-}

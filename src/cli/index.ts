@@ -10,33 +10,48 @@ import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import {
   addSegment,
+  appendRepairOperation,
   commitDraft,
   commitSequence,
   createCharacter,
+  deriveAnchor,
+  expandCanvas,
   exportCharacter,
   extractClipDraft,
   ForgeError,
   forkAsset,
   ingestRecording,
   readCutList,
+  readDraftRepair,
   removeSegment,
   renameSegment,
   scan,
+  setPlacementOffset,
   StoreError,
+  undoRepairOperation,
   validateStore,
   ValidationError,
   verifyReproducible,
 } from '../core/index.js';
-import type { AssetKind, CutList } from '../core/index.js';
+import type {
+  AssetKind,
+  CutList,
+  RepairOperationInput,
+  RepairTool,
+  StrokeGeometry,
+} from '../core/index.js';
 
 const USAGE = `forge — sprite-forge CLI
 
 Usage:
   forge scan             --store <path>                              List the store's Recordings, Characters and Exports.
   forge validate         --store <path>                              Validate every artifact in the store.
-  forge ingest           --store <path> --source <file> --id <id>    Register a raw capture as a Recording.
-  forge create-character --store <path> --id <id> --width <n> --height <n> --anchor-x <n> --anchor-y <n>
+  forge ingest           --store <path> --recording-file <file> --id <id>
+                                                                     Register a raw capture as a Recording.
+  forge create-character --store <path> --id <id> [--width <n> --height <n> --anchor-x <n> --anchor-y <n>]
                                                                      Create a Character and its Canvas/Anchor.
+       Width/height/anchor may instead be derived from a Recording's first frame:
+       --recording <id> [--cut <id>] [--background <#rrggbb>] [--tolerance <n>]
   forge cut              --store <path> --recording <id> --action <add|rename|remove|list> [options]
                                                                      Edit a Recording's Segment cut list.
        add:    --id <cut-id> --start <n> --end <n> [--speed <n>]
@@ -65,14 +80,24 @@ Usage:
        --exported-at <iso>      Override the lock's export time (default: now)
   forge verify-reproducible --store <path> --character <id> --kind <clip|sequence|export> --id <asset-or-target>
                                                                      Re-run a stage from provenance and check it
-                                                                     lands on identical artifacts (exit 1 if not).`;
+                                                                     lands on identical artifacts (exit 1 if not).
+  forge repair           --store <path> --character <id> --draft <id> --action <list|append|undo> [options]
+                                                                     Edit a Draft's Repair script (its undo stack).
+       append: --tool <erase-rect|erase-brush|paint-brush> --start <n> --end <n>
+               erase-rect: --x <n> --y <n> --width <n> --height <n>
+               brushes:    --points "x,y;x,y" --size <n> [--color <#rrggbb> for paint-brush]
+       list/undo: (no further options)
+  forge align            --store <path> --character <id> --action <set-offset|expand> [options]
+                                                                     Set a Draft's placement offset, or expand the Canvas.
+       set-offset: --draft <id> --x <n> --y <n>
+       expand:     --width <n> --height <n>`;
 
 /** Run one CLI invocation. Returns the process exit code. */
 export async function runCli(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
 
   let store: string | undefined;
-  let source: string | undefined;
+  let recordingFile: string | undefined;
   let id: string | undefined;
   let width: string | undefined;
   let height: string | undefined;
@@ -83,6 +108,12 @@ export async function runCli(argv: string[]): Promise<number> {
   let start: string | undefined;
   let end: string | undefined;
   let speed: string | undefined;
+  let tool: string | undefined;
+  let x: string | undefined;
+  let y: string | undefined;
+  let points: string | undefined;
+  let size: string | undefined;
+  let color: string | undefined;
   let newId: string | undefined;
   let character: string | undefined;
   let cut: string | undefined;
@@ -106,7 +137,7 @@ export async function runCli(argv: string[]): Promise<number> {
       args: rest,
       options: {
         store: { type: 'string', short: 's' },
-        source: { type: 'string' },
+        'recording-file': { type: 'string' },
         id: { type: 'string' },
         width: { type: 'string' },
         height: { type: 'string' },
@@ -117,6 +148,12 @@ export async function runCli(argv: string[]): Promise<number> {
         start: { type: 'string' },
         end: { type: 'string' },
         speed: { type: 'string' },
+        tool: { type: 'string' },
+        x: { type: 'string' },
+        y: { type: 'string' },
+        points: { type: 'string' },
+        size: { type: 'string' },
+        color: { type: 'string' },
         'new-id': { type: 'string' },
         character: { type: 'string' },
         cut: { type: 'string' },
@@ -138,7 +175,7 @@ export async function runCli(argv: string[]): Promise<number> {
       },
     });
     store = values.store;
-    source = values.source;
+    recordingFile = values['recording-file'];
     id = values.id;
     width = values.width;
     height = values.height;
@@ -149,6 +186,12 @@ export async function runCli(argv: string[]): Promise<number> {
     start = values.start;
     end = values.end;
     speed = values.speed;
+    tool = values.tool;
+    x = values.x;
+    y = values.y;
+    points = values.points;
+    size = values.size;
+    color = values.color;
     newId = values['new-id'];
     character = values.character;
     cut = values.cut;
@@ -181,9 +224,9 @@ export async function runCli(argv: string[]): Promise<number> {
     case 'validate':
       return runValidate(store);
     case 'ingest':
-      return runIngest(store, source, id);
+      return runIngest(store, recordingFile, id);
     case 'create-character':
-      return runCreateCharacter(store, id, width, height, anchorX, anchorY);
+      return runCreateCharacter(store, id, width, height, anchorX, anchorY, recording, cut);
     case 'cut':
       return runCut(store, { recording, action, id, start, end, speed, newId });
     case 'extract':
@@ -213,6 +256,12 @@ export async function runCli(argv: string[]): Promise<number> {
       });
     case 'verify-reproducible':
       return runVerifyReproducible(store, { character, kind, id });
+    case 'repair':
+      return runRepair(store, {
+        character, draft, action, tool, start, end, x, y, width, height, points, size, color,
+      });
+    case 'align':
+      return runAlign(store, { character, draft, action, x, y, width, height });
     default:
       return fail(command ? `unknown command "${command}"` : 'no command given', USAGE);
   }
@@ -238,15 +287,15 @@ async function runValidate(store: string): Promise<number> {
   }
 }
 
-async function runIngest(store: string, source?: string, id?: string): Promise<number> {
-  if (!source) {
-    return fail('--source <file> is required for ingest');
+async function runIngest(store: string, recordingFile?: string, id?: string): Promise<number> {
+  if (!recordingFile) {
+    return fail('--recording-file <file> is required for ingest');
   }
   if (!id) {
     return fail('--id <recording-id> is required for ingest');
   }
   try {
-    const recording = await ingestRecording(store, { recordingId: id, sourcePath: source });
+    const recording = await ingestRecording(store, { recordingId: id, sourcePath: recordingFile });
     process.stdout.write(`${JSON.stringify(recording, null, 2)}\n`);
     return 0;
   } catch (error) {
@@ -261,6 +310,8 @@ async function runCreateCharacter(
   height?: string,
   anchorX?: string,
   anchorY?: string,
+  recording?: string,
+  cut?: string,
 ): Promise<number> {
   if (!id) {
     return fail('--id <character-id> is required for create-character');
@@ -269,21 +320,36 @@ async function runCreateCharacter(
   const heightPx = integerArg(height);
   const anchorXPx = integerArg(anchorX);
   const anchorYPx = integerArg(anchorY);
-  if (
-    widthPx === undefined ||
-    heightPx === undefined ||
-    anchorXPx === undefined ||
-    anchorYPx === undefined
-  ) {
-    return fail('--width, --height, --anchor-x and --anchor-y integers are required for create-character');
-  }
+  const allExplicit =
+    widthPx !== undefined &&
+    heightPx !== undefined &&
+    anchorXPx !== undefined &&
+    anchorYPx !== undefined;
+  const noneExplicit =
+    widthPx === undefined &&
+    heightPx === undefined &&
+    anchorXPx === undefined &&
+    anchorYPx === undefined;
+
   try {
-    const created = await createCharacter(store, {
-      characterId: id,
-      width: widthPx,
-      height: heightPx,
-      anchor: { x: anchorXPx, y: anchorYPx },
-    });
+    // Either the Canvas is given outright, or it is derived from a Recording's
+    // first frame (user story 42); a partial set is ambiguous and rejected.
+    let canvas: { width: number; height: number; anchor: { x: number; y: number } };
+    if (allExplicit) {
+      canvas = { width: widthPx, height: heightPx, anchor: { x: anchorXPx, y: anchorYPx } };
+    } else if (noneExplicit && recording) {
+      const derived = await deriveAnchor(store, {
+        recordingId: recording,
+        ...(cut !== undefined ? { cutId: cut } : {}),
+      });
+      canvas = derived.canvas;
+    } else {
+      return fail(
+        'provide --width, --height, --anchor-x and --anchor-y, or --recording [--cut] to derive them',
+      );
+    }
+
+    const created = await createCharacter(store, { characterId: id, ...canvas });
     process.stdout.write(`${JSON.stringify(created, null, 2)}\n`);
     return 0;
   } catch (error) {
@@ -613,6 +679,180 @@ async function runVerifyReproducible(
     const report = await verifyReproducible(store, { characterId: character, kind, id });
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     return report.reproducible ? 0 : 1;
+  } catch (error) {
+    return failForgeError(error);
+  }
+}
+
+/** Options for the `repair` command. */
+interface RepairArgs {
+  character?: string;
+  draft?: string;
+  action?: string;
+  tool?: string;
+  start?: string;
+  end?: string;
+  x?: string;
+  y?: string;
+  width?: string;
+  height?: string;
+  points?: string;
+  size?: string;
+  color?: string;
+}
+
+/** `forge repair` — list, append to, or undo a Draft's Repair script. */
+async function runRepair(store: string, args: RepairArgs): Promise<number> {
+  const { character, draft, action } = args;
+  if (!character) {
+    return fail('--character <character-id> is required for repair');
+  }
+  if (!draft) {
+    return fail('--draft <draft-id> is required for repair');
+  }
+  if (!action) {
+    return fail('--action <list|append|undo> is required for repair');
+  }
+  try {
+    switch (action) {
+      case 'list': {
+        const state = await readDraftRepair(store, { characterId: character, draftId: draft });
+        process.stdout.write(`${JSON.stringify(state, null, 2)}\n`);
+        return 0;
+      }
+      case 'undo': {
+        const state = await undoRepairOperation(store, { characterId: character, draftId: draft });
+        process.stdout.write(`${JSON.stringify(state, null, 2)}\n`);
+        return 0;
+      }
+      case 'append': {
+        const operation = parseRepairOperation(args);
+        if (typeof operation === 'string') {
+          return fail(operation);
+        }
+        const state = await appendRepairOperation(store, {
+          characterId: character,
+          draftId: draft,
+          operation,
+        });
+        process.stdout.write(`${JSON.stringify(state, null, 2)}\n`);
+        return 0;
+      }
+      default:
+        return fail(`unknown repair action "${action}"`, USAGE);
+    }
+  } catch (error) {
+    return failForgeError(error);
+  }
+}
+
+/** Build a Repair operation from CLI args; a string result is an error message. */
+function parseRepairOperation(args: RepairArgs): RepairOperationInput | string {
+  const tool = args.tool;
+  const knownTools: readonly RepairTool[] = ['erase-rect', 'erase-brush', 'paint-brush'];
+  if (!knownTools.includes(tool as RepairTool)) {
+    return '--tool <erase-rect|erase-brush|paint-brush> is required for repair --action append';
+  }
+  const start = integerArg(args.start);
+  const end = integerArg(args.end);
+  if (start === undefined || end === undefined) {
+    return '--start and --end integers are required for repair --action append';
+  }
+
+  if (tool === 'erase-rect') {
+    const x = integerArg(args.x);
+    const y = integerArg(args.y);
+    const width = integerArg(args.width);
+    const height = integerArg(args.height);
+    if (x === undefined || y === undefined || width === undefined || height === undefined) {
+      return '--x, --y, --width and --height integers are required for repair --tool erase-rect';
+    }
+    return { tool, frames: { start, end }, geometry: { x, y, width, height } };
+  }
+
+  const points = parsePoints(args.points);
+  const size = integerArg(args.size);
+  if (points === null || size === undefined) {
+    return '--points "x,y;x,y" and --size <n> are required for a brush repair tool';
+  }
+  const geometry: StrokeGeometry = { points, size };
+  return {
+    tool: tool as RepairTool,
+    frames: { start, end },
+    geometry,
+    ...(args.color !== undefined ? { color: args.color } : {}),
+  };
+}
+
+/** Parse `"x,y;x,y"` into integer points; `null` when any pair is malformed. */
+function parsePoints(value: string | undefined): Array<[number, number]> | null {
+  if (!value) {
+    return null;
+  }
+  const points: Array<[number, number]> = [];
+  for (const pair of value.split(';')) {
+    const [px, py] = pair.split(',').map((part) => Number(part.trim()));
+    if (!Number.isInteger(px) || !Number.isInteger(py)) {
+      return null;
+    }
+    points.push([px!, py!]);
+  }
+  return points.length > 0 ? points : null;
+}
+
+/** Options for the `align` command. */
+interface AlignArgs {
+  character?: string;
+  draft?: string;
+  action?: string;
+  x?: string;
+  y?: string;
+  width?: string;
+  height?: string;
+}
+
+/** `forge align` — set a Draft's placement offset, or expand the Canvas. */
+async function runAlign(store: string, args: AlignArgs): Promise<number> {
+  const { character, action } = args;
+  if (!character) {
+    return fail('--character <character-id> is required for align');
+  }
+  if (!action) {
+    return fail('--action <set-offset|expand> is required for align');
+  }
+  try {
+    switch (action) {
+      case 'set-offset': {
+        const { draft } = args;
+        if (!draft) {
+          return fail('--draft <draft-id> is required for align --action set-offset');
+        }
+        const x = integerArg(args.x);
+        const y = integerArg(args.y);
+        if (x === undefined || y === undefined) {
+          return fail('--x and --y integers are required for align --action set-offset');
+        }
+        const updated = await setPlacementOffset(store, {
+          characterId: character,
+          draftId: draft,
+          offset: { x, y },
+        });
+        process.stdout.write(`${JSON.stringify(updated, null, 2)}\n`);
+        return 0;
+      }
+      case 'expand': {
+        const width = integerArg(args.width);
+        const height = integerArg(args.height);
+        if (width === undefined || height === undefined) {
+          return fail('--width and --height integers are required for align --action expand');
+        }
+        const result = await expandCanvas(store, { characterId: character, width, height });
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return 0;
+      }
+      default:
+        return fail(`unknown align action "${action}"`, USAGE);
+    }
   } catch (error) {
     return failForgeError(error);
   }

@@ -19,7 +19,7 @@ import { readClip, readSequence, renderSequenceSheet, tileRepairedFrames } from 
 import { renderSegmentFrames } from './draft.js';
 import { StoreError } from './errors.js';
 import { buildExport, readExportManifest, type ExportManifest } from './export.js';
-import { isValidId } from './ids.js';
+import { assertValidId } from './ids.js';
 import { assetMetaPath, canvasPath, manifestPath, sheetPath } from './layout.js';
 import { readRepairScript } from './repair.js';
 import { pathExists, readBinaryFile, readJsonFile } from './store/index.js';
@@ -304,9 +304,3 @@ async function readCanvas(root: string, characterId: string): Promise<Canvas> {
   return value as Canvas;
 }
 
-/** Reject an id that does not match the id grammar before it becomes a path segment. */
-function assertValidId(id: string, noun: string, label: string): void {
-  if (!isValidId(id)) {
-    throw new StoreError(`Invalid ${label} "${id}" (${noun} id): must match /^[a-z][a-z0-9-]*$/.`);
-  }
-}

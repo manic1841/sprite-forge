@@ -31,9 +31,15 @@ import {
   validateStore,
   StoreError,
 } from '../src/core/index.js';
-import type { RgbaImage } from '../src/core/background.js';
 import { withStore, type StoreFixture } from './harness.js';
 import { withSyntheticGif, type SyntheticGif } from './synthetic-gif.js';
+
+/** A raw RGBA image, as decoded for pixel assertions. */
+interface RgbaImage {
+  width: number;
+  height: number;
+  data: Uint8Array;
+}
 
 const CHARACTER_ID = 'hero';
 const RECORDING_ID = 'mgba-2026-09';

@@ -20,7 +20,7 @@
 import type { AssetMeta } from './assets.js';
 import type { Canvas } from './character.js';
 import { StoreError } from './errors.js';
-import { isValidId } from './ids.js';
+import { assertValidId, isValidId } from './ids.js';
 import {
   assetMetaPath,
   canvasPath,
@@ -156,10 +156,23 @@ export async function buildExport(
 
   const canvas = await readCanvas(root, characterId);
   const animationIds = await resolveAnimationIds(root, characterId, options.animations);
+  // Format-spec §9: the `flipsFacing`<->turn correspondence is a design check, not
+  // a structural one. A `flipsFacing` id that names a committed Asset outside the
+  // exported subset is therefore allowed (it is ignored, contributing no flag). An
+  // id that names no committed Asset at all *is* a closed-export error: it is a
+  // dangling reference, not a design judgement.
   const flips = new Set(options.flipsFacing ?? []);
   for (const id of flips) {
-    if (!animationIds.includes(id)) {
-      throw new StoreError(`flipsFacing names animation "${id}", which is not exported.`);
+    if (animationIds.includes(id)) {
+      continue;
+    }
+    const committed =
+      (await pathExists(root, clipDir(characterId, id))) ||
+      (await pathExists(root, sequenceDir(characterId, id)));
+    if (!committed) {
+      throw new StoreError(
+        `flipsFacing names "${id}", which is not a committed Asset of Character "${characterId}".`,
+      );
     }
   }
 
@@ -187,7 +200,7 @@ export async function buildExport(
     authoredFacing: options.authoredFacing ?? 'right',
     canvas,
     animations,
-    bindings: cloneBindings(bindings),
+    bindings: copyBindings(bindings),
     lock: {
       spriteForgeVersion: SPRITE_FORGE_VERSION,
       exportedAt: options.exportedAt ?? new Date().toISOString(),
@@ -334,12 +347,12 @@ function assertBindings(
 }
 
 /** Copy the caller's bindings so the result cannot be mutated from outside. */
-function cloneBindings(bindings: ExportBindings): ExportBindings {
-  const clone: ExportBindings = {};
+function copyBindings(bindings: ExportBindings): ExportBindings {
+  const copy: ExportBindings = {};
   for (const [situation, ids] of Object.entries(bindings)) {
-    clone[situation] = [...ids];
+    copy[situation] = [...ids];
   }
-  return clone;
+  return copy;
 }
 
 /** Read and validate the Character's Canvas; the Manifest must equal it (§9). */
@@ -355,12 +368,6 @@ async function readCanvas(root: string, characterId: string): Promise<Canvas> {
   return value as Canvas;
 }
 
-/** Reject an id that does not match the id grammar before it becomes a path segment. */
-function assertValidId(id: string, noun: string, label: string): void {
-  if (!isValidId(id)) {
-    throw new StoreError(`Invalid ${label} "${id}" (${noun} id): must match /^[a-z][a-z0-9-]*$/.`);
-  }
-}
 
 /** The target is a folder name under `exports/`, so it must be a safe id. */
 function assertValidTarget(target: string): void {

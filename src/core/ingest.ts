@@ -83,9 +83,9 @@ export async function ingestRecording(
     const recorded = await readJsonFile(root, cutListPath);
     if (!matchesRecordedSource(recorded, hash, frameCount)) {
       throw new StoreError(
-        `Ingest mismatch for recording "${recordingId}": the source no longer ` +
+        `Ingest mismatch for recording "${recordingId}": the file no longer ` +
           `matches the recorded hash/frame count. Recorded ` +
-          `${describeRecorded(recorded)}; source is ${describeSource(hash, frameCount)}.`,
+          `${describeRecorded(recorded)}; file is ${describeFile(hash, frameCount)}.`,
       );
     }
     await ensureSourcePresent(root, sourcePath(recordingId), bytes);
@@ -104,7 +104,7 @@ async function readBytes(sourceFile: string): Promise<Buffer> {
   try {
     return await readExternalFile(sourceFile);
   } catch (error) {
-    throw new StoreError(`Cannot read recording source "${sourceFile}": ${(error as Error).message}`);
+    throw new StoreError(`Cannot read recording file "${sourceFile}": ${(error as Error).message}`);
   }
 }
 
@@ -117,17 +117,17 @@ async function readSourceFacts(
   try {
     metadata = await sharp(bytes, { animated: true }).metadata();
   } catch (error) {
-    throw new StoreError(`Cannot decode recording source "${sourceFile}": ${(error as Error).message}`);
+    throw new StoreError(`Cannot decode recording file "${sourceFile}": ${(error as Error).message}`);
   }
 
   const frameCount = metadata.pages;
   const delaysMs = metadata.delay;
   if (typeof frameCount !== 'number' || frameCount < 1) {
-    throw new StoreError(`Recording source "${sourceFile}" reports no frames.`);
+    throw new StoreError(`Recording file "${sourceFile}" reports no frames.`);
   }
   if (!Array.isArray(delaysMs) || delaysMs.length !== frameCount) {
     throw new StoreError(
-      `Recording source "${sourceFile}" does not report per-frame delays ` +
+      `Recording file "${sourceFile}" does not report per-frame delays ` +
         `(expected ${frameCount}, got ${Array.isArray(delaysMs) ? delaysMs.length : 'none'}).`,
     );
   }
@@ -155,7 +155,7 @@ function describeRecorded(recorded: unknown): string {
   return 'an unreadable cut list';
 }
 
-function describeSource(hash: string, frameCount: number): string {
+function describeFile(hash: string, frameCount: number): string {
   return `{ hash: ${hash}, frameCount: ${frameCount} }`;
 }
 

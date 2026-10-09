@@ -9,7 +9,8 @@
 // range edge, real painting) is verified by running `pnpm web` against a temp store.
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clampRange, mountWorkbench } from '../src/web/client/app.js';
+import { mountWorkbench } from '../src/web/client/app.js';
+import { clampRange } from '../src/web/client/timeline.js';
 import type { WorkbenchApi } from '../src/web/client/api.js';
 import type {
   AlignmentState,

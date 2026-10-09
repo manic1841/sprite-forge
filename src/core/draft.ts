@@ -31,10 +31,10 @@ import {
   type Rgb,
   type RgbaImage,
 } from './background.js';
-import type { Canvas } from './character.js';
+import type { Canvas, CanvasAnchor } from './character.js';
 import { StoreError, ValidationError, type ValidationIssue } from './errors.js';
 import { contentBounds, cropTo, placeOnCanvas, unionBounds, type Bounds } from './frames.js';
-import { isValidId } from './ids.js';
+import { assertValidId, isValidId } from './ids.js';
 import {
   canvasPath,
   draftDir,
@@ -202,7 +202,7 @@ export async function extractClipDraft(
 
   const rendered = await renderSegmentFrames(root, {
     recordingId,
-    segment: { startFrame: cut.startFrame, endFrame: cut.endFrame },
+    segment: { startFrame: cut.startFrame, endFrame: cut.endFrame, speed: cut.speed ?? 1 },
     canvas,
     ...(options.background !== undefined ? { background: options.background } : {}),
     tolerance,
@@ -254,7 +254,7 @@ export interface RenderSegmentFramesOptions {
   /** The Recording the Segment was cut from. */
   recordingId: string;
   /** The half-open frame range to render — a live cut or a provenance snapshot. */
-  segment: { startFrame: number; endFrame: number };
+  segment: { startFrame: number; endFrame: number; speed?: number };
   /** The Character's shared Canvas the frames are placed on. */
   canvas: Canvas;
   /** An explicit `#rrggbb` background override; sampled from a corner when omitted. */
@@ -295,6 +295,10 @@ export async function renderSegmentFrames(
   if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255) {
     throw new StoreError(`Tolerance must be an integer in 0..255; got ${tolerance}.`);
   }
+  const speed = segment.speed ?? 1;
+  if (!Number.isFinite(speed) || speed <= 0) {
+    throw new StoreError(`Segment speed must be a number > 0; got ${speed}.`);
+  }
 
   const bytes = await readSource(root, recordingId, options.expectedHash);
   const decoded = await decodeSegment(bytes, recordingId, segment);
@@ -331,9 +335,108 @@ export async function renderSegmentFrames(
 
   return {
     frames: placed,
-    delaysMs: decoded.delaysMs.slice(segment.startFrame, segment.endFrame),
+    delaysMs: applySpeed(decoded.delaysMs.slice(segment.startFrame, segment.endFrame), speed),
     background: backgroundRecord,
   };
+}
+
+/**
+ * Apply a Segment's `speed` playback multiplier to the sliced frame delays.
+ *
+ * `speed` is a playback multiplier (docs/recordings.md): `2` plays the Clip twice
+ * as fast, so each frame's duration is **divided** by it; a slowed clip
+ * (`speed < 1`) lengthens the delays. It changes pacing only — never the Segment's
+ * frame range. The result stays a positive integer (`delaysMs` items have
+ * `minimum: 1` in the contract): each value is rounded to the nearest millisecond
+ * and clamped to at least `1`.
+ */
+function applySpeed(delaysMs: number[], speed: number): number[] {
+  if (speed === 1) {
+    return delaysMs;
+  }
+  return delaysMs.map((delay) => Math.max(1, Math.round(delay / speed)));
+}
+
+/** Inputs for {@link deriveAnchor}. */
+export interface DeriveAnchorOptions {
+  /** The Recording whose first frame seeds the Anchor. */
+  recordingId: string;
+  /** A Segment's cut id; the Segment's **first** frame is used. Defaults to frame 0. */
+  cutId?: string;
+  /** An explicit `#rrggbb` background override; sampled from a corner when omitted. */
+  background?: string;
+  /** Per-channel key tolerance; defaults to 24. */
+  tolerance?: number;
+}
+
+/** A derived Anchor plus the symmetric Canvas it implies (user story 42). */
+export interface DerivedAnchor {
+  /** The source frame index used (the Segment's start, or `0`). */
+  frame: number;
+  /** The first frame's content box, in source-frame pixels. */
+  bounds: Bounds;
+  /** The content-box bottom-centre — the derived Anchor. */
+  anchor: CanvasAnchor;
+  /** A Canvas horizontally symmetric about the Anchor, with it on the bottom edge. */
+  canvas: Canvas;
+}
+
+/**
+ * Derive a Character's Anchor from a Recording (or Segment)'s first frame.
+ *
+ * User story 42: the Anchor is the first frame's content-box **bottom-centre**.
+ * The Canvas is symmetric about the Anchor (`anchor.x == width/2`) with the Anchor
+ * on its bottom edge (`anchor.y == height`), so deriving the Anchor also implies
+ * the Canvas (docs/alignment.md): the content's centre is put at the Anchor by
+ * setting `width = 2 * centreX` (the frame's content is centred, with the Canvas
+ * exactly wide enough to hold it because `centreX >= content right edge / 2`) and
+ * `height = bounds.y + bounds.height`. The centre is rounded **up** so an
+ * odd-width content box still fits. Later frames are not consulted — choose the
+ * Segment so every frame fits, or expand the Canvas afterwards.
+ */
+export async function deriveAnchor(
+  root: string,
+  options: DeriveAnchorOptions,
+): Promise<DerivedAnchor> {
+  const { recordingId } = options;
+  assertValidId(recordingId, 'recording', 'recordingId');
+  const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
+  if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255) {
+    throw new StoreError(`Tolerance must be an integer in 0..255; got ${tolerance}.`);
+  }
+
+  let startFrame = 0;
+  if (options.cutId !== undefined) {
+    assertValidId(options.cutId, 'cut', 'cutId');
+    const segment = await resolveSegment(root, recordingId, options.cutId);
+    startFrame = segment.startFrame;
+  }
+
+  const bytes = await readSource(root, recordingId);
+  const decoded = await decodeSegment(bytes, recordingId, {
+    startFrame,
+    endFrame: startFrame + 1,
+  });
+  const frame = decoded.frames[0]!;
+  const background: Rgb =
+    options.background !== undefined
+      ? parseHexColor(options.background)
+      : sampleBackgroundColor(decoded.frames);
+  const bounds = contentBounds(keyBackground(frame, background, tolerance));
+  if (bounds === null) {
+    throw new StoreError(
+      `Cannot derive an Anchor: frame ${startFrame} of Recording "${recordingId}" has no ` +
+        `content (every pixel is the background colour).`,
+    );
+  }
+
+  const anchor: CanvasAnchor = {
+    x: Math.ceil(bounds.x + bounds.width / 2),
+    y: bounds.y + bounds.height,
+  };
+  const canvas: Canvas = { width: 2 * anchor.x, height: anchor.y, anchor };
+  validateArtifact('canvas', canvas);
+  return { frame: startFrame, bounds, anchor, canvas };
 }
 
 /**
@@ -489,7 +592,7 @@ async function readSource(root: string, recordingId: string, hash?: string): Pro
   const sourceRelPath = sourcePath(recordingId);
   if (!(await pathExists(root, sourceRelPath))) {
     throw new StoreError(
-      `Recording "${recordingId}" has no source (${sourceRelPath} is missing).`,
+      `Recording "${recordingId}" has no recording file (${sourceRelPath} is missing).`,
     );
   }
   const bytes = await readBinaryFile(root, sourceRelPath);
@@ -499,7 +602,7 @@ async function readSource(root: string, recordingId: string, hash?: string): Pro
   const actual = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
   if (actual !== hash) {
     throw new StoreError(
-      `Recording "${recordingId}" source does not match its recorded hash; ` +
+      `Recording "${recordingId}" file does not match its recorded hash; ` +
         `re-ingest before extracting a Clip.`,
     );
   }
@@ -517,7 +620,7 @@ async function decodeSegment(
     metadata = await sharp(bytes, { animated: true }).metadata();
   } catch (error) {
     throw new StoreError(
-      `Cannot decode Recording "${recordingId}" source: ${(error as Error).message}`,
+      `Cannot decode recording file for "${recordingId}": ${(error as Error).message}`,
     );
   }
 
@@ -583,12 +686,6 @@ function automaticPlacement(
   return { dx, dy };
 }
 
-/** Reject an id that does not match the id grammar before it becomes a path segment. */
-function assertValidId(id: string, noun: string, label: string): void {
-  if (!isValidId(id)) {
-    throw new StoreError(`Invalid ${label} "${id}" (${noun} id): must match /^[a-z][a-z0-9-]*$/.`);
-  }
-}
 
 // --- Draft descriptor validation (design-local; drafts are not a frozen format) --
 

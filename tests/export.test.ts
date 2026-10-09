@@ -25,7 +25,6 @@ import {
   validateExport,
   validateStore,
 } from '../src/core/index.js';
-import { SPRITE_FORGE_VERSION } from '../src/core/version.js';
 import { withStore, type StoreFixture } from './harness.js';
 import { withSyntheticGif, type SyntheticGif } from './synthetic-gif.js';
 import { runCli } from '../src/cli/index.js';
@@ -282,8 +281,14 @@ describe('exportCharacter', () => {
             lock: { spriteForgeVersion: string; exportedAt: string };
           };
           expect(manifest.formatVersion).toMatch(/^\d+\.\d+\.\d+$/);
+          // The tool version is asserted where it is observable: the Manifest lock
+          // matches the committed Clip's provenance, not an imported constant.
+          const provenance = store.readJson(
+            `characters/${CHARACTER_ID}/clips/${CLIP_ID}/provenance.json`,
+          ) as { spriteForgeVersion: string };
+          expect(provenance.spriteForgeVersion).toMatch(/^\d+\.\d+\.\d+$/);
           expect(manifest.lock).toEqual({
-            spriteForgeVersion: SPRITE_FORGE_VERSION,
+            spriteForgeVersion: provenance.spriteForgeVersion,
             exportedAt,
           });
           expect(new Date(manifest.lock.exportedAt).toISOString()).toBe(exportedAt);
@@ -337,6 +342,66 @@ describe('exportCharacter', () => {
             });
           },
         );
+      },
+    );
+  });
+
+  it('allows flipsFacing to name a committed animation outside the exported subset (design check)', async () => {
+    await withSyntheticGif(
+      { frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#ff0000' },
+      async (red) => {
+        await withSyntheticGif(
+          { frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#00ff00' },
+          async (green) => {
+            await withStore(async (store) => {
+              await seedClip(red, store);
+              await seedClip(green, store, {
+                recordingId: 'rec-green',
+                cutId: 'green',
+                clipId: 'green-run',
+              });
+
+              // `green-run` is committed but NOT in the exported subset. Rule 9's
+              // flipsFacing<->turn correspondence is a design check, not structural,
+              // so this must not fail: the id simply contributes no flag here.
+              const manifest = (
+                await exportCharacter(store.root, {
+                  characterId: CHARACTER_ID,
+                  target: TARGET,
+                  animations: [CLIP_ID],
+                  bindings: { idle: [CLIP_ID] },
+                  situations: ['idle'],
+                  flipsFacing: ['green-run'],
+                })
+              ).manifest;
+
+              expect(Object.keys(manifest.animations)).toEqual([CLIP_ID]);
+              expect(manifest.animations[CLIP_ID]).not.toHaveProperty('flipsFacing');
+            });
+          },
+        );
+      },
+    );
+  });
+
+  it('rejects a flipsFacing id that is not a committed Asset at all', async () => {
+    await withSyntheticGif(
+      { frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#ff0000' },
+      async (gif) => {
+        await withStore(async (store) => {
+          await seedClip(gif, store);
+
+          await expect(
+            exportCharacter(store.root, {
+              characterId: CHARACTER_ID,
+              target: TARGET,
+              animations: [CLIP_ID],
+              bindings: { idle: [CLIP_ID] },
+              situations: ['idle'],
+              flipsFacing: ['ghost'],
+            }),
+          ).rejects.toBeInstanceOf(StoreError);
+        });
       },
     );
   });

@@ -17,7 +17,7 @@
  */
 
 import { StoreError } from './errors.js';
-import { isValidId } from './ids.js';
+import { assertValidId } from './ids.js';
 import { cutsPath } from './layout.js';
 import { pathExists, readJsonFile, writeJsonFile } from './store/index.js';
 import { validateArtifact } from './validate.js';
@@ -62,13 +62,6 @@ export async function readCutList(root: string, recordingId: string): Promise<Cu
   const value = await readJsonFile(root, artifactPath);
   validateArtifact('cuts', value, { artifact: artifactPath });
   return value as CutList;
-}
-
-/** Reject an id that does not match the id grammar before it becomes a path segment. */
-function assertValidId(id: string, noun: string, label: string): void {
-  if (!isValidId(id)) {
-    throw new StoreError(`Invalid ${label} "${id}" (${noun} id): must match /^[a-z][a-z0-9-]*$/.`);
-  }
 }
 
 /** Inputs for {@link addSegment}. */
