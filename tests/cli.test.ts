@@ -79,7 +79,7 @@ describe('forge CLI', () => {
           'ingest',
           '--store',
           store.root,
-          '--source',
+          '--recording-file',
           source.path,
           '--id',
           'mgba-2026-09',
@@ -154,6 +154,30 @@ describe('forge CLI', () => {
     });
   });
 
+  it("create-character derives the Canvas/Anchor from a Recording's first frame", async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
+      await withStore(async (store) => {
+        const ingested = await forge([
+          'ingest', '--store', store.root, '--recording-file', source.path, '--id', 'mgba-2026-09',
+        ]);
+        expect(ingested.code).toBe(0);
+
+        const created = await forge([
+          'create-character', '--store', store.root, '--id', 'hero', '--recording', 'mgba-2026-09',
+        ]);
+
+        expect(created.code, created.stderr).toBe(0);
+        // First frame's content box { x:1, y:3, w:2, h:2 } -> bottom-centre (2,5).
+        expect(JSON.parse(created.stdout).canvas).toEqual({
+          width: 4,
+          height: 5,
+          anchor: { x: 2, y: 5 },
+        });
+        expect((await forge(['validate', '--store', store.root])).code).toBe(0);
+      });
+    });
+  });
+
   it('cut adds a Segment that cut --action list then reads back', async () => {
     await withSyntheticGif({ frames: 4, delaysMs: [50, 50, 60, 50] }, async (source) => {
       await withStore(async (store) => {
@@ -161,7 +185,7 @@ describe('forge CLI', () => {
           'ingest',
           '--store',
           store.root,
-          '--source',
+          '--recording-file',
           source.path,
           '--id',
           'mgba-2026-09',
@@ -218,7 +242,7 @@ describe('forge CLI', () => {
               'ingest',
               '--store',
               store.root,
-              '--source',
+              '--recording-file',
               source.path,
               '--id',
               'mgba-2026-09',
@@ -297,7 +321,7 @@ describe('forge CLI', () => {
     await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
       await withStore(async (store) => {
         const seed = [
-          ['ingest', '--store', store.root, '--source', source.path, '--id', 'mgba-2026-09'],
+          ['ingest', '--store', store.root, '--recording-file', source.path, '--id', 'mgba-2026-09'],
           [
             'create-character', '--store', store.root, '--id', 'hero',
             '--width', '4', '--height', '6', '--anchor-x', '2', '--anchor-y', '6',
@@ -343,6 +367,94 @@ describe('forge CLI', () => {
         ]);
         const validated = await forge(['validate', '--store', store.root]);
         expect(validated.code).toBe(0);
+      });
+    });
+  });
+
+  it('repair appends, lists and undoes a Draft Repair operation (round-trip)', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
+      await withStore(async (store) => {
+        const seed = [
+          ['ingest', '--store', store.root, '--recording-file', source.path, '--id', 'mgba-2026-09'],
+          [
+            'create-character', '--store', store.root, '--id', 'hero',
+            '--width', '4', '--height', '6', '--anchor-x', '2', '--anchor-y', '6',
+          ],
+          [
+            'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+            '--action', 'add', '--id', 'walk', '--start', '0', '--end', '2',
+          ],
+          ['extract', '--store', store.root, '--character', 'hero', '--recording', 'mgba-2026-09', '--cut', 'walk'],
+        ];
+        for (const args of seed) {
+          expect((await forge(args)).code).toBe(0);
+        }
+
+        const appended = await forge([
+          'repair', '--store', store.root, '--character', 'hero', '--draft', 'walk',
+          '--action', 'append', '--tool', 'erase-rect',
+          '--start', '0', '--end', '1', '--x', '1', '--y', '4', '--width', '1', '--height', '1',
+        ]);
+        expect(appended.code).toBe(0);
+        expect(JSON.parse(appended.stdout).operations).toEqual([
+          { tool: 'erase-rect', frames: { start: 0, end: 1 }, geometry: { x: 1, y: 4, width: 1, height: 1 } },
+        ]);
+
+        const listed = await forge([
+          'repair', '--store', store.root, '--character', 'hero', '--draft', 'walk', '--action', 'list',
+        ]);
+        expect(listed.code).toBe(0);
+        expect(JSON.parse(listed.stdout).operations).toHaveLength(1);
+
+        const undone = await forge([
+          'repair', '--store', store.root, '--character', 'hero', '--draft', 'walk', '--action', 'undo',
+        ]);
+        expect(undone.code).toBe(0);
+        expect(JSON.parse(undone.stdout).operations).toEqual([]);
+
+        expect((await forge(['validate', '--store', store.root])).code).toBe(0);
+      });
+    });
+  });
+
+  it('align sets a placement offset and expands the Canvas (round-trip)', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
+      await withStore(async (store) => {
+        const seed = [
+          ['ingest', '--store', store.root, '--recording-file', source.path, '--id', 'mgba-2026-09'],
+          [
+            'create-character', '--store', store.root, '--id', 'hero',
+            '--width', '4', '--height', '6', '--anchor-x', '2', '--anchor-y', '6',
+          ],
+          [
+            'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+            '--action', 'add', '--id', 'walk', '--start', '0', '--end', '2',
+          ],
+          ['extract', '--store', store.root, '--character', 'hero', '--recording', 'mgba-2026-09', '--cut', 'walk'],
+        ];
+        for (const args of seed) {
+          expect((await forge(args)).code).toBe(0);
+        }
+
+        const offset = await forge([
+          'align', '--store', store.root, '--character', 'hero',
+          '--action', 'set-offset', '--draft', 'walk', '--x', '1', '--y=-1',
+        ]);
+        expect(offset.code, offset.stderr).toBe(0);
+        expect(JSON.parse(offset.stdout)).toMatchObject({ placementOffset: { x: 1, y: -1 } });
+
+        const expanded = await forge([
+          'align', '--store', store.root, '--character', 'hero',
+          '--action', 'expand', '--width', '6', '--height', '8',
+        ]);
+        expect(expanded.code).toBe(0);
+        expect(JSON.parse(expanded.stdout).canvas).toEqual({
+          width: 6,
+          height: 8,
+          anchor: { x: 3, y: 8 },
+        });
+
+        expect((await forge(['validate', '--store', store.root])).code).toBe(0);
       });
     });
   });
