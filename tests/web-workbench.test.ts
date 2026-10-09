@@ -16,6 +16,7 @@ import type {
   CharacterAlignment,
   ClipDraft,
   CutList,
+  ExportResult,
   RepairState,
   StoreScan,
 } from '../src/web/client/types.js';
@@ -94,9 +95,30 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     }),
     sheetUrl: (characterId, kind, id) =>
       `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet`,
+    exportCharacter: async () => EXPORT_RESULT,
+    readManifest: async () => EXPORT_RESULT,
     ...overrides,
   };
 }
+
+/** A valid ExportResult for the Export stage's "live manifest". */
+const EXPORT_RESULT: ExportResult = {
+  target: 'pixel-pet',
+  manifestPath: 'exports/pixel-pet/manifest.json',
+  sheetPaths: ['exports/pixel-pet/clips/walk.png'],
+  manifest: {
+    formatVersion: '1.0.0',
+    target: 'pixel-pet',
+    character: 'hero',
+    authoredFacing: 'right',
+    canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
+    animations: {
+      walk: { sheet: 'clips/walk.png', frameCount: 3, delaysMs: [50], loop: true },
+    },
+    bindings: { idle: ['walk'] },
+    lock: { spriteForgeVersion: '0.1.0', exportedAt: '2026-10-08T00:00:00.000Z' },
+  },
+};
 
 const EMPTY_REPAIR: RepairState = { operations: [], warnings: [] };
 const EMPTY_ALIGNMENT: AlignmentState = { offset: { x: 0, y: 0 }, warnings: [] };
@@ -476,5 +498,33 @@ describe('clampRange', () => {
     expect(clampRange('end', 500, cut, 10)).toEqual({ startFrame: 2, endFrame: 10 });
     // An end dragged before the start leaves at least one frame.
     expect(clampRange('end', 0, cut, 10)).toEqual({ startFrame: 2, endFrame: 3 });
+  });
+});
+
+describe('the Export stage', () => {
+  it('shows the live manifest in the inspector and the target in the stage', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    wb.setMode('export');
+    await wb.loadExport('pixel-pet');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    expect(stage.querySelector('[data-stage-view="export"]')).not.toBeNull();
+    expect(stage.querySelector<HTMLElement>('[data-export-summary]')!.textContent).toContain(
+      'pixel-pet',
+    );
+
+    const inspector = wb.root.querySelector<HTMLElement>('[data-region="inspector"]')!;
+    expect(inspector.dataset.inspectorFor).toBe('export');
+    const manifest = inspector.querySelector<HTMLElement>('[data-manifest]')!;
+    expect(manifest).not.toBeNull();
+    expect(manifest.dataset.manifestTarget).toBe('pixel-pet');
+    // The inspector renders the manifest JSON the consumer would read.
+    expect(manifest.textContent).toContain('"formatVersion": "1.0.0"');
+    expect(manifest.textContent).toContain('"clips/walk.png"');
+
+    expect(wb.activeExport).toBe('pixel-pet');
+    expect(wb.manifest?.manifest.target).toBe('pixel-pet');
   });
 });

@@ -13,6 +13,7 @@ import {
   commitDraft,
   commitSequence,
   createCharacter,
+  exportCharacter,
   extractClipDraft,
   ForgeError,
   forkAsset,
@@ -21,6 +22,7 @@ import {
   removeSegment,
   renameSegment,
   scan,
+  StoreError,
   validateStore,
   ValidationError,
 } from '../core/index.js';
@@ -51,7 +53,15 @@ Usage:
   forge commit           --store <path> --character <id> --name <sequence-id> --kind sequence --clips <a,b,c> [--fork-from <seq-id>]
                                                                      Concatenate committed Clips into a Sequence.
   forge fork             --store <path> --character <id> --kind <clip|sequence> --id <asset-id> [--draft <id>]
-                                                                     Open a Clip as a Draft, or a Sequence as its ordered Clip list.`;
+                                                                     Open a Clip as a Draft, or a Sequence as its ordered Clip list.
+  forge export           --store <path> --character <id> --target <target> --bindings <s=p,...> [options]
+                                                                     Gather an Asset subset into a closed Manifest plus sheets.
+       --animations <a,b>      Asset ids to export (default: every committed Asset)
+       --bindings <s=a,b;s2=c>  Situation -> one or more animation ids
+       --situations <s1,s2>     The consumer's declared Situations (default: the bindings keys)
+       --flips-facing <a,b>     Animation ids that flip the consumer's Facing on completion
+       --authored-facing <right|left>  The direction the art was drawn in (default: right)
+       --exported-at <iso>      Override the lock's export time (default: now)`;
 
 /** Run one CLI invocation. Returns the process exit code. */
 export async function runCli(argv: string[]): Promise<number> {
@@ -80,6 +90,13 @@ export async function runCli(argv: string[]): Promise<number> {
   let kind: string | undefined;
   let clips: string | undefined;
   let forkFrom: string | undefined;
+  let target: string | undefined;
+  let bindings: string | undefined;
+  let animations: string | undefined;
+  let situations: string | undefined;
+  let flipsFacing: string | undefined;
+  let authoredFacing: string | undefined;
+  let exportedAt: string | undefined;
   try {
     const { values } = parseArgs({
       args: rest,
@@ -107,6 +124,13 @@ export async function runCli(argv: string[]): Promise<number> {
         kind: { type: 'string' },
         clips: { type: 'string' },
         'fork-from': { type: 'string' },
+        target: { type: 'string' },
+        bindings: { type: 'string' },
+        animations: { type: 'string' },
+        situations: { type: 'string' },
+        'flips-facing': { type: 'string' },
+        'authored-facing': { type: 'string' },
+        'exported-at': { type: 'string' },
       },
     });
     store = values.store;
@@ -132,6 +156,13 @@ export async function runCli(argv: string[]): Promise<number> {
     kind = values.kind;
     clips = values.clips;
     forkFrom = values['fork-from'];
+    target = values.target;
+    bindings = values.bindings;
+    animations = values.animations;
+    situations = values.situations;
+    flipsFacing = values['flips-facing'];
+    authoredFacing = values['authored-facing'];
+    exportedAt = values['exported-at'];
   } catch (error) {
     return fail((error as Error).message);
   }
@@ -165,6 +196,17 @@ export async function runCli(argv: string[]): Promise<number> {
       return runCommit(store, { character, draft, name, kind, clips, forkFrom });
     case 'fork':
       return runFork(store, { character, kind, id, draft });
+    case 'export':
+      return runExport(store, {
+        character,
+        target,
+        animations,
+        bindings,
+        situations,
+        flipsFacing,
+        authoredFacing,
+        exportedAt,
+      });
     default:
       return fail(command ? `unknown command "${command}"` : 'no command given', USAGE);
   }
@@ -484,6 +526,80 @@ async function runFork(store: string, args: ForkArgs): Promise<number> {
   } catch (error) {
     return failForgeError(error);
   }
+}
+
+/** Options for the `export` command. */
+interface ExportArgs {
+  character?: string;
+  target?: string;
+  animations?: string;
+  bindings?: string;
+  situations?: string;
+  flipsFacing?: string;
+  authoredFacing?: string;
+  exportedAt?: string;
+}
+
+/** `forge export` — gather an Asset subset into a closed Manifest plus sheets. */
+async function runExport(store: string, args: ExportArgs): Promise<number> {
+  const { character, target, animations, bindings, situations, flipsFacing, authoredFacing } = args;
+  if (!character) {
+    return fail('--character <character-id> is required for export');
+  }
+  if (!target) {
+    return fail('--target <target> is required for export');
+  }
+  if (!bindings) {
+    return fail('--bindings <situation=id[,id][;...]> is required for export');
+  }
+  let facing: 'right' | 'left' | undefined;
+  if (authoredFacing !== undefined) {
+    if (authoredFacing !== 'right' && authoredFacing !== 'left') {
+      return fail(`unknown --authored-facing "${authoredFacing}" (expected right or left)`);
+    }
+    facing = authoredFacing;
+  }
+  try {
+    const result = await exportCharacter(store, {
+      characterId: character,
+      target,
+      bindings: parseBindings(bindings),
+      ...(animations !== undefined ? { animations: commaList(animations) } : {}),
+      ...(situations !== undefined ? { situations: commaList(situations) } : {}),
+      ...(flipsFacing !== undefined ? { flipsFacing: commaList(flipsFacing) } : {}),
+      ...(facing !== undefined ? { authoredFacing: facing } : {}),
+      ...(args.exportedAt !== undefined ? { exportedAt: args.exportedAt } : {}),
+    });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
+  } catch (error) {
+    return failForgeError(error);
+  }
+}
+
+/** Split a comma-separated option into trimmed, non-empty values. */
+function commaList(value: string): string[] {
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+/** Parse `situation=id[,id][;situation=id...]` into a bindings map. */
+function parseBindings(value: string): Record<string, string[]> {
+  const bindings: Record<string, string[]> = {};
+  for (const entry of value.split(';')) {
+    const trimmed = entry.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const [situation, ids] = trimmed.split('=');
+    if (!situation || ids === undefined) {
+      throw new StoreError(`Malformed --bindings entry "${trimmed}" (expected situation=id[,id]).`);
+    }
+    bindings[situation.trim()] = commaList(ids);
+  }
+  return bindings;
 }
 
 function failForgeError(error: unknown): number {

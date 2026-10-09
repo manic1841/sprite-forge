@@ -17,6 +17,7 @@ import {
   addSegment,
   appendRepairOperation,
   expandCanvas,
+  exportCharacter,
   ForgeError,
   readAssetSheet,
   readCharacterAlignment,
@@ -25,6 +26,7 @@ import {
   readDraftRepair,
   readDraftRepairFrame,
   readCutList,
+  readExportManifest,
   removeSegment,
   sampleDraftRepairColor,
   scan,
@@ -32,7 +34,7 @@ import {
   setSegmentRange,
   undoRepairOperation,
 } from '../core/index.js';
-import type { AssetKind, RepairOperationInput } from '../core/index.js';
+import type { AssetKind, ExportBindings, RepairOperationInput } from '../core/index.js';
 
 /** One request to the workbench API, decoupled from Node's request object. */
 export interface ApiRequest {
@@ -120,6 +122,52 @@ export async function handleApiRequest(
       const id = decodeURIComponent(segments[4]!);
       const sheet = await readAssetSheet(storeRoot, { characterId, kind, id });
       return { status: 200, body: sheet.data, contentType: sheet.contentType };
+    }
+
+    // /api/exports/<target>/manifest — the live Export Manifest (Export stage).
+    if (
+      method === 'GET' &&
+      segments[0] === 'api' &&
+      segments[1] === 'exports' &&
+      segments[3] === 'manifest' &&
+      segments.length === 4
+    ) {
+      const target = decodeURIComponent(segments[2]!);
+      return ok(await readExportManifest(storeRoot, target));
+    }
+
+    // /api/characters/<characterId>/exports/<target> — run the export verb.
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'exports' &&
+      segments.length === 5
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      const target = decodeURIComponent(segments[4]!);
+      const body = asRecord(request.body);
+      const authoredFacing = body.authoredFacing;
+      return ok(
+        await exportCharacter(storeRoot, {
+          characterId,
+          target,
+          bindings: bindingsRecord(body, 'bindings'),
+          ...(body.animations !== undefined
+            ? { animations: stringArray(body, 'animations') }
+            : {}),
+          ...(body.situations !== undefined
+            ? { situations: stringArray(body, 'situations') }
+            : {}),
+          ...(body.flipsFacing !== undefined
+            ? { flipsFacing: stringArray(body, 'flipsFacing') }
+            : {}),
+          ...(authoredFacing === 'right' || authoredFacing === 'left'
+            ? { authoredFacing }
+            : {}),
+          ...(typeof body.exportedAt === 'string' ? { exportedAt: body.exportedAt } : {}),
+        }),
+      );
     }
 
     // /api/characters/<characterId>/drafts/<draftId>[/frames/<index>]
@@ -337,4 +385,29 @@ function optionalNumber(body: Record<string, unknown>, key: string): number | un
     throw new ForgeError(`"${key}" must be a number.`);
   }
   return value;
+}
+
+/** Read an array-of-strings body field. */
+function stringArray(body: Record<string, unknown>, key: string): string[] {
+  const value = body[key];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new ForgeError(`"${key}" must be an array of strings.`);
+  }
+  return value as string[];
+}
+
+/** Read a Situation -> string[] bindings object. */
+function bindingsRecord(body: Record<string, unknown>, key: string): ExportBindings {
+  const value = body[key];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ForgeError(`"${key}" must be an object of Situation -> animation ids.`);
+  }
+  const bindings: ExportBindings = {};
+  for (const [situation, ids] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) {
+      throw new ForgeError(`bindings["${situation}"] must be an array of animation ids.`);
+    }
+    bindings[situation] = ids as string[];
+  }
+  return bindings;
 }
