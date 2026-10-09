@@ -29,7 +29,7 @@ export type {
   SetSegmentRangeOptions,
 } from './segments.js';
 
-export { extractClipDraft, readClipDraft, readClipDraftFrame } from './draft.js';
+export { extractClipDraft, readClipDraft, readClipDraftFrame, renderSegmentFrames } from './draft.js';
 export type {
   ClipDraft,
   ClipDraftDescriptor,
@@ -39,6 +39,8 @@ export type {
   ExtractClipDraftOptions,
   ReadClipDraftFrameOptions,
   ReadClipDraftOptions,
+  RenderedSegment,
+  RenderSegmentFramesOptions,
 } from './draft.js';
 
 export {
@@ -48,8 +50,11 @@ export {
   forkSequence,
   inheritRepairReference,
   readAssetSheet,
+  readClip,
   readSequence,
   rebakeSequenceSheet,
+  renderSequenceSheet,
+  tileRepairedFrames,
 } from './assets.js';
 export type {
   AssetMeta,
@@ -61,6 +66,7 @@ export type {
   CommitSequenceOptions,
   ForkAssetOptions,
   ReadAssetSheetOptions,
+  RenderedSequenceSheet,
   SequenceFork,
   SequenceProvenance,
 } from './assets.js';
@@ -129,6 +135,14 @@ export type {
   Facing,
   ManifestAnimation,
 } from './export.js';
+
+export { verifyReproducible } from './reproduce.js';
+export type {
+  ReproducibleKind,
+  ReproducibilityMismatch,
+  ReproducibilityReport,
+  VerifyReproducibleOptions,
+} from './reproduce.js';
 
 export { validateArtifact, validateExport, validateStore } from './validate.js';
 export type {
