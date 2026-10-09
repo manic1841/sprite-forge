@@ -18,6 +18,7 @@
  */
 
 import sharp from 'sharp';
+import type { RgbaImage } from './background.js';
 import type { Canvas } from './character.js';
 import {
   readClipDraft,
@@ -192,7 +193,12 @@ export async function commitDraft(
 
   // Commit replays the Draft's Repair script and bakes the **repaired** frames.
   const script = await readRepairScript(root, { characterId, clipId: draftId });
-  const sheet = await tileFrames(root, draft, canvas, script);
+  const sheet = await tileRepairedFrames(
+    await decodeDraftFrames(root, draft, canvas),
+    canvas,
+    script,
+    draft.placementOffset ?? { x: 0, y: 0 },
+  );
   // The Draft's script is re-homed onto the committed Asset id (the fork seam
   // #24 opened); provenance points at the re-homed script.
   const repairRel =
@@ -306,6 +312,62 @@ export async function readSequence(
 }
 
 /**
+ * Read a committed Clip: its validated meta and provenance. Broken provenance (a
+ * schema or contract violation) is a hard error.
+ */
+export async function readClip(
+  root: string,
+  options: { characterId: string; clipId: string },
+): Promise<CommittedAsset> {
+  const { characterId, clipId } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(clipId, 'asset', 'clipId');
+  const { meta, provenance } = await readCommittedClip(root, characterId, clipId);
+  return {
+    kind: 'clip',
+    id: clipId,
+    dir: assetDir(characterId, 'clip', clipId),
+    meta,
+    provenance,
+  };
+}
+
+/** A Sequence's baked strip rendered (but not written) from its provenance. */
+export interface RenderedSequenceSheet {
+  /** The concatenated strip bytes. */
+  sheet: Buffer;
+  /** The validated source Clips, in provenance order. */
+  sources: Array<{ id: string; meta: AssetMeta }>;
+  /** The Sequence's meta derived from its source Clips (Rule 7.1). */
+  meta: AssetMeta;
+}
+
+/**
+ * Re-concatenate a committed Sequence's strip from its provenance **without
+ * writing it**. Clips are immutable, so this is deterministic; `verifyReproducible`
+ * compares the result to the stored sheet, and {@link rebakeSequenceSheet} writes it.
+ */
+export async function renderSequenceSheet(
+  root: string,
+  options: { characterId: string; sequenceId: string; canvas?: Canvas },
+): Promise<RenderedSequenceSheet> {
+  const { characterId, sequenceId } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(sequenceId, 'asset', 'sequenceId');
+  // A caller mid-expand passes the new Canvas before it is written to disk.
+  const canvas = options.canvas ?? (await readCanvas(root, characterId));
+  const { provenance } = await readCommittedSequence(root, characterId, sequenceId);
+
+  const sources: Array<{ id: string; meta: AssetMeta }> = [];
+  for (const clipId of provenance.clips) {
+    const clip = await readCommittedClip(root, characterId, clipId);
+    sources.push({ id: clipId, meta: clip.meta });
+  }
+  const sheet = await concatenateClipSheets(root, characterId, sources, canvas);
+  return { sheet, sources, meta: deriveSequenceMeta(sequenceId, sources.map((s) => s.meta)) };
+}
+
+/**
  * Regenerate a committed Sequence's `sheet.png` from its provenance (Rule 7.2).
  *
  * Clips are immutable, so the concatenation is deterministic; this is used by the
@@ -320,16 +382,7 @@ export async function rebakeSequenceSheet(
   const { characterId, sequenceId } = options;
   assertValidId(characterId, 'character', 'characterId');
   assertValidId(sequenceId, 'asset', 'sequenceId');
-  // A caller mid-expand passes the new Canvas before it is written to disk.
-  const canvas = options.canvas ?? (await readCanvas(root, characterId));
-  const { provenance } = await readCommittedSequence(root, characterId, sequenceId);
-
-  const sources: Array<{ id: string; meta: AssetMeta }> = [];
-  for (const clipId of provenance.clips) {
-    const clip = await readCommittedClip(root, characterId, clipId);
-    sources.push({ id: clipId, meta: clip.meta });
-  }
-  const sheet = await concatenateClipSheets(root, characterId, sources, canvas);
+  const { sheet } = await renderSequenceSheet(root, options);
   await writeBinaryFile(root, sheetPath(characterId, 'sequence', sequenceId), sheet);
 }
 
@@ -557,30 +610,28 @@ export function inheritRepairReference(
   return repairPath(characterId, assetId);
 }
 
-/** Tile the Draft's canvas-sized frames left to right into one PNG strip. */
-async function tileFrames(
-  root: string,
-  draft: ClipDraft,
+/**
+ * Tile canvas-sized frames left to right into one PNG strip, replaying the Repair
+ * script and applying the manual placement offset per frame.
+ *
+ * This is the **bake** shared by commit (from a Draft's stored frames) and
+ * `verifyReproducible` (from frames re-rendered out of provenance): same inputs,
+ * same bytes. It is pure over in-memory data — it only encodes a PNG.
+ */
+export async function tileRepairedFrames(
+  frames: readonly RgbaImage[],
   canvas: Canvas,
   script: RepairScript,
+  offset: { x: number; y: number },
 ): Promise<Buffer> {
-  const sheetWidth = draft.frameCount * canvas.width;
+  const sheetWidth = frames.length * canvas.width;
   const sheetHeight = canvas.height;
   const sheet = Buffer.alloc(sheetWidth * sheetHeight * 4);
 
-  // The manual placement offset is a pure translation on top of the automatic
-  // Anchor placement (docs/alignment.md), re-applied here on every bake.
-  const offset = draft.placementOffset ?? { x: 0, y: 0 };
-
-  for (let index = 0; index < draft.frameCount; index++) {
-    const decoded = await decodeCanvasFrame(root, draft.frames[index]!, canvas, draft.id);
+  for (let index = 0; index < frames.length; index++) {
     // Baked tiles are the repaired result: replay the script for this frame,
     // then place the Clip manually by its offset.
-    const repaired = applyRepairScriptToFrame(
-      { width: canvas.width, height: canvas.height, data: new Uint8Array(decoded) },
-      index,
-      script,
-    );
+    const repaired = applyRepairScriptToFrame(frames[index]!, index, script);
     const frame = translateOnCanvas(repaired, offset.x, offset.y).data;
     const offsetX = index * canvas.width;
     for (let y = 0; y < canvas.height; y++) {
@@ -595,6 +646,20 @@ async function tileFrames(
   return sharp(sheet, { raw: { width: sheetWidth, height: sheetHeight, channels: 4 } })
     .png()
     .toBuffer();
+}
+
+/** Decode a Draft's stored frames to canvas-sized RGBA images for {@link tileRepairedFrames}. */
+async function decodeDraftFrames(
+  root: string,
+  draft: ClipDraft,
+  canvas: Canvas,
+): Promise<RgbaImage[]> {
+  const frames: RgbaImage[] = [];
+  for (let index = 0; index < draft.frameCount; index++) {
+    const data = await decodeCanvasFrame(root, draft.frames[index]!, canvas, draft.id);
+    frames.push({ width: canvas.width, height: canvas.height, data: new Uint8Array(data) });
+  }
+  return frames;
 }
 
 /** Decode a Draft frame and check it is exactly the Character's Canvas. */

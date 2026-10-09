@@ -25,6 +25,7 @@ import {
   StoreError,
   validateStore,
   ValidationError,
+  verifyReproducible,
 } from '../core/index.js';
 import type { AssetKind, CutList } from '../core/index.js';
 
@@ -61,7 +62,10 @@ Usage:
        --situations <s1,s2>     The consumer's declared Situations (default: the bindings keys)
        --flips-facing <a,b>     Animation ids that flip the consumer's Facing on completion
        --authored-facing <right|left>  The direction the art was drawn in (default: right)
-       --exported-at <iso>      Override the lock's export time (default: now)`;
+       --exported-at <iso>      Override the lock's export time (default: now)
+  forge verify-reproducible --store <path> --character <id> --kind <clip|sequence|export> --id <asset-or-target>
+                                                                     Re-run a stage from provenance and check it
+                                                                     lands on identical artifacts (exit 1 if not).`;
 
 /** Run one CLI invocation. Returns the process exit code. */
 export async function runCli(argv: string[]): Promise<number> {
@@ -207,6 +211,8 @@ export async function runCli(argv: string[]): Promise<number> {
         authoredFacing,
         exportedAt,
       });
+    case 'verify-reproducible':
+      return runVerifyReproducible(store, { character, kind, id });
     default:
       return fail(command ? `unknown command "${command}"` : 'no command given', USAGE);
   }
@@ -572,6 +578,41 @@ async function runExport(store: string, args: ExportArgs): Promise<number> {
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
+  } catch (error) {
+    return failForgeError(error);
+  }
+}
+
+/** Options for the `verify-reproducible` command. */
+interface VerifyReproducibleArgs {
+  character?: string;
+  kind?: string;
+  id?: string;
+}
+
+/**
+ * `forge verify-reproducible` — re-run a stage from provenance and check it lands
+ * on identical artifacts. Exits `0` when reproducible, `1` when it is not (the
+ * report is printed either way).
+ */
+async function runVerifyReproducible(
+  store: string,
+  args: VerifyReproducibleArgs,
+): Promise<number> {
+  const { character, kind, id } = args;
+  if (!character) {
+    return fail('--character <character-id> is required for verify-reproducible');
+  }
+  if (!id) {
+    return fail('--id <asset-or-target> is required for verify-reproducible');
+  }
+  if (kind !== 'clip' && kind !== 'sequence' && kind !== 'export') {
+    return fail('--kind <clip|sequence|export> is required for verify-reproducible');
+  }
+  try {
+    const report = await verifyReproducible(store, { characterId: character, kind, id });
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return report.reproducible ? 0 : 1;
   } catch (error) {
     return failForgeError(error);
   }

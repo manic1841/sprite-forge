@@ -193,45 +193,27 @@ export async function extractClipDraft(
 
   const canvas = await readCanvas(root, characterId);
   const cut = await resolveSegment(root, recordingId, cutId);
-  const bytes = await readSource(root, recordingId, cut.hash);
-  const decoded = await decodeSegment(bytes, recordingId, cut);
 
-  const frames = decoded.frames;
-  const override = options.background !== undefined;
-  const background: Rgb = override
-    ? parseHexColor(options.background!)
-    : sampleBackgroundColor(frames);
-  const backgroundRecord: DraftBackground = {
-    hex: toHexColor(background),
-    source: override ? 'override' : 'sampled',
+  // Read any human state already on this Draft id BEFORE the frames are replaced,
+  // so a re-extract keeps pointing at the Repair script and remembers the framing
+  // the offset/script were authored against — otherwise a re-cut or re-expand
+  // would silently drop the warning (docs/repair.md / docs/alignment.md, "Validity").
+  const preserved = await readPreservedDraftState(root, characterId, draftId);
+
+  const rendered = await renderSegmentFrames(root, {
+    recordingId,
+    segment: { startFrame: cut.startFrame, endFrame: cut.endFrame },
+    canvas,
+    ...(options.background !== undefined ? { background: options.background } : {}),
     tolerance,
-  };
-
-  // De-background every frame to binary alpha (research §2-3).
-  const keyed = frames.map((frame) => keyBackground(frame, background, tolerance));
-
-  // Crop to the union of content bounds; place by the FIRST frame's foot base.
-  const perFrame = keyed.map((frame) => contentBounds(frame));
-  const first = perFrame[0] ?? null;
-  if (first === null) {
-    throw new StoreError(
-      `Segment "${cutId}" has no content to extract (every frame is the background colour).`,
-    );
-  }
-  const union = unionBounds(perFrame.filter((box): box is Bounds => box !== null));
-  const { dx, dy } = automaticPlacement(first, union, canvas);
+    expectedHash: cut.hash,
+  });
 
   await removePath(root, draftDir(characterId, draftId));
 
   const framePaths: string[] = [];
-  for (let index = 0; index < keyed.length; index++) {
-    const placed = placeOnCanvas(
-      cropTo(keyed[index]!, union),
-      canvas.width,
-      canvas.height,
-      dx,
-      dy,
-    );
+  for (let index = 0; index < rendered.frames.length; index++) {
+    const placed = rendered.frames[index]!;
     const png = await sharp(Buffer.from(placed.data), {
       raw: { width: placed.width, height: placed.height, channels: 4 },
     })
@@ -253,17 +235,129 @@ export async function extractClipDraft(
       endFrame: cut.endFrame,
       speed: cut.speed ?? 1,
     },
-    background: backgroundRecord,
-    frameCount: keyed.length,
-    delaysMs: decoded.delaysMs.slice(cut.startFrame, cut.endFrame),
+    background: rendered.background,
+    frameCount: rendered.frames.length,
+    delaysMs: rendered.delaysMs,
     loop: options.loop ?? true,
     spriteForgeVersion: SPRITE_FORGE_VERSION,
+    ...preserved,
   };
 
   validateDraftDescriptor(descriptor, draftPath(characterId, draftId), draftId);
   await writeClipDraft(root, descriptor);
 
   return { ...descriptor, dir: draftDir(characterId, draftId), frames: framePaths };
+}
+
+/** Inputs for {@link renderSegmentFrames}. */
+export interface RenderSegmentFramesOptions {
+  /** The Recording the Segment was cut from. */
+  recordingId: string;
+  /** The half-open frame range to render — a live cut or a provenance snapshot. */
+  segment: { startFrame: number; endFrame: number };
+  /** The Character's shared Canvas the frames are placed on. */
+  canvas: Canvas;
+  /** An explicit `#rrggbb` background override; sampled from a corner when omitted. */
+  background?: string;
+  /** Per-channel key tolerance; defaults to 24. */
+  tolerance?: number;
+  /** When set, the source bytes must hash to this (`sha256:` + 64 hex) or it is a hard error. */
+  expectedHash?: string;
+}
+
+/** The result of {@link renderSegmentFrames}: placed frames plus the derived settings. */
+export interface RenderedSegment {
+  /** One canvas-sized, de-backgrounded, aligned RGBA frame per source frame. */
+  frames: RgbaImage[];
+  /** Per-frame delays in ms, sliced from the source metadata. */
+  delaysMs: number[];
+  /** The background key that was used, so de-backgrounding is reproducible. */
+  background: DraftBackground;
+}
+
+/**
+ * Run deterministic pipeline stages 1–4 (extract, de-background, crop, align) for
+ * one Segment, from the Recording and settings **alone**.
+ *
+ * This is the reproducibility seam: given the same Recording (checked against its
+ * recorded hash), Segment range and background settings, it yields byte-identical
+ * placed frames — whether called by {@link extractClipDraft} or by
+ * `verifyReproducible` re-running a committed Asset from its provenance. It is
+ * **pure** over the store: it only reads.
+ */
+export async function renderSegmentFrames(
+  root: string,
+  options: RenderSegmentFramesOptions,
+): Promise<RenderedSegment> {
+  const { recordingId, segment, canvas } = options;
+  assertValidId(recordingId, 'recording', 'recordingId');
+  const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
+  if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255) {
+    throw new StoreError(`Tolerance must be an integer in 0..255; got ${tolerance}.`);
+  }
+
+  const bytes = await readSource(root, recordingId, options.expectedHash);
+  const decoded = await decodeSegment(bytes, recordingId, segment);
+
+  const frames = decoded.frames;
+  const override = options.background !== undefined;
+  const background: Rgb = override
+    ? parseHexColor(options.background!)
+    : sampleBackgroundColor(frames);
+  const backgroundRecord: DraftBackground = {
+    hex: toHexColor(background),
+    source: override ? 'override' : 'sampled',
+    tolerance,
+  };
+
+  // De-background every frame to binary alpha (research §2-3).
+  const keyed = frames.map((frame) => keyBackground(frame, background, tolerance));
+
+  // Crop to the union of content bounds; place by the FIRST frame's foot base.
+  const perFrame = keyed.map((frame) => contentBounds(frame));
+  const first = perFrame[0] ?? null;
+  if (first === null) {
+    throw new StoreError(
+      `Segment [${segment.startFrame}, ${segment.endFrame}) has no content to extract ` +
+        `(every frame is the background colour).`,
+    );
+  }
+  const union = unionBounds(perFrame.filter((box): box is Bounds => box !== null));
+  const { dx, dy } = automaticPlacement(first, union, canvas);
+
+  const placed = keyed.map((frame) =>
+    placeOnCanvas(cropTo(frame, union), canvas.width, canvas.height, dx, dy),
+  );
+
+  return {
+    frames: placed,
+    delaysMs: decoded.delaysMs.slice(segment.startFrame, segment.endFrame),
+    background: backgroundRecord,
+  };
+}
+
+/**
+ * Carry forward the human-editable fields already present on a Draft id, so a
+ * re-extract does not silently discard the Repair script reference or the framing
+ * the offset/script were authored against. A Draft that does not exist yields `{}`.
+ */
+async function readPreservedDraftState(
+  root: string,
+  characterId: string,
+  draftId: string,
+): Promise<Partial<ClipDraftDescriptor>> {
+  const artifactPath = draftPath(characterId, draftId);
+  if (!(await pathExists(root, artifactPath))) {
+    return {};
+  }
+  const value = (await readJsonFile(root, artifactPath)) as ClipDraftDescriptor;
+  const preserved: Partial<ClipDraftDescriptor> = {};
+  if (value.derivedFrom !== undefined) preserved.derivedFrom = value.derivedFrom;
+  if (value.placementOffset) preserved.placementOffset = value.placementOffset;
+  if (value.placementFraming) preserved.placementFraming = value.placementFraming;
+  if (value.repair) preserved.repair = value.repair;
+  if (value.repairFraming) preserved.repairFraming = value.repairFraming;
+  return preserved;
 }
 
 /**
@@ -390,8 +484,8 @@ async function resolveSegment(
   };
 }
 
-/** Read the Recording's source bytes, verifying they still match the recorded hash. */
-async function readSource(root: string, recordingId: string, hash: string): Promise<Buffer> {
+/** Read the Recording's source bytes, verifying them against the recorded hash when given. */
+async function readSource(root: string, recordingId: string, hash?: string): Promise<Buffer> {
   const sourceRelPath = sourcePath(recordingId);
   if (!(await pathExists(root, sourceRelPath))) {
     throw new StoreError(
@@ -399,6 +493,9 @@ async function readSource(root: string, recordingId: string, hash: string): Prom
     );
   }
   const bytes = await readBinaryFile(root, sourceRelPath);
+  if (hash === undefined) {
+    return bytes;
+  }
   const actual = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
   if (actual !== hash) {
     throw new StoreError(

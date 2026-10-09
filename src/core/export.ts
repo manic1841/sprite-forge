@@ -128,20 +128,28 @@ export interface ExportResult {
   manifest: ExportManifest;
 }
 
+/** The deterministic content of an Export, before anything is written. */
+export interface BuiltExport {
+  /** The canvas-level Manifest. */
+  manifest: ExportManifest;
+  /** The copied sheets, one per exported animation, with their bundle paths. */
+  sheets: Array<{ relPath: string; data: Buffer }>;
+}
+
 /**
- * Export an Asset subset of a Character as a closed Manifest plus one sheet per
- * exported Asset.
+ * Build an Export's content — the Manifest and the copied sheet bytes — without
+ * writing anything.
  *
- * Reads each selected committed Asset (Clip or Sequence), copies its baked
- * `sheet.png` into `exports/<target>/clips/<id>.png`, and writes a canvas-level
- * `manifest.json`. The target folder is replaced so the Export is exactly the
- * selected subset. The result is validated against the schema and every
- * closed-export rule before it is returned.
+ * This is the reproducibility seam: `exportCharacter` writes the result, and
+ * `verifyReproducible` re-runs it and compares. It reads the selected committed
+ * Assets (Clip or Sequence), copies each baked `sheet.png`, and assembles a
+ * canvas-level Manifest, validating it against the schema and every closed-export
+ * rule before returning.
  */
-export async function exportCharacter(
+export async function buildExport(
   root: string,
   options: ExportCharacterOptions,
-): Promise<ExportResult> {
+): Promise<BuiltExport> {
   const { characterId, target, bindings } = options;
   assertValidId(characterId, 'character', 'characterId');
   assertValidTarget(target);
@@ -157,7 +165,6 @@ export async function exportCharacter(
 
   // Build the canvas-level animations map and copy each Asset's sheet.
   const animations: Record<string, ManifestAnimation> = {};
-  const sheetPaths: string[] = [];
   const sheets: Array<{ relPath: string; data: Buffer }> = [];
   for (const id of animationIds) {
     const asset = await readExportedAsset(root, characterId, id);
@@ -168,9 +175,7 @@ export async function exportCharacter(
       loop: asset.meta.loop,
       ...(flips.has(id) ? { flipsFacing: true } : {}),
     };
-    const relPath = exportSheetPath(target, id);
-    sheets.push({ relPath, data: asset.sheet });
-    sheetPaths.push(relPath);
+    sheets.push({ relPath: exportSheetPath(target, id), data: asset.sheet });
   }
 
   assertBindings(bindings, animationIds, options.situations);
@@ -190,6 +195,24 @@ export async function exportCharacter(
   };
 
   validateArtifact('manifest', manifest, { artifact: manifestPath(target) });
+  return { manifest, sheets };
+}
+
+/**
+ * Export an Asset subset of a Character as a closed Manifest plus one sheet per
+ * exported Asset.
+ *
+ * Builds the content with {@link buildExport}, replaces the target folder so the
+ * Export is exactly the selected subset, writes the sheets and `manifest.json`,
+ * and re-validates every closed-export rule against what was written. A committed
+ * Asset's baked sheet is copied, never regenerated.
+ */
+export async function exportCharacter(
+  root: string,
+  options: ExportCharacterOptions,
+): Promise<ExportResult> {
+  const { target } = options;
+  const { manifest, sheets } = await buildExport(root, options);
 
   // Replace the target folder so a re-export is exactly the selected subset.
   await removePath(root, exportDir(target));
@@ -202,7 +225,12 @@ export async function exportCharacter(
   // (format-spec §9); any violation aborts the export.
   await validateExport(root, target);
 
-  return { target, manifestPath: manifestPath(target), sheetPaths, manifest };
+  return {
+    target,
+    manifestPath: manifestPath(target),
+    sheetPaths: sheets.map((sheet) => sheet.relPath),
+    manifest,
+  };
 }
 
 /**
