@@ -30,7 +30,7 @@ import {
   type ClipDraftFrame,
 } from './draft.js';
 import { StoreError, ValidationError, type ValidationIssue } from './errors.js';
-import { isValidId } from './ids.js';
+import { assertValidId } from './ids.js';
 import { canvasPath, repairPath } from './layout.js';
 import { pathExists, readJsonFile, removePath, writeJsonFile } from './store/index.js';
 import { validateArtifact } from './validate.js';
@@ -597,9 +597,3 @@ function validateRepairScript(value: unknown, artifact: string): void {
   }
 }
 
-/** Reject an id that does not match the id grammar before it becomes a path segment. */
-function assertValidId(id: string, noun: string, label: string): void {
-  if (!isValidId(id)) {
-    throw new StoreError(`Invalid ${label} "${id}" (${noun} id): must match /^[a-z][a-z0-9-]*$/.`);
-  }
-}

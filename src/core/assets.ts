@@ -30,7 +30,7 @@ import {
 } from './draft.js';
 import { StoreError } from './errors.js';
 import { translateOnCanvas } from './frames.js';
-import { isValidId } from './ids.js';
+import { assertValidId } from './ids.js';
 import {
   assetDir,
   assetMetaPath,
@@ -766,7 +766,7 @@ async function assertIdFree(root: string, characterId: string, assetId: string):
   if (await pathExists(root, existingClip)) {
     throw new StoreError(
       `Asset "${assetId}" already exists for Character "${characterId}" (${existingClip}); ` +
-        `a committed Asset is immutable — fork it to make a variant.`,
+        `a committed Asset is immutable — fork it to make a new Asset.`,
     );
   }
   const existingSequence = sequenceDir(characterId, assetId);
@@ -880,9 +880,3 @@ async function readCanvas(root: string, characterId: string): Promise<Canvas> {
   return value as Canvas;
 }
 
-/** Reject an id that does not match the id grammar before it becomes a path segment. */
-function assertValidId(id: string, noun: string, label: string): void {
-  if (!isValidId(id)) {
-    throw new StoreError(`Invalid ${label} "${id}" (${noun} id): must match /^[a-z][a-z0-9-]*$/.`);
-  }
-}
