@@ -20,7 +20,7 @@ Background: [`architecture.md`](./architecture.md), [`recordings.md`](./recordin
 
 | Convention | Rule |
 | --- | --- |
-| **Id grammar** | `^[a-z][a-z0-9-]*$` — lowercase ASCII, kebab-case; no underscores, dots, or leading/trailing/double hyphens. |
+| **Id grammar** | `^[a-z][a-z0-9-]*$` — lowercase ASCII only, first character a letter, then letters/digits/hyphens; no underscores or dots. A trailing or repeated hyphen is legal (`a-`, `a--b`) because the pattern does not anchor those. |
 | **Id scope** | `recording` and `character` ids are unique in the store; `character`/`clip`/`sequence` ids are unique within a Character; `cut` ids are unique within a Recording. |
 | **Single asset namespace** | Within one Character, **Clip and Sequence ids share one namespace** — `clips/walk/` and `sequences/walk/` cannot both exist. |
 | **Folder equals id** | A folder's name **must equal** the id it holds (`clips/walk/` ⇔ `"id": "walk"`). |

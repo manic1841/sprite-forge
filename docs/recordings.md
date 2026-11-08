@@ -76,7 +76,7 @@ A Clip's provenance records:
   "recordingHash": "sha256:…",     // detects a swapped source
   "segment": { "cutId": "walk", "startFrame": 293, "endFrame": 327, "speed": 1 },
   "background": { "hex": "#9421ce", "source": "sampled", "tolerance": 24 },
-  "repair": "repairs/<clip-id>/repair.json",
+  "repair": "characters/<character-id>/repairs/<clip-id>/repair.json",
   "placementOffset": { "x": 0, "y": 0 },
   "derivedFrom": null,
   "spriteForgeVersion": "0.1.0"

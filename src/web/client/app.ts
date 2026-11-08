@@ -115,6 +115,8 @@ export function mountWorkbench(
     expandHeight: number;
     exportTarget: string | null;
     manifest: ExportResult | null;
+    /** The message of the last failed load, shown until a load succeeds again. */
+    loadError: string | null;
   } = {
     mode: 'clip',
     scan: null,
@@ -137,6 +139,7 @@ export function mountWorkbench(
     expandHeight: 0,
     exportTarget: null,
     manifest: null,
+    loadError: null,
   };
 
   // --- shell ----------------------------------------------------------------
@@ -268,7 +271,29 @@ export function mountWorkbench(
     // Contract: only the stage's contents change here. The rail, inspector and
     // filmstrip nodes are never touched by a mode switch.
     stage.innerHTML = '';
+    // A failed load leaves the stage showing why, so a rejected artifact never
+    // looks like a dead button.
+    if (state.loadError !== null) {
+      stage.appendChild(loadErrorBanner());
+    }
     stage.appendChild(stageView(state.mode));
+  }
+
+  /**
+   * The load-failure notice. A load can be rejected by the store's
+   * validate-on-read contract (a stale Manifest, a Draft with a broken repair
+   * script); without this the click looks like a no-op because only the console
+   * ever saw the error.
+   */
+  function loadErrorBanner(): HTMLElement {
+    const banner = make('div', 'load-error');
+    banner.dataset.loadError = '';
+    banner.setAttribute('role', 'alert');
+    banner.append(
+      make('strong', 'load-error-title', 'Load failed'),
+      make('p', 'load-error-message', state.loadError ?? ''),
+    );
+    return banner;
   }
 
   function stageView(mode: WorkbenchMode): HTMLElement {
@@ -381,6 +406,7 @@ export function mountWorkbench(
       const result = await api.exportCharacter(characterId, target, { bindings });
       state.exportTarget = target;
       state.manifest = result;
+      state.loadError = null;
       message.textContent = `exported ${target}`;
       renderLibrary();
       renderStage();
@@ -830,6 +856,12 @@ export function mountWorkbench(
     inspector.dataset.inspectorFor = state.mode;
     inspector.appendChild(heading('Inspector'));
 
+    if (state.loadError !== null) {
+      const notice = make('p', 'muted load-error-note', state.loadError);
+      notice.dataset.loadErrorNote = '';
+      inspector.appendChild(notice);
+    }
+
     if (state.mode === 'clip') {
       renderClipInspector();
       return;
@@ -1147,23 +1179,44 @@ export function mountWorkbench(
     }
   }
 
-  async function loadRecording(recordingId: string): Promise<void> {
+  /**
+   * Run a load and turn a rejection into visible state.
+   *
+   * Every store read is validate-on-read, so a load can fail for reasons the user
+   * can fix (a Manifest older than the Canvas, a revised repair script). `reset`
+   * drops whatever the failed load half-assigned so the stage never shows stale
+   * content next to the error.
+   */
+  function guarded(load: () => Promise<void>, reset: () => void): Promise<void> {
+    state.loadError = null;
+    return load().catch((error: unknown) => {
+      reset();
+      state.loadError = error instanceof Error ? error.message : String(error);
+      renderLibrary();
+      renderStage();
+      renderInspector();
+    });
+  }
+
+  async function readRecording(recordingId: string): Promise<void> {
     state.recordingId = recordingId;
     state.frame = 0;
     state.cutList = await api.readCutList(recordingId);
+    state.loadError = null;
     renderLibrary();
     renderFilmstrip();
     renderContext();
     renderInspector();
   }
 
-  async function loadDraft(characterId: string, draftId: string): Promise<void> {
+  async function readDraft(characterId: string, draftId: string): Promise<void> {
     state.draft = { characterId, draftId };
     state.activeCharacterId = characterId;
     state.draftFrame = 0;
     state.repairRevision = 0;
     state.draftDescriptor = await api.readClipDraft(characterId, draftId);
     state.repair = await api.readRepair(characterId, draftId);
+    state.loadError = null;
     renderLibrary();
     renderStage();
     renderContext();
@@ -1171,7 +1224,7 @@ export function mountWorkbench(
   }
 
   /** Load a Character's alignment view (Canvas + Clip/Draft offsets) for the stage. */
-  async function loadAlignment(characterId: string): Promise<void> {
+  async function readAlignment(characterId: string): Promise<void> {
     state.activeCharacterId = characterId;
     state.alignment = await api.readCharacterAlignment(characterId);
     if (state.alignment) {
@@ -1184,17 +1237,45 @@ export function mountWorkbench(
     } else {
       state.alignmentWarnings = [];
     }
+    state.loadError = null;
     renderStage();
     renderInspector();
   }
 
   /** Load an Export's live Manifest (validated server-side) for the Export stage. */
-  async function loadExport(target: string): Promise<void> {
+  async function readExport(target: string): Promise<void> {
     state.exportTarget = target;
     state.manifest = await api.readManifest(target);
+    state.loadError = null;
     renderLibrary();
     renderStage();
     renderInspector();
+  }
+
+  // The public loads: a read plus the reset that drops its half-built state when
+  // the store rejects it. `readRecording`-style reads stay private.
+  function loadRecording(recordingId: string): Promise<void> {
+    return guarded(() => readRecording(recordingId), () => {
+      state.cutList = null;
+    });
+  }
+
+  function loadDraft(characterId: string, draftId: string): Promise<void> {
+    return guarded(() => readDraft(characterId, draftId), () => {
+      state.draftDescriptor = null;
+    });
+  }
+
+  function loadAlignment(characterId: string): Promise<void> {
+    return guarded(() => readAlignment(characterId), () => {
+      state.alignment = null;
+    });
+  }
+
+  function loadExport(target: string): Promise<void> {
+    return guarded(() => readExport(target), () => {
+      state.manifest = null;
+    });
   }
 
   // --- initial render -------------------------------------------------------

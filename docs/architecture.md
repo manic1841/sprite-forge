@@ -109,8 +109,8 @@ The web UI is the primary working surface, and its shape is a **docked
 workbench**, not a wizard: one persistent shell, with a single region swapping per
 task so the working context is never lost.
 
-- **Rail (left, persistent)** — the Library: Recordings and committed Assets,
-  always present; click one to load it.
+- **Rail (left, persistent)** — the Library region: Recordings, Drafts,
+  committed Assets and Exports, always present; click one to load it.
 - **Stage (centre)** — the active view, chosen by a **mode** switch: *Clip editor*
   (the frame, segmentation scrub, and the Repair brush), *Alignment* (Clips ghosted
   on the shared Canvas against the Anchor), or *Export* (Situation bindings and the

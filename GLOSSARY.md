@@ -7,9 +7,13 @@ depends only on an export.
 
 ## Source material
 
+The Raw capture a Recording is built from. "Source" survives only in that narrow
+sense — a **source file** or **source path** — never as a name for the Recording
+itself.
+
 **Recording**:
 A single screen capture from an emulator, stored as one animated image file.
-_Avoid_: source, take, video
+_Avoid_: take, video, capture file
 
 **Segment**:
 A named cut in a Recording's cut list: a half-open frame range
@@ -71,7 +75,13 @@ _Avoid_: library item, resource, material
 
 **Asset store**:
 The directory tree that holds every Asset and its provenance.
-_Avoid_: library, catalog, repository
+_Avoid_: catalog, repository
+
+**Library**:
+The workbench's left rail: the browsable list of what the Asset store currently
+holds (Recordings, Drafts, committed Assets, Exports). It is a view of the store,
+never the store itself.
+_Avoid_: browser, explorer, file list
 
 **Canvas**:
 The frame size shared by every Asset of a Character, so the consumer can swap sheets

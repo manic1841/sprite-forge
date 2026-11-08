@@ -529,3 +529,59 @@ describe('the Export stage', () => {
     expect(wb.manifest?.manifest.target).toBe('pixel-pet');
   });
 });
+
+describe('a rejected load', () => {
+  /** An API whose Manifest read fails the way validate-on-read does. */
+  function failingManifestApi(message: string): WorkbenchApi {
+    return fakeApi({
+      readManifest: async () => {
+        throw new Error(message);
+      },
+    });
+  }
+
+  it('shows why the load failed instead of looking like a dead click', async () => {
+    const wb = mountWorkbench(container, { api: failingManifestApi('manifest canvas does not equal canvas.json') });
+    await wb.ready;
+    wb.setMode('export');
+
+    await wb.loadExport('pixel-pet');
+
+    const stage = wb.root.querySelector<HTMLElement>('[data-region="stage"]')!;
+    const banner = stage.querySelector<HTMLElement>('[data-load-error]')!;
+    expect(banner).not.toBeNull();
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain('manifest canvas does not equal canvas.json');
+
+    // The inspector says so too, so neither region looks live.
+    const inspector = wb.root.querySelector<HTMLElement>('[data-region="inspector"]')!;
+    expect(inspector.querySelector('[data-load-error-note]')).not.toBeNull();
+
+    // The half-built state is dropped rather than left stale.
+    expect(wb.manifest).toBeNull();
+  });
+
+  it('clears the error once a later load succeeds', async () => {
+    let fail = true;
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        readManifest: async () => {
+          if (fail) {
+            throw new Error('stale manifest');
+          }
+          return EXPORT_RESULT;
+        },
+      }),
+    });
+    await wb.ready;
+    wb.setMode('export');
+    await wb.loadExport('pixel-pet');
+    expect(wb.root.querySelector('[data-load-error]')).not.toBeNull();
+
+    fail = false;
+    await wb.loadExport('pixel-pet');
+
+    expect(wb.root.querySelector('[data-load-error]')).toBeNull();
+    expect(wb.manifest?.manifest.target).toBe('pixel-pet');
+  });
+});

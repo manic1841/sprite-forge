@@ -58,7 +58,8 @@ stationary one is cleared once across the whole Clip.
 ## Commit
 
 Committing **replays** the Repair script and bakes the repaired frames into the
-Asset's `sheet.png`. The script stays in `repairs/<clip-id>/` and the Asset's
+Asset's `sheet.png`. The script stays at
+`characters/<character-id>/repairs/<clip-id>/repair.json` and the Asset's
 provenance points at it; the committed Asset is immutable. Repairing further means
 **forking** the Asset, which copies the script as the new branch's starting point.
 See [ADR-0002](./adr/0002-immutable-assets-fork-to-edit.md) and

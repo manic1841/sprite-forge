@@ -8,3 +8,7 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+
+# Local store path
+store/
+store-accept/
