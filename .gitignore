@@ -11,4 +11,11 @@ coverage/
 
 # Local store path
 store/
-store-accept/
+
+# taste-skill gate run artifacts under the landing page (screenshots, Chrome profiles)
+site/.taste-skill/chrome-*/
+site/.taste-skill/tiles/
+site/.taste-skill/consistency/
+site/.taste-skill/layout/
+site/.taste-skill/gate/
+site/.taste-skill/*.png

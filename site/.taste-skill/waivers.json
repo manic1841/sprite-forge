@@ -1,0 +1,12 @@
+[
+ {
+  "check": "screen-height",
+  "target": "#pipeline",
+  "reason": "desktop-only tool site: at 390 the pipeline section runs a few px past two screens; at 1440 it is one screen"
+ },
+ {
+  "check": "section-height",
+  "target": "section#controls",
+  "reason": "desktop-only tool site: at 390 the four control cards run ~45px past one screen; at 1440 they fit"
+ }
+]
