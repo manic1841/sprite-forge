@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en" data-type="software" data-radius="sharp" data-ground="sage" data-buttons="pill">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Workbench — sprite-forge</title>
+    <meta name="description"
+        content="Cut a Recording on the store: mark a Segment, repair the frames and commit a Clip. The workbench runs on the local dev server.">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <meta name="theme-color" content="#141a18">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&family=DM+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="assets/system.css">
+    <link rel="stylesheet" href="assets/ui/base.css">
+    <link rel="stylesheet" href="workbench.css">
+    <style>
+        /*
+  The page owns the frame (a slim bar and the full viewport); the workbench owns
+  everything under it. No marketing sections, no scrolling page: the app is the
+  page.
+*/
+        :root {
+            --p-bg: #161c1a;
+            --p-surface: #1f2725;
+            --p-ink: #e3e2da;
+            --p-muted: #aab0ab;
+            --p-accent: #9fc7b8;
+            --p-accent-ink: #161c1a;
+            --font-display: "Instrument Sans", system-ui, sans-serif;
+            --font-text: "Instrument Sans", system-ui, sans-serif;
+            --font-mono: "DM Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            height: 100dvh;
+            margin: 0;
+            overflow: hidden;
+            background: #141a18;
+            color: var(--p-ink);
+            font: 400 13px/1.5 var(--font-text);
+        }
+
+        .wb-page__bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 0 16px;
+            height: 44px;
+            border-bottom: 1px solid color-mix(in oklab, var(--p-ink) 12%, transparent);
+            background: var(--p-surface);
+            font-size: 13px;
+        }
+
+        .wb-page__mark {
+            font-weight: 500;
+            letter-spacing: -0.01em;
+        }
+
+        .wb-page__crumb {
+            color: var(--p-muted);
+        }
+
+        .wb-page__store {
+            margin-left: auto;
+            font: 400 11.5px/1.4 var(--font-mono);
+            color: var(--p-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 40ch;
+        }
+
+        .wb-page__back {
+            flex: none;
+            padding: 3px 10px;
+            border: 1px solid color-mix(in oklab, var(--p-ink) 24%, transparent);
+            border-radius: 999px;
+            color: var(--p-muted);
+        }
+
+        .wb-page__back:hover {
+            color: var(--p-ink);
+        }
+
+        /* the shell is the app frame now, not a section in a page */
+        .wb-shell {
+            min-height: 0;
+            margin-top: 0;
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        @media (max-width: 639px) {
+            .wb-page__store {
+                display: none;
+            }
+        }
+
+        /* the stacked layout is taller than a phone, so the page scrolls there */
+        @media (max-width: 859px) {
+            body {
+                display: block;
+                height: auto;
+                min-height: 100dvh;
+                overflow: auto;
+            }
+
+            .wb-page__bar {
+                position: sticky;
+                top: 0;
+                z-index: 5;
+            }
+
+            .wb-shell.ui {
+                min-height: calc(100dvh - 44px);
+                height: auto;
+            }
+        }
+    </style>
+</head>
+
+<body class="ui" data-ui>
+    <header class="wb-page__bar">
+        <a class="wb-page__mark" href="/">sprite-forge</a>
+        <span class="wb-page__crumb">/ workbench</span>
+        <span class="wb-page__store" data-wb-store></span>
+        <a class="wb-page__back" href="/">Back to site</a>
+    </header>
+    <div class="wb-shell ui" id="app" data-ui data-wb-mount>
+        <div class="wb-fallback">
+            <p><b>Starting the workbench…</b></p>
+            <p class="muted">It reads the store through the local server. If this stays, start it with
+                <code>SPRITE_FORGE_STORE=./store pnpm web</code> and reload.</p>
+        </div>
+    </div>
+    <script type="module" src="workbench.js"></script>
+</body>
+
+</html>

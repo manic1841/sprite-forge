@@ -26,9 +26,11 @@ variable; the default Vite port is **5173**):
 
 ```sh
 SPRITE_FORGE_STORE=/path/to/store pnpm web
-# then open http://localhost:5173/
+# then open http://localhost:5173/workbench
 ```
 
-This is a dev server (`vite`); it is not a production build and ships nothing.
-The browser app lives in `src/web/client/`; the core-backed API middleware lives
-in `src/web/server.ts` and is mounted by `vite.config.ts`.
+The landing page at `http://localhost:5173/` previews the workbench and links to
+the tool; the tool itself is the separate `/workbench` route so it gets the whole
+viewport. This is a dev server (`vite`); it is not a production build and ships
+nothing. The browser app lives in `src/web/client/`; the core-backed API
+middleware lives in `src/web/server.ts` and is mounted by `vite.config.ts`.

@@ -1,13 +1,13 @@
 /**
- * Mounts the workbench into the landing page.
+ * Mounts the workbench on its own page (`/workbench`).
  *
- * The page is static, the workbench is not: it reads and writes the store
+ * The page is a shell, the workbench is the app: it reads and writes the store
  * through `/api`, which only exists while `pnpm web` serves this folder. So the
- * mount probes the store first — on a plain static server the section keeps its
+ * mount probes the store first — on a plain static server the shell keeps its
  * "start the dev server" notice instead of an empty black box.
  *
- * Kept as `.js` on purpose: the landing page must stay loadable without a
- * bundler, and only this file needs one to reach the TypeScript app.
+ * Kept as `.js` on purpose: the page must stay loadable without a bundler, and
+ * only this file needs one to reach the TypeScript app.
  */
 
 const shell = document.querySelector('[data-wb-mount]');
@@ -42,6 +42,10 @@ if (shell instanceof HTMLElement) {
     const workbench = mountWorkbench(shell, { api: createApi() });
     await workbench.ready;
     document.documentElement.dataset.wb = 'live';
+    const store = document.querySelector('[data-wb-store]');
+    if (store) {
+      store.textContent = 'local store';
+    }
 
     // A visitor meets a cut in progress rather than an empty editor: open the
     // first Recording the store holds (read-only — nothing is written).

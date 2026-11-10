@@ -1,68 +1,12 @@
 /*
-  The workbench, set in the landing page's own language.
+  The workbench page's app sheet.
 
-  The app ships its own dark sheet; this one replaces it wholesale for the
-  embedded section. Every rule is scoped under .wb-shell so the app can never
-  reach into the page, and the shell carries .ui so the fragment kit's tokens
-  and resets come along instead of the app's :root ones.
+  The workbench is its own route (`/workbench`), so this sheet is the app, not a
+  section in a marketing page: the shell fills the viewport and every rule stays
+  scoped under `.wb-shell` so the shared kit's fragments cannot reach in.
 
   Product scale, not page scale: 13px text, 12px meta, nothing under 11px.
 */
-
-#workbench .wb-head { max-width: 720px; margin-bottom: 0; }
-#workbench .wb-head__lead { max-width: 58ch; }
-
-/* the section is a flex column so the window can take every pixel the head and
-   the note leave, instead of the two-screen block opening onto a void */
-#workbench { display: flex; flex-direction: column; padding-bottom: 72px; }
-#workbench .wrap { display: flex; flex: 1 1 auto; flex-direction: column; }
-
-#workbench .wb-foot {
-  max-width: 72ch;
-  margin: 10px 0 0;
-  font: 400 12px/1.6 var(--font-mono);
-  color: var(--p-muted, var(--u-muted));
-}
-#workbench .wb-foot code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--u-fill-2);
-  color: var(--u-ink);
-}
-
-/* the three store facts that stand under the window: what it reads, writes and
-   commits, so the second screen carries its weight */
-#workbench .wb-facts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--gutter);
-  /* the band sits on the section's closing edge, so the air collects between
-     it and the note instead of hanging below the facts */
-  margin: auto 0 0;
-  padding-top: var(--s-8);
-  padding: 0;
-  list-style: none;
-}
-#workbench .wb-fact__k {
-  display: block;
-  font: 500 10.5px/1.4 var(--font-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-#workbench .wb-fact__v {
-  display: block;
-  margin-top: 4px;
-  font: 400 12.5px/1.5 var(--font-mono);
-  color: var(--ink);
-}
-#workbench .wb-facts p {
-  margin: 8px 0 0;
-  max-width: 34ch;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--ink-2, var(--ink));
-}
 
 .wb-shell.ui {
   --fx-bg: #141a18;
@@ -76,25 +20,53 @@
   --ui-radius: 10px;
 
   position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
-  max-height: 1080px;
-  min-height: 420px;
-  margin-top: var(--s-6);
-  border-radius: var(--r-lg);
+  min-height: 0;
   background: var(--u-bg);
-  box-shadow: var(--u-shadow);
   overflow: hidden;
 }
 
-/* the offline notice, and the error line that replaces it when /api is absent */
-.wb-fallback { display: grid; gap: 10px; align-content: center; padding: 40px; max-width: 60ch; }
-.wb-fallback p { margin: 0; }
-.wb-fallback code { font-family: var(--font-mono); font-size: 12px; padding: 2px 6px; border-radius: 5px; background: var(--u-fill-2); color: var(--u-ink); }
-.wb-note { margin: 0; padding: 0 40px 32px; max-width: 60ch; font: 400 12px/1.5 var(--font-mono); color: var(--u-muted); }
+/* the notice before the store answers, and the error line when /api is absent */
+.wb-fallback {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 10px;
+  align-content: center;
+  justify-items: start;
+  padding: 40px;
+  max-width: 60ch;
+}
+
+.wb-fallback p {
+  margin: 0;
+}
+
+.wb-fallback code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+.wb-note {
+  margin: 0;
+  padding: 0 40px 32px;
+  max-width: 60ch;
+  font: 400 12px/1.5 var(--font-mono);
+  color: var(--u-muted);
+}
 
 /* ------------------------------------------------------------------ frame */
 
-.wb-shell .workbench { display: flex; height: 100%; min-height: 0; }
+.wb-shell .workbench {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
 
 .wb-shell .rail,
 .wb-shell .inspector {
@@ -106,10 +78,23 @@
   scrollbar-color: var(--u-line-2) transparent;
 }
 
-.wb-shell .rail { width: 232px; border-right: 1px solid var(--u-line-2); }
-.wb-shell .inspector { width: 296px; border-left: 1px solid var(--u-line-2); }
+.wb-shell .rail {
+  width: 232px;
+  border-right: 1px solid var(--u-line-2);
+}
 
-.wb-shell .centre { display: flex; flex-direction: column; flex: 1; min-width: 0; background: var(--u-bg); }
+.wb-shell .inspector {
+  width: 296px;
+  border-left: 1px solid var(--u-line-2);
+}
+
+.wb-shell .centre {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--u-bg);
+}
 
 /* ------------------------------------------------------------------ chrome */
 
@@ -155,13 +140,31 @@
   transition: background-color 160ms var(--u-ease), color 160ms var(--u-ease);
 }
 
-.wb-shell .btn:hover:not(:disabled) { background: var(--u-fill-3); }
-.wb-shell .btn:focus-visible { outline: 2px solid var(--u-accent); outline-offset: 1px; }
-.wb-shell .btn:disabled { opacity: 0.4; cursor: default; }
+.wb-shell .btn:hover:not(:disabled) {
+  background: var(--u-fill-3);
+}
+
+.wb-shell .btn:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.wb-shell .btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 /* a ghost is the quiet half of the pair: secondary, cancelling, destructive */
-.wb-shell .btn.ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--u-line-2); color: var(--u-muted); }
-.wb-shell .btn.ghost:hover:not(:disabled) { background: var(--u-fill-2); color: var(--u-ink); }
+.wb-shell .btn.ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--u-line-2);
+  color: var(--u-muted);
+}
+
+.wb-shell .btn.ghost:hover:not(:disabled) {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
 
 /* inside the mock the one action of a form is an accent outline, not a second
    solid: the page's own solid pill stays the only filled button on screen */
@@ -173,11 +176,13 @@
   color: var(--u-accent-text);
   font-weight: 600;
 }
+
 .wb-shell .import .btn:hover,
 .wb-shell .export-form .btn:last-of-type:hover,
 .wb-shell .commit-row .btn:last-child:hover:not(:disabled) {
   background: color-mix(in oklab, var(--u-accent) 22%, var(--u-bg));
 }
+
 .wb-shell [data-inspector-section="commit"] [data-commit-run] {
   margin-top: 10px;
   border: 1px solid var(--u-accent);
@@ -185,6 +190,7 @@
   color: var(--u-accent-text);
   font-weight: 600;
 }
+
 .wb-shell [data-inspector-section="commit"] [data-commit-run]:hover:not(:disabled) {
   background: color-mix(in oklab, var(--u-accent) 22%, var(--u-bg));
 }
@@ -195,7 +201,13 @@
   font-weight: 600;
   outline: 0;
 }
-.wb-shell .btn.small { height: 22px; padding: 0 7px; border-radius: 5px; font-size: 11.5px; }
+
+.wb-shell .btn.small {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+}
 
 /* ------------------------------------------------------------- rail lists */
 
@@ -207,7 +219,12 @@
   color: var(--u-muted);
 }
 
-.wb-shell .ttl.sub { margin-top: 12px; font-size: 10.5px; letter-spacing: 0.12em; color: var(--u-soft); }
+.wb-shell .ttl.sub {
+  margin-top: 12px;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  color: var(--u-soft);
+}
 
 .wb-shell .asset {
   display: block;
@@ -224,13 +241,40 @@
   transition: background-color 160ms var(--u-ease), border-color 160ms var(--u-ease);
 }
 
-.wb-shell .asset:hover { background: var(--u-fill-2); }
-.wb-shell .asset.sel { border-color: var(--u-accent); background: var(--u-tint); }
-.wb-shell .asset-name { display: block; font-size: 13px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-shell .asset-sub { display: block; font: 400 11px/1.4 var(--ui-mono); color: var(--u-muted); }
+.wb-shell .asset:hover {
+  background: var(--u-fill-2);
+}
 
-.wb-shell .tag { font: 500 10.5px/1.4 var(--ui-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--u-muted); }
-.wb-shell .muted { color: var(--u-muted); }
+.wb-shell .asset.sel {
+  border-color: var(--u-accent);
+  background: var(--u-tint);
+}
+
+.wb-shell .asset-name {
+  display: block;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .asset-sub {
+  display: block;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+.wb-shell .tag {
+  font: 500 10.5px/1.4 var(--ui-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--u-muted);
+}
+
+.wb-shell .muted {
+  color: var(--u-muted);
+}
 
 /* ------------------------------------------------------------------- stage */
 
@@ -259,27 +303,75 @@
   --ui-radius: 10px;
 }
 
-.wb-shell .stage > * { position: static; max-width: none; }
-.wb-shell p { margin: 0 0 8px; }
-.wb-shell p:last-child { margin-bottom: 0; }
-.wb-shell .list { display: block; }
+.wb-shell .stage>* {
+  position: static;
+  max-width: none;
+}
 
-.wb-shell .stage-view { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-height: 0; }
-.wb-shell .stage-view > .align-clips { flex: 1 1 auto; min-height: 0; }
-.wb-shell .stage-view > .recording-viewer,
-.wb-shell .stage-view > .draft-viewer { flex: 1 1 auto; min-height: 0; justify-content: center; }
-.wb-shell .inspector-section { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--u-line); }
-.wb-shell .inspector-section:last-child { border-bottom: 0; }
-.wb-shell .inspector-section > :last-child { margin-bottom: 0; }
-.wb-shell .inspector .kv + p,
-.wb-shell .inspector p.muted { margin-top: 8px; }
+.wb-shell p {
+  margin: 0 0 8px;
+}
+
+.wb-shell p:last-child {
+  margin-bottom: 0;
+}
+
+.wb-shell .list {
+  display: block;
+}
+
+.wb-shell .stage-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.wb-shell .stage-view>.align-clips {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-shell .stage-view>.recording-viewer,
+.wb-shell .stage-view>.draft-viewer {
+  flex: 1 1 auto;
+  min-height: 0;
+  justify-content: center;
+}
+
+.wb-shell .inspector-section {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--u-line);
+}
+
+.wb-shell .inspector-section:last-child {
+  border-bottom: 0;
+}
+
+.wb-shell .inspector-section> :last-child {
+  margin-bottom: 0;
+}
+
+.wb-shell .inspector .kv+p,
+.wb-shell .inspector p.muted {
+  margin-top: 8px;
+}
 
 /* a stage's blocks keep a readable column and sit centred, not stretched */
-.wb-shell .stage-view > .segments,
-.wb-shell .stage-view > .repair-controls,
-.wb-shell .stage-view > .align-clips,
-.wb-shell .stage-view > .records { width: min(100%, 620px); margin-inline: auto; }
-.wb-shell .stage-view > .export-form { width: min(100%, 520px); margin-inline: auto; }
+.wb-shell .stage-view>.segments,
+.wb-shell .stage-view>.repair-controls,
+.wb-shell .stage-view>.align-clips,
+.wb-shell .stage-view>.records {
+  width: min(100%, 620px);
+  margin-inline: auto;
+}
+
+.wb-shell .stage-view>.export-form {
+  width: min(100%, 520px);
+  margin-inline: auto;
+}
 
 /* ------------------------------------------------------------------ filmstrip */
 
@@ -312,9 +404,20 @@
   scrollbar-width: thin;
   scrollbar-color: var(--u-line-2) transparent;
 }
-.wb-shell .film::-webkit-scrollbar { width: 6px; height: 6px; }
-.wb-shell .film::-webkit-scrollbar-track { background: transparent; }
-.wb-shell .film::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--u-line-2); }
+
+.wb-shell .film::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.wb-shell .film::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.wb-shell .film::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--u-line-2);
+}
 
 .wb-shell .cell {
   min-width: 0;
@@ -329,8 +432,16 @@
   cursor: pointer;
 }
 
-.wb-shell .cell.inrange { border-color: color-mix(in oklab, var(--u-accent) 55%, transparent); background: var(--u-tint); }
-.wb-shell .cell.sel { border-color: var(--u-accent); background: var(--u-accent); color: var(--u-accent-ink); }
+.wb-shell .cell.inrange {
+  border-color: color-mix(in oklab, var(--u-accent) 55%, transparent);
+  background: var(--u-tint);
+}
+
+.wb-shell .cell.sel {
+  border-color: var(--u-accent);
+  background: var(--u-accent);
+  color: var(--u-accent-ink);
+}
 
 .wb-shell .timeline {
   position: relative;
@@ -342,7 +453,14 @@
   overflow: hidden;
 }
 
-.wb-shell .cut { position: absolute; inset: 0 auto 0 auto; background: var(--u-tint-2); border-left: 2px solid var(--u-accent); border-right: 2px solid var(--u-accent); }
+.wb-shell .cut {
+  position: absolute;
+  inset: 0 auto 0 auto;
+  background: var(--u-tint-2);
+  border-left: 2px solid var(--u-accent);
+  border-right: 2px solid var(--u-accent);
+}
+
 .wb-shell .timeline:empty::after {
   content: "no cut band";
   position: absolute;
@@ -354,7 +472,15 @@
   text-transform: uppercase;
   color: var(--u-muted);
 }
-.wb-shell .cut-handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; background: var(--u-accent); }
+
+.wb-shell .cut-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  background: var(--u-accent);
+}
 
 /* the repair tools are a segmented control, so they read quieter than the tabs */
 .wb-shell .repair-tools {
@@ -365,6 +491,7 @@
   border: 1px solid var(--u-line-2);
   border-radius: 8px;
 }
+
 .wb-shell .repair-tools .btn {
   height: 22px;
   padding: 0 9px;
@@ -373,33 +500,74 @@
   color: var(--u-muted);
   font-size: 11.5px;
 }
-.wb-shell .repair-tools .btn:hover:not(:disabled) { background: var(--u-fill-2); color: var(--u-ink); }
+
+.wb-shell .repair-tools .btn:hover:not(:disabled) {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
 .wb-shell .repair-tools .btn.on {
   background: var(--u-tint);
   color: var(--u-accent-text);
   box-shadow: inset 0 0 0 1px var(--u-accent);
 }
+
 .wb-shell input[type="color"] {
   width: 46px;
   height: 26px;
   padding: 3px;
   cursor: pointer;
 }
-.wb-shell .inspector .repair-settings { display: grid; gap: 10px; margin-bottom: 12px; }
+
+.wb-shell .inspector .repair-settings {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
 
 /* -------------------------------------------------------------- facts + forms */
 
-.wb-shell .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font: 400 12px/1.5 var(--ui-mono); }
-.wb-shell .kv .k { color: var(--u-muted); white-space: nowrap; }
-.wb-shell .kv .v { color: var(--u-ink); word-break: break-word; }
+.wb-shell .kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 0;
+  font: 400 12px/1.5 var(--ui-mono);
+}
 
-.wb-shell .field { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.wb-shell .field-label { font: 400 11.5px/1.4 var(--ui-mono); color: var(--u-muted); }
+.wb-shell .kv .k {
+  color: var(--u-muted);
+  white-space: nowrap;
+}
+
+.wb-shell .kv .v {
+  color: var(--u-ink);
+  word-break: break-word;
+}
+
+.wb-shell .field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-shell .field-label {
+  font: 400 11.5px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
 
 /* the inspector is the narrow column, so its fields stack rather than squeeze */
-.wb-shell .inspector .field { flex-direction: column; align-items: stretch; gap: 4px; }
+.wb-shell .inspector .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
 .wb-shell .inspector .field input[type="color"],
-.wb-shell .inspector .field input[type="checkbox"] { align-self: flex-start; }
+.wb-shell .inspector .field input[type="checkbox"] {
+  align-self: flex-start;
+}
 
 .wb-shell :is(input, select, textarea) {
   min-width: 0;
@@ -411,8 +579,18 @@
   font: 400 12.5px/1.4 var(--ui-mono);
 }
 
-.wb-shell :is(input, select, textarea):focus-visible { outline: 2px solid var(--u-accent); outline-offset: 0; }
-.wb-shell input[type="color"] { padding: 2px; width: 34px; height: 24px; cursor: pointer; }
+.wb-shell :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 0;
+}
+
+.wb-shell input[type="color"] {
+  padding: 2px;
+  width: 34px;
+  height: 24px;
+  cursor: pointer;
+}
+
 .wb-shell input[type="checkbox"] {
   appearance: none;
   position: relative;
@@ -425,10 +603,12 @@
   background: var(--u-fill-2);
   cursor: pointer;
 }
+
 .wb-shell input[type="checkbox"]:checked {
   border-color: var(--u-accent);
   background: var(--u-accent);
 }
+
 .wb-shell input[type="checkbox"]:checked::after {
   content: "";
   position: absolute;
@@ -439,12 +619,14 @@
   transform: rotate(-45deg) translate(0.5px, -1px);
   transform-origin: top left;
 }
+
 .wb-shell input[type="file"] {
   width: 100%;
   padding: 0;
   border: 0;
   background: none;
 }
+
 .wb-shell input[type="file"]::file-selector-button {
   width: 100%;
   padding: 7px 10px;
@@ -455,6 +637,7 @@
   font: 500 11.5px/1.3 var(--ui-font);
   cursor: pointer;
 }
+
 .wb-shell input[type="file"]::file-selector-button:hover {
   border-color: var(--u-accent);
   color: var(--u-accent-text);
@@ -472,58 +655,195 @@
   cursor: pointer;
 }
 
-.wb-shell .choices { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 8px; padding: 0; border: 0; }
-.wb-shell .choices legend { padding: 0; font: 500 10.5px/1.4 var(--ui-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--u-muted); }
-.wb-shell .choice { display: flex; align-items: center; gap: 5px; font: 400 12px/1.4 var(--ui-mono); color: var(--u-muted); cursor: pointer; }
+.wb-shell .choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+}
 
-.wb-shell .import { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 14px; padding: 10px; border: 1px dashed var(--u-line-2); border-radius: 8px; }
-.wb-shell .import .field { flex-direction: column; align-items: stretch; gap: 3px; }
-.wb-shell .import .btn { align-self: flex-start; }
-.wb-shell .import .muted { margin: 0; font: 400 11px/1.45 var(--ui-mono); word-break: break-word; }
+.wb-shell .choices legend {
+  padding: 0;
+  font: 500 10.5px/1.4 var(--ui-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--u-muted);
+}
 
-.wb-shell .segments .field { justify-content: flex-start; gap: 10px; }
+.wb-shell .choice {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 400 12px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+  cursor: pointer;
+}
+
+.wb-shell .import {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 14px;
+  padding: 10px;
+  border: 1px dashed var(--u-line-2);
+  border-radius: 8px;
+}
+
+.wb-shell .import .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.wb-shell .import .btn {
+  align-self: flex-start;
+}
+
+.wb-shell .import .muted {
+  margin: 0;
+  font: 400 11px/1.45 var(--ui-mono);
+  word-break: break-word;
+}
+
+.wb-shell .segments .field {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
 .wb-shell .segments .field .field-label,
-.wb-shell .segments .field .k { flex: none; }
-.wb-shell .segments .field select { flex: 1; }
+.wb-shell .segments .field .k {
+  flex: none;
+}
+
+.wb-shell .segments .field select {
+  flex: 1;
+}
 
 .wb-shell .segment-add,
 .wb-shell .character-add,
 .wb-shell .asset-actions,
 .wb-shell .commit-row,
-.wb-shell .fork { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.wb-shell .fork {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
 
-.wb-shell .segments { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+.wb-shell .segments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+
 .wb-shell .segment-list,
 .wb-shell .sequence-list,
-.wb-shell .validation-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; padding: 0; list-style: none; font: 400 12px/1.5 var(--ui-mono); }
+.wb-shell .validation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  font: 400 12px/1.5 var(--ui-mono);
+}
 
-.wb-shell .segment { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--u-line); border-radius: 6px; }
-.wb-shell .segment .asset-name { flex: 1; }
-.wb-shell .sequence-item { display: flex; align-items: center; gap: 6px; }
-.wb-shell .sequence-clip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-shell .asset-delete { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--u-line); }
-.wb-shell .validation { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--u-line); }
+.wb-shell .segment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--u-line);
+  border-radius: 6px;
+}
 
-.wb-shell .export-form { display: flex; flex-direction: column; gap: 10px; }
+.wb-shell .segment .asset-name {
+  flex: 1;
+}
+
+.wb-shell .sequence-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-shell .sequence-clip {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .asset-delete {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--u-line);
+}
+
+.wb-shell .validation {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--u-line);
+}
+
+.wb-shell .export-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .wb-shell .export-form .field {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   align-items: center;
   gap: 4px 12px;
 }
-.wb-shell .export-form .field > .field-label { white-space: nowrap; }
-.wb-shell .export-form .choices { grid-column: 2; }
-.wb-shell .export-summary { display: grid; gap: 2px; font: 400 12px/1.5 var(--ui-mono); color: var(--u-muted); }
-.wb-shell .manifest { font: 400 11.5px/1.6 var(--ui-mono); color: var(--u-text-2); white-space: pre-wrap; word-break: break-word; }
 
-.wb-shell .root { font: 400 12px/1.5 var(--ui-mono); }
+.wb-shell .export-form .field>.field-label {
+  white-space: nowrap;
+}
+
+.wb-shell .export-form .choices {
+  grid-column: 2;
+}
+
+.wb-shell .export-summary {
+  display: grid;
+  gap: 2px;
+  font: 400 12px/1.5 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+.wb-shell .manifest {
+  font: 400 11.5px/1.6 var(--ui-mono);
+  color: var(--u-text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wb-shell .root {
+  font: 400 12px/1.5 var(--ui-mono);
+}
 
 /* --------------------------------------------------------------- the frames */
 
-.wb-shell img { image-rendering: pixelated; }
+.wb-shell img {
+  image-rendering: pixelated;
+}
 
 .wb-shell .draft-viewer,
-.wb-shell .recording-viewer { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.wb-shell .recording-viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
 .wb-shell .draft-stage {
   display: flex;
   flex: 1 1 0;
@@ -536,10 +856,26 @@
 
 /* the frame steppers: two round ghosts either side of the picture */
 .wb-shell .draft-stage .btn,
-.wb-shell .recording-viewer > .btn { width: 32px; height: 32px; padding: 0; border-radius: 50%; font-size: 12px; }
-.wb-shell .recording-viewer > .pill,
-.wb-shell .draft-viewer > .pill { margin: 0; align-self: flex-end; }
-.wb-shell .draft-frames { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+.wb-shell .recording-viewer>.btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+}
+
+.wb-shell .recording-viewer>.pill,
+.wb-shell .draft-viewer>.pill {
+  margin: 0;
+  align-self: flex-end;
+}
+
+.wb-shell .draft-frames {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
 
 .wb-shell .draft-frame,
 .wb-shell .recording-frame {
@@ -570,16 +906,51 @@
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 
-.wb-shell .sheet-box { max-width: 100%; overflow: hidden; border: 1px solid var(--u-line-2); border-radius: 8px; background: var(--u-fill); }
-.wb-shell .sheet { display: block; max-width: none; }
+.wb-shell .sheet-box {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--u-line-2);
+  border-radius: 8px;
+  background: var(--u-fill);
+}
+
+.wb-shell .sheet {
+  display: block;
+  max-width: none;
+}
 
 /* ----------------------------------------------------------- repair + align */
 
-.wb-shell .repair-controls { padding: 10px; border: 1px dashed var(--u-line-2); border-radius: 8px; }
-.wb-shell .repair-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-.wb-shell .repair-settings { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
-.wb-shell .repair-ops { margin: 4px 0 0; padding-left: 18px; font: 400 11.5px/1.6 var(--ui-mono); color: var(--u-text-2); }
-.wb-shell .repair-op { margin-bottom: 2px; }
+.wb-shell .repair-controls {
+  padding: 10px;
+  border: 1px dashed var(--u-line-2);
+  border-radius: 8px;
+}
+
+.wb-shell .repair-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.wb-shell .repair-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.wb-shell .repair-ops {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font: 400 11.5px/1.6 var(--ui-mono);
+  color: var(--u-text-2);
+}
+
+.wb-shell .repair-op {
+  margin-bottom: 2px;
+}
 
 .wb-shell .repair-warning,
 .wb-shell .warning {
@@ -603,16 +974,51 @@
   overflow: hidden;
 }
 
-.wb-shell .align-anchor { position: absolute; z-index: 3; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--u-accent); box-shadow: 0 0 0 1px var(--u-bg); }
-.wb-shell .align-ghost { position: absolute; inset: 0 auto auto 0; z-index: 2; opacity: 0.55; }
-.wb-shell .align-ghost-image { display: block; }
+.wb-shell .align-anchor {
+  position: absolute;
+  z-index: 3;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--u-accent);
+  box-shadow: 0 0 0 1px var(--u-bg);
+}
+
+.wb-shell .align-ghost {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: 2;
+  opacity: 0.55;
+}
+
+.wb-shell .align-ghost-image {
+  display: block;
+}
+
 .wb-shell .align-offsets,
-.wb-shell .align-expand { display: flex; gap: 8px; margin-bottom: 6px; }
+.wb-shell .align-expand {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
 .wb-shell .align-offsets .field,
-.wb-shell .align-expand .field { flex: 1; }
+.wb-shell .align-expand .field {
+  flex: 1;
+}
+
 .wb-shell .align-offsets input,
-.wb-shell .align-expand input { width: 52px; }
-.wb-shell .align-clips { margin: 0 0 8px; padding-left: 16px; font: 400 11.5px/1.6 var(--ui-mono); color: var(--u-muted); }
+.wb-shell .align-expand input {
+  width: 52px;
+}
+
+.wb-shell .align-clips {
+  margin: 0 0 8px;
+  padding-left: 16px;
+  font: 400 11.5px/1.6 var(--ui-mono);
+  color: var(--u-muted);
+}
 
 /* -------------------------------------------------------------- error states */
 
@@ -626,30 +1032,69 @@
   font: 400 12px/1.5 var(--ui-mono);
 }
 
-.wb-shell .load-error-title { display: block; margin-bottom: 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
-.wb-shell .load-error-message { margin: 0; word-break: break-word; }
-.wb-shell .load-error-note { margin: 0 0 8px; color: #f0a0a0; }
-.wb-shell .action-error { margin: 6px 0 0; color: #f0a0a0; font: 400 11.5px/1.5 var(--ui-mono); }
+.wb-shell .load-error-title {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wb-shell .load-error-message {
+  margin: 0;
+  word-break: break-word;
+}
+
+.wb-shell .load-error-note {
+  margin: 0 0 8px;
+  color: #f0a0a0;
+}
+
+.wb-shell .action-error {
+  margin: 6px 0 0;
+  color: #f0a0a0;
+  font: 400 11.5px/1.5 var(--ui-mono);
+}
 
 /* --------------------------------------------------------------- narrow */
 
 @media (max-width: 1279px) {
-  .wb-shell .rail { width: 200px; }
-  .wb-shell .inspector { width: 250px; }
+  .wb-shell .rail {
+    width: 200px;
+  }
+
+  .wb-shell .inspector {
+    width: 250px;
+  }
 }
 
 @media (max-width: 1023px) {
-  .wb-shell .rail { width: 168px; }
-  .wb-shell .inspector { width: 214px; }
+  .wb-shell .rail {
+    width: 168px;
+  }
+
+  .wb-shell .inspector {
+    width: 214px;
+  }
+
   .wb-shell .draft-frame,
-  .wb-shell .recording-frame { width: 210px; }
+  .wb-shell .recording-frame {
+    width: 210px;
+  }
 }
 
 /* under 860px the shell stacks: the stage first, then the two rails as fixed
    strips, because three columns cannot share a phone */
 @media (max-width: 859px) {
-  .wb-shell { flex: none; min-height: 720px; }
-  .wb-shell .workbench { flex-direction: column; }
+  .wb-shell {
+    flex: none;
+    min-height: 720px;
+  }
+
+  .wb-shell .workbench {
+    flex-direction: column;
+  }
+
   .wb-shell .rail,
   .wb-shell .inspector {
     flex: none;
@@ -658,18 +1103,38 @@
     border: 0;
     border-top: 1px solid var(--u-line-2);
   }
-  .wb-shell .centre { order: -1; flex: 1 1 0; min-height: 300px; }
-  .wb-shell .stage { padding: 16px; }
+
+  .wb-shell .centre {
+    order: -1;
+    flex: 1 1 0;
+    min-height: 300px;
+  }
+
+  .wb-shell .stage {
+    padding: 16px;
+  }
+
   .wb-shell .draft-frame,
-  .wb-shell .recording-frame { width: 100%; max-width: 260px; }
+  .wb-shell .recording-frame {
+    width: 100%;
+    max-width: 260px;
+  }
 }
 
 @media (max-width: 639px) {
-  .wb-shell .pill { display: none; }
-  .wb-shell .modes { overflow: hidden; }
+  .wb-shell .pill {
+    display: none;
+  }
+
+  .wb-shell .modes {
+    overflow: hidden;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .wb-shell .btn,
-  .wb-shell .asset { transition: none; }
+  .wb-shell .asset {
+    transition: none;
+  }
 }

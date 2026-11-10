@@ -113,7 +113,10 @@ stored, not regenerated. See
 
 The web UI is the primary working surface, and its shape is a **docked
 workbench**, not a wizard: one persistent shell, with a single region swapping per
-task so the working context is never lost.
+task so the working context is never lost. It is served as its own page,
+`/workbench`; the landing page at `/` is a separate marketing document that
+previews the tool and hands off to it, so the app owns the full viewport instead
+of competing with page sections.
 
 - **Rail (left, persistent)** — the Library region: the Import form at the top of
   Recordings, then the Recordings, Drafts, committed Assets and Exports that

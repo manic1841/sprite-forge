@@ -6,12 +6,12 @@ Deal: palette green-black-bone — a near-black ground and a muted green accent 
 
 Voice: technical-dry (copy-registers.md 2). Pairs: exact, not cold; the pipe in verb-led steps; real commands and file names. Person: "you" for what you get, the tool is the subject. Sentences: 8 to 16 words, one longer where it explains. Humour: none in the hero or the FAQ. House words: Recording, Segment, Clip, Sequence, Canvas, Anchor, Commit, Fork, Provenance. Never: virtue words, a pun on "forge", an invented figure.
 
-Fact sheet: sprite-forge turns mGBA screen recordings into de-backgrounded, cropped, aligned pixel-animation assets; 32x24 canvas, anchor 16,24, delays 50 to 60 ms, corner-sampled background, frame-exact cut list, replayable Repair script, immutable committed Assets, provenance, `verify-reproducible`. Buyer: pixel-art game teams using emulator captures. Main action: Run the workbench (#run).
+Fact sheet: sprite-forge turns mGBA screen recordings into de-backgrounded, cropped, aligned pixel-animation assets; 32x24 canvas, anchor 16,24, delays 50 to 60 ms, corner-sampled background, frame-exact cut list, replayable Repair script, immutable committed Assets, provenance, `verify-reproducible`. Buyer: pixel-art game teams using emulator captures. Main action: Run the workbench (`/workbench`).
 
 ## Sections
 
 1. `#top` hero, centred — "Pixel-animation tool for game teams", the workbench window with the draft frame and its cut range. Picture: app window (the kit's window pane and real sprite frames). 1 screen. Hero entrance only.
-2. `#workbench` app-frame — every pull of a Recording reviewed on one screen: the recording list beside the open Draft, its frames, cuts and repair tools. Picture: app window (list + open clip editor). 1 screen.
+2. `#workbench` app-frame — every pull of a Recording reviewed on one screen: the recording list beside the open Draft, its frames, cuts and repair tools. Picture: a static app window (list + open clip editor) that hands off to the live `/workbench` page. 1 screen.
 3. `#pipeline` chapter — one Recording becomes a Clip, in order: ingest, Segment, key, commit. Picture: a wide `[data-visual]` frame with the fluted-glass effect under the pipeline diagram. 2 screens. Holds the effect.
 4. `#assets` features-2x2 — four controls (background key, repair script, the store's checks, provenance) each on its own fragment. Pictures: toggles, checklist, terminal-run, code. 2 screens.
 5. `#run` steps — clone, install, open the workbench, each on a terminal fragment. 1 screen (3 at 768).

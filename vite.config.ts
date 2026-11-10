@@ -1,9 +1,9 @@
 /**
  * Vite config for the **dev-only** site + workbench.
  *
- * The root is `site/`, so the landing page and the workbench it mounts share one
- * origin: the page's `/api` calls and its modules resolve on the same server,
- * which is what lets the workbench run *inside* the page rather than beside it.
+ * The root is `site/`, so the landing page (`/`) and the workbench (`/workbench`)
+ * share one origin: the workbench's `/api` calls and its modules resolve on the
+ * same server, so the tool runs as its own page without a second dev server.
  * The Node half (`src/web/server.ts`) is mounted as middleware so the browser
  * never touches `node:fs`. Point it at a store with:
  *
@@ -94,6 +94,26 @@ function rawKitAssets(): Plugin {
   };
 }
 
+/**
+ * The workbench is a page of its own at `/workbench`; Vite only serves the file
+ * by its literal name, so rewrite the clean route onto `workbench.html`. The
+ * query string is kept. Links can then be plain `/workbench` everywhere.
+ */
+export function workbenchPage(): Plugin {
+  return {
+    name: 'sprite-forge-workbench-page',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const [path, query] = (req.url ?? '/').split('?');
+        if (path === '/workbench' || path === '/workbench/') {
+          req.url = `/workbench.html${query ? `?${query}` : ''}`;
+        }
+        next();
+      });
+    },
+  };
+}
+
 function workbenchApi(): Plugin {
   return {
     name: 'sprite-forge-workbench-api',
@@ -122,5 +142,5 @@ function workbenchApi(): Plugin {
 export default defineConfig({
   root: 'site',
   server: { port: 5173, fs: { allow: [projectRoot] } },
-  plugins: [rawKitAssets(), outsideRootModules(), workbenchApi()],
+  plugins: [workbenchPage(), rawKitAssets(), outsideRootModules(), workbenchApi()],
 });
