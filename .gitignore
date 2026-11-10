@@ -19,3 +19,7 @@ site/.taste-skill/consistency/
 site/.taste-skill/layout/
 site/.taste-skill/gate/
 site/.taste-skill/*.png
+
+# gate and shoot run artifacts kept at the repo root while iterating
+.taste-skill/
+shots/

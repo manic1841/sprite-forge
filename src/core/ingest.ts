@@ -22,6 +22,7 @@ import { cutsPath, recordingDir, sourcePath } from './layout.js';
 import type { CutList } from './segments.js';
 import {
   pathExists,
+  readBinaryFile,
   readExternalFile,
   readJsonFile,
   writeBinaryFile,
@@ -161,4 +162,66 @@ function describeFile(hash: string, frameCount: number): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A single Recording frame, encoded as PNG for the browser preview. */
+export interface RecordingFrame {
+  /** Store-relative POSIX path of the source the frame came from. */
+  path: string;
+  /** Always `image/png`. */
+  contentType: 'image/png';
+  /** The encoded PNG bytes. */
+  data: Buffer;
+}
+
+/**
+ * Read one frame of a Recording as PNG.
+ *
+ * The filmstrip is a scrubber, so picking a frame has to show something; the
+ * source is an animated file and the browser cannot slice it. The frame is
+ * composited over the opaque background the GIF itself carries, so what is
+ * shown is what the capture looked like.
+ */
+export async function readRecordingFrame(
+  root: string,
+  options: { recordingId: string; index: number },
+): Promise<RecordingFrame> {
+  const { recordingId, index } = options;
+  if (!isValidId(recordingId)) {
+    throw new StoreError(
+      `Invalid recording id "${recordingId}": must match /^[a-z][a-z0-9-]*$/.`,
+    );
+  }
+  if (!Number.isInteger(index) || index < 0) {
+    throw new StoreError(`Recording frame index must be an integer >= 0; got ${index}.`);
+  }
+
+  const relPath = sourcePath(recordingId);
+  if (!(await pathExists(root, relPath))) {
+    throw new StoreError(
+      `Recording "${recordingId}" has no recording file (${relPath} is missing).`,
+    );
+  }
+  const bytes = await readBinaryFile(root, relPath);
+
+  let pages: number | undefined;
+  try {
+    pages = (await sharp(bytes, { animated: true }).metadata()).pages;
+  } catch (error) {
+    throw new StoreError(
+      `Cannot decode recording file for "${recordingId}": ${(error as Error).message}`,
+    );
+  }
+  const frameCount = pages ?? 1;
+  if (index >= frameCount) {
+    throw new StoreError(
+      `Recording "${recordingId}" has ${frameCount} frame(s); frame ${index} is out of range.`,
+    );
+  }
+
+  const data = await sharp(bytes, { animated: true, page: index, pages: 1 })
+    .flatten({ background: '#000000' })
+    .png()
+    .toBuffer();
+  return { path: relPath, contentType: 'image/png', data };
 }

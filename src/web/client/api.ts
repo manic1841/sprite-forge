@@ -10,14 +10,22 @@ import type {
   AlignmentState,
   CharacterAlignment,
   ClipDraft,
+  CommittedAsset,
+  CommittedSequence,
+  CreatedCharacter,
   CutList,
+  DerivedAnchor,
   ExpandCanvasResult,
   ExportBindings,
   ExportResult,
   Facing,
+  IngestedRecording,
   PlacementOffset,
   RepairOperationInput,
   RepairState,
+  ReproducibilityReport,
+  SequenceFork,
+  StoreCheckReport,
   StoreScan,
 } from './types.js';
 
@@ -25,8 +33,38 @@ import type {
 export interface WorkbenchApi {
   /** List the store's Recordings, Drafts and committed Assets. */
   scan(): Promise<StoreScan>;
+  /**
+   * Register an uploaded capture as a Recording. The bytes travel as base64
+   * because the browser cannot hand the server a path.
+   */
+  ingestRecording(
+    id: string,
+    dataBase64: string,
+    filename?: string,
+  ): Promise<IngestedRecording>;
   /** Read a Recording's cut list. */
   readCutList(recordingId: string): Promise<CutList>;
+  /**
+   * The URL a Recording frame's PNG is served from, for an `<img src>`.
+   * Synchronous: it is a URL, not a fetch.
+   */
+  recordingFrameUrl(recordingId: string, index: number): string;
+  /** Preview the Canvas/Anchor a Recording (or Segment) would derive. */
+  deriveAnchor(recordingId: string, cutId?: string): Promise<DerivedAnchor>;
+  /** Create a Character with an explicit Canvas/Anchor. */
+  createCharacter(
+    id: string,
+    canvas: { width: number; height: number; anchorX: number; anchorY: number },
+  ): Promise<CreatedCharacter>;
+  /** Extract a Segment into a Clip Draft. */
+  extractClipDraft(
+    characterId: string,
+    request: { recordingId: string; cutId: string; draftId?: string },
+  ): Promise<ClipDraft>;
+  /** Commit a Draft into an immutable Clip. */
+  commitDraft(characterId: string, draftId: string, name: string): Promise<CommittedAsset>;
+  /** Rename a Segment's cut id. */
+  renameSegment(recordingId: string, cutId: string, newId: string): Promise<CutList>;
   /** Add a Segment (creating a cut). */
   addSegment(
     recordingId: string,
@@ -92,6 +130,32 @@ export interface WorkbenchApi {
   ): Promise<ExportResult>;
   /** Read an existing Export's live, validated Manifest (the Export stage). */
   readManifest(target: string): Promise<ExportResult>;
+  /** Read a committed Clip's validated meta, provenance and sheet path. */
+  readClip(characterId: string, clipId: string): Promise<CommittedAsset>;
+  /** Read a committed Sequence's validated meta, provenance and source Clips. */
+  readSequence(characterId: string, sequenceId: string): Promise<CommittedSequence>;
+  /** Fork a committed Clip into a new Draft. */
+  forkClip(characterId: string, clipId: string, draftId?: string): Promise<ClipDraft>;
+  /** Fork a committed Sequence into its ordered Clip list, to edit and re-commit. */
+  forkSequence(characterId: string, sequenceId: string): Promise<SequenceFork>;
+  /** Commit an ordered Clip list as a new Sequence. */
+  commitSequence(
+    characterId: string,
+    sequenceId: string,
+    clips: string[],
+  ): Promise<CommittedSequence>;
+  /** Throw away a Draft and the Repair script it owns. */
+  discardDraft(characterId: string, draftId: string): Promise<void>;
+  /** Delete a committed Asset (refused while a Sequence still uses a Clip). */
+  deleteAsset(characterId: string, kind: 'clip' | 'sequence', id: string): Promise<void>;
+  /** Re-bake one Asset and diff it against what is stored. */
+  verifyReproducible(
+    characterId: string,
+    kind: 'clip' | 'sequence',
+    id: string,
+  ): Promise<ReproducibilityReport>;
+  /** Validate the whole store. */
+  validateStore(): Promise<StoreCheckReport>;
 }
 
 /** The Export stage's inputs; the server passes them straight to `exportCharacter`. */
@@ -126,7 +190,38 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
 
   return {
     scan: () => call<StoreScan>('/store'),
+    ingestRecording: (id, dataBase64, filename) =>
+      call<IngestedRecording>('/recordings', {
+        method: 'POST',
+        body: JSON.stringify({ id, dataBase64, filename }),
+      }),
     readCutList: (recordingId) => call<CutList>(`/recordings/${recordingId}/cuts`),
+    recordingFrameUrl: (recordingId, index) =>
+      `${base}/recordings/${recordingId}/frames/${index}`,
+    deriveAnchor: (recordingId, cutId) =>
+      call<DerivedAnchor>(
+        `/recordings/${recordingId}/anchor${cutId === undefined ? '' : `?cut=${cutId}`}`,
+      ),
+    createCharacter: (id, canvas) =>
+      call<CreatedCharacter>('/characters', {
+        method: 'POST',
+        body: JSON.stringify({ id, ...canvas }),
+      }),
+    extractClipDraft: (characterId, request) =>
+      call<ClipDraft>(`/characters/${characterId}/drafts`, {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }),
+    commitDraft: (characterId, draftId, name) =>
+      call<CommittedAsset>(`/characters/${characterId}/drafts/${draftId}/commit`, {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      }),
+    renameSegment: (recordingId, cutId, newId) =>
+      call<CutList>(`/recordings/${recordingId}/cuts/${cutId}/rename`, {
+        method: 'POST',
+        body: JSON.stringify({ newId }),
+      }),
     addSegment: (recordingId, segment) =>
       call<CutList>(`/recordings/${recordingId}/cuts`, {
         method: 'POST',
@@ -162,8 +257,7 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
       );
       return body.color;
     },
-    readCharacterAlignment: (characterId) =>
-      call<CharacterAlignment>(`/characters/${characterId}/alignment`),
+    readCharacterAlignment: (characterId) =>      call<CharacterAlignment>(`/characters/${characterId}/alignment`),
     readDraftAlignment: (characterId, draftId) =>
       call<AlignmentState>(`/characters/${characterId}/drafts/${draftId}/alignment`),
     setPlacementOffset: (characterId, draftId, offset) =>
@@ -184,5 +278,41 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
         body: JSON.stringify(request),
       }),
     readManifest: (target) => call<ExportResult>(`/exports/${target}/manifest`),
+    readClip: (characterId, clipId) =>
+      call<CommittedAsset>(`/characters/${characterId}/clips/${clipId}`),
+    readSequence: (characterId, sequenceId) =>
+      call<CommittedSequence>(`/characters/${characterId}/sequences/${sequenceId}`),
+    forkClip: (characterId, clipId, draftId) =>
+      call<ClipDraft>(`/characters/${characterId}/clips/${clipId}/fork`, {
+        method: 'POST',
+        body: JSON.stringify(draftId === undefined ? {} : { draftId }),
+      }),
+    forkSequence: (characterId, sequenceId) =>
+      call<SequenceFork>(`/characters/${characterId}/sequences/${sequenceId}/fork`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+    commitSequence: (characterId, sequenceId, clips) =>
+      call<CommittedSequence>(`/characters/${characterId}/sequences`, {
+        method: 'POST',
+        body: JSON.stringify({ name: sequenceId, clips }),
+      }),
+    discardDraft: async (characterId, draftId) => {
+      await call<{ discarded: string }>(`/characters/${characterId}/drafts/${draftId}/discard`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    },
+    deleteAsset: async (characterId, kind, id) => {
+      const folder = kind === 'clip' ? 'clips' : 'sequences';
+      await call<{ deleted: string }>(`/characters/${characterId}/${folder}/${id}`, {
+        method: 'DELETE',
+      });
+    },
+    verifyReproducible: (characterId, kind, id) =>
+      call<ReproducibilityReport>(
+        `/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/reproducible`,
+      ),
+    validateStore: () => call<StoreCheckReport>('/validate'),
   };
 }

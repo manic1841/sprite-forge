@@ -14,13 +14,18 @@ export type {
   AssetRef,
   CharacterAlignment,
   ClipDraft,
+  CommittedAsset,
+  CommittedSequence,
+  CreatedCharacter,
   CutList,
+  DerivedAnchor,
   ExpandCanvasResult,
   ExportBindings,
   ExportManifest,
   ExportResult,
   Facing,
   FrameRange,
+  IngestedRecording,
   PlacementOffset,
   RectGeometry,
   RepairOperation,
@@ -30,12 +35,27 @@ export type {
   RepairTool,
   RepairWarning,
   RepairWarningCode,
+  ReproducibilityReport,
   ScannedAsset,
   ScannedCharacter,
   ScannedDraft,
   ScannedExport,
   ScannedRecording,
   Segment,
+  SequenceFork,
   StoreScan,
   StrokeGeometry,
 } from '../../core/index.js';
+
+/**
+ * A whole-store check report.
+ *
+ * Deliberately *not* the core `StoreValidationReport`: the core throws with every
+ * issue attached, while the workbench wants one list it can render either way.
+ */
+export interface StoreCheckReport {
+  ok: boolean;
+  root: string;
+  artifactCount: number;
+  problems: { artifact: string; path: string; message: string }[];
+}

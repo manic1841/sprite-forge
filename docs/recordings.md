@@ -7,6 +7,10 @@ Vocabulary: [`GLOSSARY.md`](../GLOSSARY.md) — **Recording**, **Segment**.
 
 ## Opening a Recording
 
+Ingest is available two ways — `forge ingest` on the CLI, and the **Import** form at
+the top of the workbench's Library rail, which picks a file, defaults the id to a
+slug of its name, and registers it. Both go through the same core verb.
+
 A Recording lives at `recordings/<recording-id>/` with its raw file and its cut list:
 
 ```text
@@ -44,6 +48,13 @@ The UI is a frame-accurate scrubber over the Recording:
 
 `speed` is a playback multiplier applied when a Clip is generated; it does **not**
 change the Segment's frame range.
+
+In the workbench the same operations are on the Clip editor's stage: the Recording is
+previewed while it plays, a Segment is added from the fields under the list, renamed,
+deleted, or dragged in the filmstrip, and **Extract** turns it into a Draft on the
+same screen. Extracting needs a Character whose Canvas can hold the Segment, so the
+stage also offers **New Character**, which derives the Anchor and Canvas from the
+Segment's frames.
 
 ## Overlap is not policed
 

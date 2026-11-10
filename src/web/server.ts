@@ -13,26 +13,46 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import {
   addSegment,
   appendRepairOperation,
+  commitDraft,
+  commitSequence,
+  createCharacter,
+  deleteAsset,
+  deriveAnchor,
+  discardDraft,
   expandCanvas,
   exportCharacter,
+  extractClipDraft,
   ForgeError,
+  forkAsset,
+  ingestRecording,
   readAssetSheet,
   readCharacterAlignment,
+  readClip,
   readClipDraft,
   readDraftAlignment,
   readDraftRepair,
   readDraftRepairFrame,
   readCutList,
   readExportManifest,
+  readRecordingFrame,
+  readSequence,
   removeSegment,
+  renameSegment,
   sampleDraftRepairColor,
   scan,
   setPlacementOffset,
   setSegmentRange,
   undoRepairOperation,
+  validateStore,
+  ValidationError,
+  verifyReproducible,
+  withStoreLock,
 } from '../core/index.js';
 import type { AssetKind, ExportBindings, RepairOperationInput } from '../core/index.js';
 
@@ -75,6 +95,49 @@ export async function handleApiRequest(
     // GET /api/store
     if (method === 'GET' && matches(segments, ['api', 'store'])) {
       return ok(await scan(storeRoot));
+    }
+
+    // GET /api/validate — the whole store's validation report.
+    //
+    // `validateStore` throws on the first invalid artifact set; the workbench wants
+    // the whole picture, so the failure is normalised into the same report shape
+    // instead of becoming a 500.
+    if (method === 'GET' && matches(segments, ['api', 'validate'])) {
+      try {
+        const report = await validateStore(storeRoot);
+        return ok({ ok: true, root: report.root, artifactCount: report.artifacts.length, problems: [] });
+      } catch (error) {
+        if (error instanceof ValidationError) {
+          return ok({
+            ok: false,
+            root: storeRoot,
+            artifactCount: 0,
+            problems: error.issues.map((issue) => ({
+              artifact: issue.artifact,
+              path: issue.path,
+              message: issue.message,
+            })),
+          });
+        }
+        throw error;
+      }
+    }
+
+    // GET /api/characters/<characterId>/<kind>/<assetId>/reproducible
+    if (
+      method === 'GET' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      (segments[3] === 'clips' || segments[3] === 'sequences') &&
+      segments[5] === 'reproducible'
+    ) {
+      return ok(
+        await verifyReproducible(storeRoot, {
+          characterId: decodeURIComponent(segments[2]!),
+          kind: segments[3] === 'clips' ? 'clip' : 'sequence',
+          id: decodeURIComponent(segments[4]!),
+        }),
+      );
     }
 
     // /api/characters/<characterId>/alignment — the Alignment stage's view model.
@@ -240,6 +303,101 @@ export async function handleApiRequest(
       }
     }
 
+    // POST /api/recordings — ingest an uploaded capture as a Recording.
+    if (method === 'POST' && matches(segments, ['api', 'recordings'])) {
+      const body = asRecord(request.body);
+      return { status: 201, body: await ingestUploaded(storeRoot, body) };
+    }
+
+    // GET /api/recordings/<recordingId>/frames/<index> — a preview frame.
+    if (
+      method === 'GET' &&
+      segments[0] === 'api' &&
+      segments[1] === 'recordings' &&
+      segments[3] === 'frames' &&
+      segments[4] !== undefined
+    ) {
+      const recordingId = decodeURIComponent(segments[2]!);
+      const frame = await readRecordingFrame(storeRoot, {
+        recordingId,
+        index: Number(segments[4]),
+      });
+      return { status: 200, body: frame.data, contentType: frame.contentType };
+    }
+
+    // GET /api/recordings/<recordingId>/anchor?cut=<cutId> — preview a derived Canvas.
+    if (
+      method === 'GET' &&
+      matches(segments, ['api', 'recordings', segments[2] ?? '', 'anchor'])
+    ) {
+      const recordingId = decodeURIComponent(segments[2]!);
+      const cutId = params.get('cut') ?? undefined;
+      return ok(
+        await deriveAnchor(storeRoot, {
+          recordingId,
+          ...(cutId === undefined ? {} : { cutId }),
+        }),
+      );
+    }
+
+    // POST /api/characters — create a Character.
+    if (method === 'POST' && matches(segments, ['api', 'characters'])) {
+      const body = asRecord(request.body);
+      return {
+        status: 201,
+        body: await createCharacter(storeRoot, {
+          characterId: requiredString(body, 'id'),
+          width: requiredNumber(body, 'width'),
+          height: requiredNumber(body, 'height'),
+          anchor: { x: requiredNumber(body, 'anchorX'), y: requiredNumber(body, 'anchorY') },
+        }),
+      };
+    }
+
+    // POST /api/characters/<characterId>/drafts — extract a Segment into a Draft.
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'drafts' &&
+      segments.length === 4
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      const body = asRecord(request.body);
+      return {
+        status: 201,
+        body: await extractClipDraft(storeRoot, {
+          characterId,
+          recordingId: requiredString(body, 'recordingId'),
+          cutId: requiredString(body, 'cutId'),
+          draftId: requiredOptionalString(body, 'draftId'),
+          background: requiredOptionalString(body, 'background'),
+          tolerance: optionalNumber(body, 'tolerance'),
+          loop: body['loop'] === undefined ? undefined : body['loop'] === true,
+        }),
+      };
+    }
+
+    // POST /api/characters/<characterId>/drafts/<draftId>/commit — bake a Clip.
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'drafts' &&
+      segments[5] === 'commit'
+    ) {
+      const body = asRecord(request.body);
+      return {
+        status: 201,
+        body: await commitDraft(storeRoot, {
+          characterId: decodeURIComponent(segments[2]!),
+          draftId: decodeURIComponent(segments[4]!),
+          assetId: requiredString(body, 'name'),
+          kind: 'clip',
+        }),
+      };
+    }
+
     // /api/recordings/<recordingId>/cuts[/<cutId>]
     if (segments[0] === 'api' && segments[1] === 'recordings' && segments[3] === 'cuts') {
       const recordingId = decodeURIComponent(segments[2]!);
@@ -276,12 +434,127 @@ export async function handleApiRequest(
       }
     }
 
+    // /api/characters/<characterId>/<clips|sequences>/<assetId>[/fork]
+    if (
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      (segments[3] === 'clips' || segments[3] === 'sequences') &&
+      segments.length >= 5
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      const kind = segments[3] === 'clips' ? 'clip' : 'sequence';
+      const id = decodeURIComponent(segments[4]!);
+
+      if (method === 'GET' && segments.length === 5 && kind === 'clip') {
+        return ok(await readClip(storeRoot, { characterId, clipId: id }));
+      }
+      if (method === 'GET' && segments.length === 5) {
+        return ok(await readSequence(storeRoot, { characterId, sequenceId: id }));
+      }
+      if (method === 'DELETE' && segments.length === 5) {
+        await deleteAsset(storeRoot, { characterId, kind, id });
+        return ok({ deleted: id });
+      }
+      if (method === 'POST' && segments[5] === 'fork' && segments.length === 6) {
+        const body = asRecord(request.body);
+        const draftId = requiredOptionalString(body, 'draftId');
+        const forked =
+          kind === 'clip'
+            ? await forkAsset(storeRoot, { characterId, kind: 'clip', id, draftId })
+            : await forkAsset(storeRoot, { characterId, kind: 'sequence', id, draftId });
+        return { status: 201, body: forked };
+      }
+    }
+
+    // POST /api/characters/<characterId>/sequences — concatenate Clips into a Sequence.
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'sequences' &&
+      segments.length === 4
+    ) {
+      const body = asRecord(request.body);
+      return {
+        status: 201,
+        body: await commitSequence(storeRoot, {
+          characterId: decodeURIComponent(segments[2]!),
+          sequenceId: requiredString(body, 'name'),
+          clips: requiredStringArray(body, 'clips'),
+          derivedFrom: undefined,
+        }),
+      };
+    }
+
+    // POST /api/characters/<characterId>/drafts/<draftId>/discard
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'drafts' &&
+      segments[5] === 'discard'
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      await discardDraft(storeRoot, { characterId, draftId: decodeURIComponent(segments[4]!) });
+      return ok({ discarded: decodeURIComponent(segments[4]!) });
+    }
+
+    // POST /api/recordings/<recordingId>/cuts/<cutId>/rename
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'recordings' &&
+      segments[3] === 'cuts' &&
+      segments[5] === 'rename'
+    ) {
+      const body = asRecord(request.body);
+      return ok(
+        await renameSegment(storeRoot, {
+          recordingId: decodeURIComponent(segments[2]!),
+          id: decodeURIComponent(segments[4]!),
+          newId: requiredString(body, 'newId'),
+        }),
+      );
+    }
+
     return { status: 404, body: { error: `No route for ${method} ${pathname}` } };
   } catch (error) {
     if (error instanceof ForgeError) {
       return { status: 400, body: { error: error.message } };
     }
     throw error;
+  }
+}
+
+/**
+ * Ingest a recording whose bytes arrived in the request body.
+ *
+ * A browser cannot hand the core a filesystem path, so the upload's base64
+ * payload is written to a throwaway file, handed to `ingestRecording` (which
+ * owns the copy, the hash and the metadata read), then removed. The store stays
+ * the only place a Recording ends up.
+ */
+async function ingestUploaded(
+  storeRoot: string,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  const id = requiredString(body, 'id');
+  const encoded = requiredString(body, 'dataBase64');
+  // The extension only names the temp file; `sharp` sniffs the real format.
+  const suffix = path.extname(requiredOptionalString(body, 'filename') ?? '') || '.gif';
+
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length === 0) {
+    throw new ForgeError('"dataBase64" must decode to at least one byte.');
+  }
+
+  const dir = await mkdtemp(path.join(tmpdir(), 'sprite-forge-upload-'));
+  try {
+    const file = path.join(dir, `upload${suffix}`);
+    await writeFile(file, bytes);
+    return await ingestRecording(storeRoot, { recordingId: id, sourcePath: file });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -317,11 +590,15 @@ async function dispatch(
   res: ServerResponse,
 ): Promise<void> {
   const body = await readJsonBody(req);
-  const response = await handleApiRequest(storeRoot, {
-    method: req.method ?? 'GET',
-    url: req.url ?? '/',
-    body,
-  });
+  const method = req.method ?? 'GET';
+  const request = { method, url: req.url ?? '/', body };
+  // Mutations are queued per store. Each route does its own read-modify-write, so
+  // two of them arriving together would both read the old file and one edit would
+  // be lost (the "edit X then Y saves (0, 2)" bug). Reads are never queued.
+  const response =
+    method === 'GET' || method === 'HEAD'
+      ? await handleApiRequest(storeRoot, request)
+      : await withStoreLock(storeRoot, () => handleApiRequest(storeRoot, request));
   res.statusCode = response.status;
   if (response.contentType && Buffer.isBuffer(response.body)) {
     res.setHeader('content-type', response.contentType);
@@ -376,6 +653,20 @@ function requiredNumber(body: Record<string, unknown>, key: string): number {
   return value;
 }
 
+function requiredOptionalString(
+  body: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = body[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new ForgeError(`"${key}" must be a string.`);
+  }
+  return value;
+}
+
 function optionalNumber(body: Record<string, unknown>, key: string): number | undefined {
   const value = body[key];
   if (value === undefined) {
@@ -388,12 +679,19 @@ function optionalNumber(body: Record<string, unknown>, key: string): number | un
 }
 
 /** Read an array-of-strings body field. */
-function stringArray(body: Record<string, unknown>, key: string): string[] {
-  const value = body[key];
+function stringArray(body: Record<string, unknown>, key: string): string[] {  const value = body[key];
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
     throw new ForgeError(`"${key}" must be an array of strings.`);
   }
   return value as string[];
+}
+
+/** Read a required array-of-strings body field (a Sequence's source Clip list). */
+function requiredStringArray(body: Record<string, unknown>, key: string): string[] {
+  if (body[key] === undefined) {
+    throw new ForgeError(`"${key}" is required.`);
+  }
+  return stringArray(body, key);
 }
 
 /** Read a Situation -> string[] bindings object. */

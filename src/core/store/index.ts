@@ -101,12 +101,54 @@ export async function writeJsonFile(root: string, relPath: RelPath, value: unkno
   await writeBinaryFile(root, relPath, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'));
 }
 
-/** Write bytes to a file, creating parent directories. */
+/**
+ * Write bytes to a file, creating parent directories.
+ *
+ * The write goes to a sibling temp file and is then renamed over the target. A
+ * plain `writeFile` is not atomic: a concurrent reader can catch the half-written
+ * file, which is exactly how a `draft.json` mid-edit used to fail as "Malformed
+ * JSON ... Unexpected end of JSON input".
+ */
 export async function writeBinaryFile(root: string, relPath: RelPath, data: Uint8Array): Promise<void> {
   const abs = resolveInStore(root, relPath);
   await fs.mkdir(path.dirname(abs), { recursive: true });
-  await fs.writeFile(abs, data);
+  // Same directory, so the rename stays on one filesystem and cannot EXDEV.
+  const temp = `${abs}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    await fs.writeFile(temp, data);
+    await fs.rename(temp, abs);
+  } catch (error) {
+    await fs.rm(temp, { force: true });
+    throw error;
+  }
 }
+
+/**
+ * Run `body` with no other queued mutation on this store in flight.
+ *
+ * Atomic writes stop a reader seeing half a file, but two read-modify-writes can
+ * still interleave (edit X, edit Y: both read, both write, one edit is lost).
+ * Front ends queue their mutating calls through here. Writes only, and short —
+ * this is a single-user local tool, so a simple FIFO per root is enough.
+ */
+export function withStoreLock<T>(root: string, body: () => Promise<T>): Promise<T> {
+  const previous = storeLocks.get(root) ?? Promise.resolve();
+  const run = previous.then(body, body);
+  // Keep the chain alive after a rejection, and drop it once nothing is queued.
+  const settled = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  storeLocks.set(root, settled);
+  void settled.then(() => {
+    if (storeLocks.get(root) === settled) {
+      storeLocks.delete(root);
+    }
+  });
+  return run;
+}
+
+const storeLocks = new Map<string, Promise<void>>();
 
 /**
  * Read a file that lives **outside** the store — the one deliberate external

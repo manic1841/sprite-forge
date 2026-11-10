@@ -387,12 +387,11 @@ export interface DerivedAnchor {
  * User story 42: the Anchor is the first frame's content-box **bottom-centre**.
  * The Canvas is symmetric about the Anchor (`anchor.x == width/2`) with the Anchor
  * on its bottom edge (`anchor.y == height`), so deriving the Anchor also implies
- * the Canvas (docs/alignment.md): the content's centre is put at the Anchor by
- * setting `width = 2 * centreX` (the frame's content is centred, with the Canvas
- * exactly wide enough to hold it because `centreX >= content right edge / 2`) and
- * `height = bounds.y + bounds.height`. The centre is rounded **up** so an
- * odd-width content box still fits. Later frames are not consulted — choose the
- * Segment so every frame fits, or expand the Canvas afterwards.
+ * the Canvas (docs/alignment.md). The centre is rounded **up** so an odd-width
+ * content box still fits. With a `cutId` the Canvas is grown to hold the union of
+ * the whole Segment's frames, so extracting it cannot fail on a later frame;
+ * without one only the first frame is measured, and the Canvas can be expanded
+ * afterwards.
  */
 export async function deriveAnchor(
   root: string,
@@ -406,24 +405,23 @@ export async function deriveAnchor(
   }
 
   let startFrame = 0;
+  let endFrame = 1;
   if (options.cutId !== undefined) {
     assertValidId(options.cutId, 'cut', 'cutId');
     const segment = await resolveSegment(root, recordingId, options.cutId);
     startFrame = segment.startFrame;
+    endFrame = segment.endFrame;
   }
 
   const bytes = await readSource(root, recordingId);
-  const decoded = await decodeSegment(bytes, recordingId, {
-    startFrame,
-    endFrame: startFrame + 1,
-  });
+  const decoded = await decodeSegment(bytes, recordingId, { startFrame, endFrame });
   const frame = decoded.frames[0]!;
   const background: Rgb =
     options.background !== undefined
       ? parseHexColor(options.background)
       : sampleBackgroundColor(decoded.frames);
-  const bounds = contentBounds(keyBackground(frame, background, tolerance));
-  if (bounds === null) {
+  const first = contentBounds(keyBackground(frame, background, tolerance));
+  if (first === null) {
     throw new StoreError(
       `Cannot derive an Anchor: frame ${startFrame} of Recording "${recordingId}" has no ` +
         `content (every pixel is the background colour).`,
@@ -431,12 +429,39 @@ export async function deriveAnchor(
   }
 
   const anchor: CanvasAnchor = {
-    x: Math.ceil(bounds.x + bounds.width / 2),
-    y: bounds.y + bounds.height,
+    x: Math.ceil(first.x + first.width / 2),
+    y: first.y + first.height,
   };
-  const canvas: Canvas = { width: 2 * anchor.x, height: anchor.y, anchor };
+  let canvas: Canvas = { width: 2 * anchor.x, height: anchor.y, anchor };
+
+  // With a Segment, the Canvas must fit **every** frame of it, not just the one
+  // the Anchor is read from: extraction re-bakes the whole range and would
+  // otherwise fail on a later, larger frame.
+  if (options.cutId !== undefined) {
+    const union = unionBounds(
+      decoded.frames.flatMap((entry) => {
+        const box = contentBounds(keyBackground(entry, background, tolerance));
+        return box === null ? [] : [box];
+      }),
+    );
+    canvas = canvasFitting(first, union);
+  }
+
   validateArtifact('canvas', canvas);
-  return { frame: startFrame, bounds, anchor, canvas };
+  return { frame: startFrame, bounds: first, anchor: canvas.anchor, canvas };
+}
+
+/**
+ * The smallest Canvas that holds `union` with the first frame's foot base on the
+ * Anchor, and the Anchor at its bottom-centre (docs/alignment.md).
+ */
+function canvasFitting(first: Bounds, union: Bounds): Canvas {
+  const localX = Math.ceil(first.x - union.x + first.width / 2);
+  const localY = first.y - union.y + first.height;
+  const half = Math.max(localX, union.width - localX, 1);
+  const width = 2 * half;
+  const height = localY + union.height;
+  return { width, height, anchor: { x: width / 2, y: height } };
 }
 
 /**

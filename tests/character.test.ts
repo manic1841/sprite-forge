@@ -143,8 +143,10 @@ describe('deriveAnchor', () => {
     });
   });
 
-  it("uses a Segment's first frame when a cut is given", async () => {
+  it("uses a Segment's first frame as the Anchor and sizes the Canvas to the whole Segment", async () => {
     // Fixture frame 1 content box = { x: 2, y: 3, w: 2, h: 2 }; bottom-centre = (3, 5).
+    // The Segment is [1, 3), and frame 2 shifts one pixel right, so the union box is
+    // { x: 2, y: 3, w: 3, h: 2 }: the Canvas must hold that, not just frame 1.
     await withSyntheticGif({ frames: 4, width: 8, height: 6, delaysMs: [50, 50, 60, 50] }, async (gif) => {
       await withStore(async (store) => {
         await ingestRecording(store.root, { recordingId: 'rec', sourcePath: gif.path });
@@ -158,8 +160,10 @@ describe('deriveAnchor', () => {
         const derived = await deriveAnchor(store.root, { recordingId: 'rec', cutId: 'walk' });
 
         expect(derived.frame).toBe(1);
-        expect(derived.anchor).toEqual({ x: 3, y: 5 });
-        expect(derived.canvas).toEqual({ width: 6, height: 5, anchor: { x: 3, y: 5 } });
+        expect(derived.bounds).toEqual({ x: 2, y: 3, width: 2, height: 2 });
+        // Anchor at the Canvas bottom-centre, with the union box fully inside it.
+        expect(derived.anchor).toEqual({ x: 2, y: 4 });
+        expect(derived.canvas).toEqual({ width: 4, height: 4, anchor: { x: 2, y: 4 } });
       });
     });
   });

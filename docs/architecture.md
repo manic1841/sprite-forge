@@ -109,19 +109,32 @@ The web UI is the primary working surface, and its shape is a **docked
 workbench**, not a wizard: one persistent shell, with a single region swapping per
 task so the working context is never lost.
 
-- **Rail (left, persistent)** — the Library region: Recordings, Drafts,
-  committed Assets and Exports, always present; click one to load it.
+- **Rail (left, persistent)** — the Library region: the Import form at the top of
+  Recordings, then the Recordings, Drafts, committed Assets and Exports that
+  already exist; click an item to load it.
 - **Stage (centre)** — the active view, chosen by a **mode** switch: *Clip editor*
-  (the frame, segmentation scrub, and the Repair brush), *Alignment* (Clips ghosted
-  on the shared Canvas against the Anchor), or *Export* (Situation bindings and the
-  resulting Manifest).
-- **Inspector (right, contextual)** — whatever the active mode needs: brush colour /
-  size and the Repair operations in the editor; per-Clip placement offsets in
-  alignment; the live `manifest.json` in export.
+  (a Recording's preview and segmentation, or a Draft's frame and Repair brush —
+  the two share one screen because they are the same job), *Alignment* (Clips
+  ghosted on the shared Canvas against the Anchor), or *Export* (Situation
+  bindings and the resulting Manifest).
+- **Inspector (right, contextual)** — whatever the stage's **target** needs: the
+  Draft's per-frame facts, the Repair controls and Commit; the Recording's facts
+  and cut guidance; per-Clip placement offsets in alignment; the live
+  `manifest.json` in export.
 - **Filmstrip (bottom, docked)** — the current Segment frame-by-frame, plus the
   Recording's timeline with its draggable cut ranges.
 
 Switching modes swaps only the stage; the rail, inspector and filmstrip stay put.
+The **target** — a Recording, a Draft, a Character or an Export — is what the
+stage and inspector follow, not the mode, so going from "cut" to "repair" to
+"commit" never leaves the screen. Extracting a Segment opens the new Draft in
+place; committing it shows the new Clip on the Character's Canvas.
+
+The client is a shell plus one module per region (`src/web/client/workbench/`:
+`dom`, `state`, `context`, `importForm`, `library`, `filmstrip`, `stageClip`,
+`stageAlign`, `stageExport`, `inspector`, `repair`). A view receives a
+`WorkbenchContext` and never imports a sibling, so a region can be replaced or
+tested on its own.
 
 This shape was chosen against two alternatives prototyped at equal fidelity — a
 **linear stepper** (one task per screen, heavy Next/Back) and a **timeline-first**

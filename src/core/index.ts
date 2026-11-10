@@ -8,8 +8,12 @@
 export { scan, readStoreTree } from './scan.js';
 export type { CharacterTree, StoreTree } from './scan.js';
 
-export { ingestRecording } from './ingest.js';
-export type { IngestRecordingOptions, IngestedRecording } from './ingest.js';
+export { ingestRecording, readRecordingFrame } from './ingest.js';
+export type {
+  IngestRecordingOptions,
+  IngestedRecording,
+  RecordingFrame,
+} from './ingest.js';
 
 export { createCharacter } from './character.js';
 export type {
@@ -48,6 +52,8 @@ export type {
 export {
   commitDraft,
   commitSequence,
+  deleteAsset,
+  discardDraft,
   forkAsset,
   forkSequence,
   inheritRepairReference,
@@ -66,6 +72,7 @@ export type {
   CommittedSequence,
   CommitDraftOptions,
   CommitSequenceOptions,
+  DeleteAssetOptions,
   ForkAssetOptions,
   ReadAssetSheetOptions,
   RenderedSequenceSheet,
@@ -155,8 +162,7 @@ export type {
   ValidatedArtifact,
 } from './validate.js';
 
-export { ForgeError, StoreError, ValidationError } from './errors.js';
-export type { ValidationIssue } from './errors.js';
+export { ForgeError, StoreError, ValidationError } from './errors.js';export type { ValidationIssue } from './errors.js';
 
 export type {
   AssetKind,
@@ -168,3 +174,5 @@ export type {
   ScannedRecording,
   StoreScan,
 } from './types.js';
+
+export { withStoreLock } from './store/index.js';

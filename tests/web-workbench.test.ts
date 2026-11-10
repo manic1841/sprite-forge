@@ -8,17 +8,22 @@
 // contextual inspector. Behaviour that cannot be pinned structurally (dragging a
 // range edge, real painting) is verified by running `pnpm web` against a temp store.
 
-import { beforeEach, describe, expect, it } from 'vitest';
-import { mountWorkbench } from '../src/web/client/app.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mountWorkbench, slugifyId } from '../src/web/client/app.js';
 import { clampRange } from '../src/web/client/timeline.js';
 import type { WorkbenchApi } from '../src/web/client/api.js';
 import type {
   AlignmentState,
   CharacterAlignment,
   ClipDraft,
+  CommittedAsset,
+  CommittedSequence,
+  CreatedCharacter,
   CutList,
+  DerivedAnchor,
   ExportResult,
   RepairState,
+  SequenceFork,
   StoreScan,
 } from '../src/web/client/types.js';
 
@@ -74,11 +79,37 @@ const DRAFT: ClipDraft = {
 function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
   return {
     scan: async () => SCAN,
+    ingestRecording: async (id) => ({
+      id,
+      dir: `recordings/${id}`,
+      hash: `sha256:${'b'.repeat(64)}`,
+      frameCount: 4,
+      delaysMs: [50, 50, 60, 50],
+    }),
     readCutList: async () => CUTS,
     addSegment: async () => CUTS,
     setSegmentRange: async () => CUTS,
     removeSegment: async () => CUTS,
+    renameSegment: async () => CUTS,
+    recordingFrameUrl: (recordingId, index) =>
+      `/api/recordings/${recordingId}/frames/${index}`,
     readClipDraft: async () => DRAFT,
+    extractClipDraft: async () => DRAFT,
+    commitDraft: async (characterId, draftId, name) =>
+      ({
+        kind: 'clip',
+        id: name,
+        dir: `characters/${characterId}/clips/${name}`,
+      }) as unknown as CommittedAsset,
+    deriveAnchor: async () =>
+      ({
+        frame: 0,
+        bounds: { x: 0, y: 0, width: 4, height: 6 },
+        anchor: { x: 2, y: 6 },
+        canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
+      }) as DerivedAnchor,
+    createCharacter: async (id) =>
+      ({ id, dir: `characters/${id}` }) as unknown as CreatedCharacter,
     frameUrl: (characterId, draftId, index) =>
       `/api/characters/${characterId}/drafts/${draftId}/frames/${index}`,
     readRepair: async () => EMPTY_REPAIR,
@@ -98,6 +129,32 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
       `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet`,
     exportCharacter: async () => EXPORT_RESULT,
     readManifest: async () => EXPORT_RESULT,
+    readClip: async () => CLIP,
+    readSequence: async () => SEQUENCE,
+    forkClip: async () => DRAFT,
+    forkSequence: async () => SEQUENCE_FORK,
+    commitSequence: async (characterId, sequenceId, clips) => ({
+      ...SEQUENCE,
+      id: sequenceId,
+      dir: `characters/${characterId}/sequences/${sequenceId}`,
+      provenance: { ...SEQUENCE.provenance, clips },
+    }),
+    discardDraft: async () => {},
+    deleteAsset: async () => {},
+    verifyReproducible: async (characterId, kind, id) => ({
+      kind,
+      id,
+      reproducible: true,
+      artifacts: [`characters/${characterId}/clips/${id}/sheet.png`],
+      excluded: [],
+      mismatches: [],
+    }),
+    validateStore: async () => ({
+      ok: true,
+      root: '/tmp/store',
+      artifactCount: 0,
+      problems: [],
+    }),
     ...overrides,
   };
 }
@@ -122,7 +179,39 @@ const EXPORT_RESULT: ExportResult = {
 };
 
 const EMPTY_REPAIR: RepairState = { operations: [], warnings: [] };
-const EMPTY_ALIGNMENT: AlignmentState = { offset: { x: 0, y: 0 }, warnings: [] };
+
+/** A committed Clip as the asset inspector reads it. */
+const CLIP: CommittedAsset = {
+  kind: 'clip',
+  id: 'walk',
+  dir: 'characters/hero/clips/walk',
+  meta: { id: 'walk', frameCount: 3, delaysMs: [50], loop: true },
+  provenance: {
+    recordingId: 'idle',
+    recordingHash: `sha256:${'a'.repeat(64)}`,
+    segment: { cutId: 'walk', startFrame: 1, endFrame: 4, speed: 1 },
+    background: { hex: '#9421ce', source: 'sampled', tolerance: 24 },
+    repair: null,
+    derivedFrom: null,
+    spriteForgeVersion: '0.1.0',
+  },
+};
+
+/** A committed Sequence and its fork, as the sequence stage reads them. */
+const SEQUENCE: CommittedSequence = {
+  kind: 'sequence',
+  id: 'walk-jump',
+  dir: 'characters/hero/sequences/walk-jump',
+  meta: { id: 'walk-jump', frameCount: 6, delaysMs: [50], loop: false },
+  provenance: { clips: ['walk', 'greeting'], derivedFrom: null, spriteForgeVersion: '0.1.0' },
+};
+
+const SEQUENCE_FORK: SequenceFork = {
+  kind: 'sequence',
+  id: 'walk-jump',
+  clips: ['walk', 'greeting'],
+  derivedFrom: { kind: 'sequence', id: 'walk-jump' },
+};const EMPTY_ALIGNMENT: AlignmentState = { offset: { x: 0, y: 0 }, warnings: [] };
 const ALIGNMENT: CharacterAlignment = {
   canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
   clips: [{ id: 'walk', placementOffset: { x: 0, y: -1 } }],
@@ -135,6 +224,10 @@ beforeEach(() => {
   document.body.innerHTML = '';
   container = document.createElement('div');
   document.body.appendChild(container);
+  // jsdom leaves confirm()/prompt() unimplemented; without a stub every
+  // confirmation resolves falsy and the action silently never runs.
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  vi.spyOn(window, 'prompt').mockReturnValue(null);
 });
 
 describe('the workbench shell', () => {
@@ -583,5 +676,556 @@ describe('a rejected load', () => {
 
     expect(wb.root.querySelector('[data-load-error]')).toBeNull();
     expect(wb.manifest?.manifest.target).toBe('pixel-pet');
+  });
+});
+
+describe('importing a capture', () => {
+  /** A File of arbitrary bytes, as the file input would hand over. */
+  function gifFile(name = 'My Capture!.gif'): File {
+    return new File([new Uint8Array([71, 73, 70, 56, 57, 97])], name, {
+      type: 'image/gif',
+    });
+  }
+
+  it('derives a legal id from the filename and imports on submit', async () => {
+    const seen: { id: string; filename?: string }[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        ingestRecording: async (id, _data, filename) => {
+          seen.push({ id, filename });
+          return {
+            id,
+            dir: `recordings/${id}`,
+            hash: `sha256:${'c'.repeat(64)}`,
+            frameCount: 4,
+            delaysMs: [50, 50, 60, 50],
+          };
+        },
+      }),
+    });
+    await wb.ready;
+
+    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const fileInput = rail.querySelector<HTMLInputElement>('[data-import-file]')!;
+    const idInput = rail.querySelector<HTMLInputElement>('[data-import-id]')!;
+    expect(idInput.value).toBe('');
+
+    // A picked file seeds the id from its name.
+    Object.defineProperty(fileInput, 'files', { value: [gifFile()], configurable: true });
+    fileInput.dispatchEvent(new Event('change'));
+    expect(idInput.value).toBe('my-capture');
+
+    rail.querySelector<HTMLFormElement>('[data-import-form]')!.requestSubmit();
+    await wb.settled();
+
+    expect(seen).toEqual([{ id: 'my-capture', filename: 'My Capture!.gif' }]);
+    // The imported Recording is the active one, so cutting can start at once.
+    expect(wb.activeRecording).toBe('my-capture');
+  });
+
+  it('stops following the filename once the user types an id', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const fileInput = rail.querySelector<HTMLInputElement>('[data-import-file]')!;
+    const idInput = rail.querySelector<HTMLInputElement>('[data-import-id]')!;
+
+    idInput.value = 'boss-fight';
+    idInput.dispatchEvent(new Event('input'));
+    Object.defineProperty(fileInput, 'files', { value: [gifFile()], configurable: true });
+    fileInput.dispatchEvent(new Event('change'));
+
+    expect(idInput.value).toBe('boss-fight');
+  });
+
+  it('reports the server message when the import is rejected', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        ingestRecording: async () => {
+          throw new Error('Invalid recording id "x": must match /^[a-z][a-z0-9-]*$/.');
+        },
+      }),
+    });
+    await wb.ready;
+
+    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const fileInput = rail.querySelector<HTMLInputElement>('[data-import-file]')!;
+    Object.defineProperty(fileInput, 'files', { value: [gifFile()], configurable: true });
+    fileInput.dispatchEvent(new Event('change'));
+
+    rail.querySelector<HTMLFormElement>('[data-import-form]')!.requestSubmit();
+    await wb.settled();
+
+    expect(
+      rail.querySelector<HTMLElement>('[data-import-message]')!.textContent,
+    ).toContain('must match');
+  });
+
+  it('asks for a file when none is picked', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    rail.querySelector<HTMLFormElement>('[data-import-form]')!.requestSubmit();
+    await wb.settled();
+
+    expect(
+      rail.querySelector<HTMLElement>('[data-import-message]')!.textContent,
+    ).toContain('pick a capture');
+  });
+
+  it('slugifies filenames into the id grammar', () => {
+    expect(slugifyId('My Capture!.gif')).toBe('my-capture');
+    expect(slugifyId('2026-09-01 run.gif')).toBe('rec-2026-09-01-run');
+    expect(slugifyId('+++.gif')).toBe('recording');
+  });
+});
+
+describe('the recording workspace', () => {
+  it('puts the Import form above the list of already-imported Recordings', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const form = rail.querySelector('[data-import-form]')!;
+    const first = rail.querySelector('[data-recording]')!;
+
+    // Document order: the form comes first, the existing recordings after it.
+    expect(form.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('previews the active Recording frame in the Clip editor', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    const img = wb.root.querySelector<HTMLImageElement>('[data-recording-frame]')!;
+    expect(img.getAttribute('src')).toBe('/api/recordings/idle/frames/0');
+
+    // Stepping moves the preview, so a segment can be cut at the right frame.
+    wb.root.querySelector<HTMLElement>('[data-frame-step="next"]')!.click();
+    expect(wb.activeFrame).toBe(1);
+    expect(wb.root.querySelector('[data-recording-frame]')!.getAttribute('src')).toBe(
+      '/api/recordings/idle/frames/1',
+    );
+  });
+
+  it('adds, renames and deletes segments from the stage', async () => {
+    const added: unknown[] = [];
+    const removed: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        addSegment: async (_id, segment) => {
+          added.push(segment);
+          return CUTS;
+        },
+        removeSegment: async (_id, cutId) => {
+          removed.push(cutId);
+          return CUTS;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    (stage.querySelector('[data-segment-id]') as HTMLInputElement).value = 'jump';
+    (stage.querySelector('[data-segment-start]') as HTMLInputElement).value = '2';
+    (stage.querySelector('[data-segment-end]') as HTMLInputElement).value = '5';
+    (stage.querySelector('[data-segment-add]') as HTMLFormElement).requestSubmit();
+    await wb.settled();
+
+    expect(added).toEqual([{ id: 'jump', startFrame: 2, endFrame: 5 }]);
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    stage.querySelector<HTMLElement>('[data-segment-delete="walk"]')!.click();
+    await wb.settled();
+    expect(removed).toEqual(['walk']);
+  });
+
+  it('keeps a segment when the delete confirmation is dismissed', async () => {
+    const removed: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        removeSegment: async (_id, cutId) => {
+          removed.push(cutId);
+          return CUTS;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    stage.querySelector<HTMLElement>('[data-segment-delete="walk"]')!.click();
+    await wb.settled();
+    expect(removed).toEqual([]);
+  });
+
+  it('renames a segment through the prompt', async () => {
+    const renamed: string[] = [];
+    vi.spyOn(window, 'prompt').mockReturnValue('stride');
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        renameSegment: async (_id, cutId, newId) => {
+          renamed.push(`${cutId}->${newId}`);
+          return CUTS;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    wb.root.querySelector<HTMLElement>('[data-segment-rename="walk"]')!.click();
+    await wb.settled();
+    expect(renamed).toEqual(['walk->stride']);
+  });
+
+  it('creates a Character from the derived framing', async () => {
+    const created: Array<{ id: string; canvas: unknown }> = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        createCharacter: async (id, canvas) => {
+          created.push({ id, canvas });
+          return { id, dir: `characters/${id}` } as unknown as CreatedCharacter;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    (stage.querySelector('[data-character-id]') as HTMLInputElement).value = 'hero';
+    (stage.querySelector('[data-character-add]') as HTMLFormElement).requestSubmit();
+    await wb.settled();
+
+    // The Canvas is explicit: it comes from the derived Anchor, not from later.
+    expect(created).toEqual([
+      { id: 'hero', canvas: { width: 4, height: 6, anchorX: 2, anchorY: 6 } },
+    ]);
+  });
+
+  it('extracts a segment straight into a Draft on the same screen', async () => {
+    const extracted: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        extractClipDraft: async (characterId, request) => {
+          extracted.push({ characterId, ...request });
+          return DRAFT;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!.click();
+    await wb.settled();
+
+    expect(extracted).toEqual([{ characterId: 'hero', recordingId: 'idle', cutId: 'walk' }]);
+    // The new Draft is open, so repair can start without leaving the stage.
+    expect(wb.activeDraft).toEqual({ characterId: 'hero', draftId: 'wip' });
+    expect(wb.root.querySelector('[data-draft-frame]')).not.toBeNull();
+  });
+
+  it('commits the open Draft into a Clip', async () => {
+    const committed: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        commitDraft: async (characterId, draftId, name) => {
+          committed.push(`${characterId}/${draftId}->${name}`);
+          return { kind: 'clip', id: name } as unknown as CommittedAsset;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const inspector = wb.root.querySelector('[data-region="inspector"]')!;
+    (inspector.querySelector('[data-commit-name]') as HTMLInputElement).value = 'walk';
+    inspector.querySelector<HTMLElement>('[data-commit-run]')!.click();
+    await wb.settled();
+
+    expect(committed).toEqual(['hero/wip->walk']);
+    // Committing consumes the Draft, so the workspace shows the new Clip playing.
+    expect(wb.mode).toBe('clip');
+    expect(wb.activeDraft).toBeNull();
+    expect(wb.root.querySelector('[data-asset-frame]')).not.toBeNull();
+  });
+});
+
+describe('committed assets', () => {
+  it('opens a Clip from the Library and plays its baked sheet', async () => {
+    const sheets: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        sheetUrl: (characterId, kind, id) => {
+          sheets.push(`${characterId}/${kind}/${id}`);
+          return `/api/characters/${characterId}/clips/${id}/sheet`;
+        },
+      }),
+    });
+    await wb.ready;
+
+    wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
+    await wb.settled();
+
+    // An asset is immutable, so opening one lands on a read-only playback face.
+    expect(wb.mode).toBe('clip');
+    expect(sheets).toEqual(['hero/clip/walk']);
+    const frame = wb.root.querySelector<HTMLElement>('[data-asset-frame]');
+    expect(frame?.dataset.assetFrame).toBe('0');
+    expect(wb.root.querySelector('[data-inspector-section="asset"]')).not.toBeNull();
+  });
+
+  it('steps the playback through the sheet without leaving the Asset', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await (wb as unknown as { loadAsset: typeof wb.loadAlignment }) &&
+      wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
+    await wb.settled();
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    stage.querySelectorAll<HTMLElement>('[data-asset-viewer] button')[1]!.click();
+    await wb.settled();
+    expect(
+      stage.querySelector<HTMLElement>('[data-asset-frame]')!.dataset.assetFrame,
+    ).toBe('1');
+  });
+
+  it('forks a Clip into a Draft with the id the user typed', async () => {
+    const forks: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        forkClip: async (characterId, clipId, draftId) => {
+          forks.push(`${characterId}/${clipId}/${draftId}`);
+          return DRAFT;
+        },
+      }),
+    });
+    await wb.ready;
+    wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
+    await wb.settled();
+
+    const inspector = wb.root.querySelector('[data-region="inspector"]')!;
+    (inspector.querySelector('[data-fork-id]') as HTMLInputElement).value = 'walk-fix';
+    inspector.querySelector<HTMLElement>('[data-fork-run]')!.click();
+    await wb.settled();
+
+    expect(forks).toEqual(['hero/walk/walk-fix']);
+    expect(wb.activeDraft).toEqual({ characterId: 'hero', draftId: 'wip' });
+  });
+
+  it('reports a reproducibility check on the open Asset', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        verifyReproducible: async (_characterId, kind, id) => ({
+          kind,
+          id,
+          reproducible: false,
+          artifacts: [`characters/hero/clips/${id}/sheet.png`],
+          excluded: [],
+          mismatches: [{ artifact: 'sheet.png', detail: 'bytes differ' }],
+        }),
+      }),
+    });
+    await wb.ready;
+    wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
+    await wb.settled();
+
+    wb.root.querySelector<HTMLElement>('[data-asset-verify]')!.click();
+    await wb.settled();
+
+    const report = wb.root.querySelector<HTMLElement>('[data-asset-reproducible]');
+    expect(report?.textContent).toContain('bytes differ');
+  });
+
+  it('deletes an Asset only after the confirmation', async () => {
+    const deleted: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        deleteAsset: async (characterId, kind, id) => {
+          deleted.push(`${characterId}/${kind}/${id}`);
+        },
+      }),
+    });
+    await wb.ready;
+    wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
+    await wb.settled();
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    wb.root.querySelector<HTMLElement>('[data-asset-delete]')!.click();
+    await wb.settled();
+
+    expect(deleted).toEqual(['hero/clip/walk']);
+  });
+
+  it('shows a refused delete in the action banner', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        deleteAsset: async () => {
+          throw new Error('Clip "walk" is still used by Sequence "greeting".');
+        },
+      }),
+    });
+    await wb.ready;
+    wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
+    await wb.settled();
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    wb.root.querySelector<HTMLElement>('[data-asset-delete]')!.click();
+    await wb.settled();
+
+    expect(wb.root.querySelector('[data-action-error]')?.textContent).toContain('greeting');
+    // The Asset is still open: a refused edit is not a lost load.
+    expect(wb.root.querySelector('[data-asset-frame]')).not.toBeNull();
+  });
+});
+
+describe('sequence composition', () => {
+  it('forks the Clip list into an editable composition', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    wb.root.querySelector<HTMLElement>('[data-asset="greeting"]')!.click();
+    await wb.settled();
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-edit]')!.click();
+    await wb.settled();
+
+    const items = wb.root.querySelectorAll<HTMLElement>('[data-sequence-clip]');
+    expect([...items].map((item) => item.dataset.sequenceClip)).toEqual(['walk', 'greeting']);
+  });
+
+  it('reorders and commits the composition', async () => {
+    const commits: Array<{ name: string; clips: string[] }> = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        commitSequence: async (_characterId, sequenceId, clips) => {
+          commits.push({ name: sequenceId, clips });
+          return { ...SEQUENCE, id: sequenceId, provenance: { ...SEQUENCE.provenance, clips } };
+        },
+      }),
+    });
+    await wb.ready;
+    wb.root.querySelector<HTMLElement>('[data-asset="greeting"]')!.click();
+    await wb.settled();
+    wb.root.querySelector<HTMLElement>('[data-sequence-edit]')!.click();
+    await wb.settled();
+
+    // The second entry moves up, so the committed order is reversed.
+    const items = wb.root.querySelectorAll<HTMLElement>('[data-sequence-item], [data-sequence-clip]');
+    expect(items.length).toBeGreaterThan(0);
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-up]')[1]!.click();
+    await wb.settled();
+
+    (wb.root.querySelector('[data-sequence-name]') as HTMLInputElement).value = 'greet-walk';
+    wb.root.querySelector<HTMLInputElement>('[data-sequence-name]')!.dispatchEvent(
+      new Event('change'),
+    );
+    wb.root.querySelector<HTMLElement>('[data-sequence-commit]')!.click();
+    await wb.settled();
+
+    expect(commits).toEqual([{ name: 'greet-walk', clips: ['greeting', 'walk'] }]);
+  });
+});
+
+describe('export contract fields', () => {
+  it('sends the animation subset, situations, flips and facing', async () => {
+    const requests: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        exportCharacter: async (_characterId, target, request) => {
+          requests.push({ target, ...request });
+          return EXPORT_RESULT;
+        },
+      }),
+    });
+    await wb.ready;
+    wb.setMode('export');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    (stage.querySelector('[data-export-target-input]') as HTMLInputElement).value = 'pixel-pet';
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    stage.querySelector<HTMLInputElement>('[data-export-flip="walk"]')!.click();
+    (stage.querySelector('[data-export-situations]') as HTMLInputElement).value = 'idle, happy';
+    (stage.querySelector('[data-export-facing]') as HTMLSelectElement).value = 'left';
+    stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
+    await wb.settled();
+
+    expect(requests).toEqual([
+      {
+        target: 'pixel-pet',
+        bindings: { idle: [] },
+        animations: ['walk'],
+        situations: ['idle', 'happy'],
+        flipsFacing: ['walk'],
+        authoredFacing: 'left',
+      },
+    ]);
+  });
+
+  it('keeps the half-typed form across a re-render', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    wb.setMode('export');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    (stage.querySelector('[data-export-target-input]') as HTMLInputElement).value = 'pixel-pet';
+    (stage.querySelector('[data-export-target-input]') as HTMLInputElement).dispatchEvent(
+      new Event('input'),
+    );
+    // A re-render of the stage (a mode toggle away and back) must not wipe it.
+    wb.setMode('clip');
+    wb.setMode('export');
+
+    expect(
+      (wb.root.querySelector('[data-export-target-input]') as HTMLInputElement).value,
+    ).toBe('pixel-pet');
+  });
+});
+
+describe('discard and store check', () => {
+  it('discards a Draft and falls back to its Character', async () => {
+    const discarded: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        discardDraft: async (characterId, draftId) => {
+          discarded.push(`${characterId}/${draftId}`);
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    wb.root.querySelector<HTMLElement>('[data-discard-draft]')!.click();
+    await wb.settled();
+
+    expect(discarded).toEqual(['hero/wip']);
+    expect(wb.activeDraft).toBeNull();
+    expect(wb.mode).toBe('align');
+  });
+
+  it('renders the store check problems', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        validateStore: async () => ({
+          ok: false,
+          root: '/tmp/store',
+          artifactCount: 0,
+          problems: [
+            { artifact: 'characters/hero/clips/walk/meta.json', path: '/frameCount', message: 'must be a positive integer' },
+          ],
+        }),
+      }),
+    });
+    await wb.ready;
+
+    wb.root.querySelector<HTMLElement>('[data-validate-run]')!.click();
+    await wb.settled();
+
+    const report = wb.root.querySelector('[data-validation-report]');
+    expect(report?.getAttribute('data-validation-report')).toBe('false');
+    expect(report?.textContent).toContain('must be a positive integer');
   });
 });

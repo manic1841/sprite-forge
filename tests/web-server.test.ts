@@ -4,6 +4,7 @@
 // the store (the same seam every other ticket uses), never on the server's
 // internals.
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import {
@@ -474,5 +475,67 @@ describe('the Export routes', () => {
         });
       },
     );
+  });
+});
+
+describe('POST /api/recordings', () => {
+  it('ingests an uploaded capture and leaves a Recording in the store', async () => {
+    await withSyntheticGif({ frames: 3, delaysMs: [50, 50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        const dataBase64 = readFileSync(gif.path).toString('base64');
+
+        const response = await handleApiRequest(store.root, {
+          method: 'POST',
+          url: '/api/recordings',
+          body: { id: 'uploaded', dataBase64, filename: 'recording.gif' },
+        });
+
+        expect(response.status).toBe(201);
+        expect(response.body).toMatchObject({ id: 'uploaded', frameCount: 3 });
+        expect(store.listFiles()).toEqual(
+          expect.arrayContaining([
+            'recordings/uploaded/source.gif',
+            'recordings/uploaded/cuts.json',
+          ]),
+        );
+
+        // The store is the only place the bytes landed: the temp file is gone.
+        const cuts = await handleApiRequest(store.root, {
+          method: 'GET',
+          url: '/api/recordings/uploaded/cuts',
+        });
+        expect(cuts.body).toMatchObject({ frameCount: 3, cuts: [] });
+      });
+    });
+  });
+
+  it('rejects an id that breaks the id grammar', async () => {
+    await withSyntheticGif({ frames: 2, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        const response = await handleApiRequest(store.root, {
+          method: 'POST',
+          url: '/api/recordings',
+          body: {
+            id: 'Bad Id',
+            dataBase64: readFileSync(gif.path).toString('base64'),
+          },
+        });
+
+        expect(response.status).toBe(400);
+        expect(String((response.body as { error: string }).error)).toContain('must match');
+      });
+    });
+  });
+
+  it('rejects an upload with no bytes', async () => {
+    await withStore(async (store) => {
+      const response = await handleApiRequest(store.root, {
+        method: 'POST',
+        url: '/api/recordings',
+        body: { id: 'empty', dataBase64: '' },
+      });
+
+      expect(response.status).toBe(400);
+    });
   });
 });

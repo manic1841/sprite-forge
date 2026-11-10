@@ -41,9 +41,11 @@ import {
   draftFramePath,
   repairPath,
   sequenceDir,
+  sequencesDir,
   sheetPath,
 } from './layout.js';
 import {
+  listDirectories,
   pathExists,
   readBinaryFile,
   readJsonFile,
@@ -560,6 +562,79 @@ export async function readAssetSheet(
     );
   }
   return { path: relPath, contentType: 'image/png', data: await readBinaryFile(root, relPath) };
+}
+
+// --- internals ----------------------------------------------------------------
+
+/**
+ * Discard a Draft: delete its folder and any Repair script it owns.
+ *
+ * A Draft is working data, so dropping it loses no committed Asset. Nothing else
+ * refers to a Draft id, so there is no referential check to make.
+ */
+export async function discardDraft(
+  root: string,
+  options: { characterId: string; draftId: string },
+): Promise<void> {
+  const { characterId, draftId } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(draftId, 'draft', 'draftId');
+  const rel = draftDir(characterId, draftId);
+  if (!(await pathExists(root, rel))) {
+    throw new StoreError(
+      `No Draft "${draftId}" for Character "${characterId}" (${rel} is missing).`,
+    );
+  }
+  await removePath(root, rel);
+  await removePath(root, repairPath(characterId, draftId));
+}
+
+/** Inputs for {@link deleteAsset}. */
+export interface DeleteAssetOptions {
+  characterId: string;
+  /** Whether the Asset is a Clip or a Sequence. Required: ids are shared. */
+  kind: AssetKind;
+  id: string;
+}
+
+/**
+ * Delete a committed Asset.
+ *
+ * Unlike a Draft, a committed Asset can be referenced: a Sequence names its
+ * source Clips in `provenance.json`. Deleting a Clip that a Sequence still uses
+ * would leave that Sequence unbuildable, so it is refused and the holders are
+ * listed — the caller deletes the Sequence first.
+ */
+export async function deleteAsset(root: string, options: DeleteAssetOptions): Promise<void> {
+  const { characterId, kind, id } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(id, 'asset', 'id');
+
+  const rel = assetDir(characterId, kind, id);
+  if (!(await pathExists(root, rel))) {
+    throw new StoreError(
+      `No committed ${kind} "${id}" for Character "${characterId}" (${rel} is missing).`,
+    );
+  }
+
+  if (kind === 'clip') {
+    const holders: string[] = [];
+    for (const sequenceId of await listDirectories(root, sequencesDir(characterId))) {
+      const sequence = await readSequence(root, { characterId, sequenceId });
+      if (sequence.provenance.clips.includes(id)) {
+        holders.push(sequenceId);
+      }
+    }
+    if (holders.length > 0) {
+      throw new StoreError(
+        `Clip "${id}" is used by Sequence(s) ${holders.join(', ')}; delete them first.`,
+      );
+    }
+    // A Clip's Repair script is filed under the Clip id, so it goes with it.
+    await removePath(root, repairPath(characterId, id));
+  }
+
+  await removePath(root, rel);
 }
 
 // --- internals ----------------------------------------------------------------
