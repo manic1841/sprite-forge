@@ -168,6 +168,44 @@ describe('handleApiRequest', () => {
   });
 });
 
+describe('the Character routes', () => {
+  it('creates a blank Character when the body carries no Canvas', async () => {
+    await withStore(async (store) => {
+      const response = await handleApiRequest(store.root, {
+        method: 'POST',
+        url: '/api/characters',
+        body: { id: 'hero' },
+      });
+
+      expect(response.status).toBe(201);
+      // The provisional Canvas, not a missing canvas.json: a Character has to be a
+      // Character (and appear in scan) the moment it is created.
+      expect(store.readJson('characters/hero/canvas.json')).toEqual({
+        width: 32,
+        height: 32,
+        anchor: { x: 16, y: 32 },
+      });
+    });
+  });
+
+  it('still honours an explicit Canvas', async () => {
+    await withStore(async (store) => {
+      const response = await handleApiRequest(store.root, {
+        method: 'POST',
+        url: '/api/characters',
+        body: { id: 'hero', width: 4, height: 6, anchorX: 2, anchorY: 6 },
+      });
+
+      expect(response.status).toBe(201);
+      expect(store.readJson('characters/hero/canvas.json')).toEqual({
+        width: 4,
+        height: 6,
+        anchor: { x: 2, y: 6 },
+      });
+    });
+  });
+});
+
 describe('the Draft / Clip-editor routes', () => {
   it('reads a Draft descriptor and its frame list', async () => {
     await withStore(async (store) => {

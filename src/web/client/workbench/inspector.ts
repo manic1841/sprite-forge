@@ -7,18 +7,11 @@
  */
 
 import type { WorkbenchContext } from './context.js';
-import {
-  addRow,
-  colorInput,
-  labeled,
-  make,
-  numberInput,
-  scopeSelect,
-  sizeInput,
-  subheading,
-} from './dom.js';
-import { undoRepair, warningRow } from './repair.js';
+import { confirmAction } from './dialog.js';
+import { addRow, labeled, make, numberInput, subheading } from './dom.js';
+import { repairLog } from './repair.js';
 import { activeAsset, activeDraft, activeExport } from './state.js';
+import { recordingPicker, segmentEditor } from './stageCut.js';
 import type { ClipDraft, PlacementOffset } from '../types.js';
 
 /** Render the inspector for the current target and mode. */
@@ -35,7 +28,17 @@ export function renderInspector(ctx: WorkbenchContext): void {
     inspector.appendChild(notice);
   }
 
+  if (state.mode === 'cut') {
+    recordingInspector(ctx);
+    return;
+  }
   if (state.mode === 'align') {
+    // Opening a Character lands here, so the Character's own section comes with
+    // it: its Canvas is not the only thing a new Character still needs, and the
+    // footage that frames it has to be reachable from the face you arrive on.
+    if (state.target.kind === 'character') {
+      characterInspector(ctx, state.target.characterId);
+    }
     alignInspector(ctx);
     return;
   }
@@ -51,7 +54,39 @@ export function renderInspector(ctx: WorkbenchContext): void {
     assetInspector(ctx);
     return;
   }
+  if (state.target.kind === 'character') {
+    characterInspector(ctx, state.target.characterId);
+    return;
+  }
   recordingInspector(ctx);
+}
+
+// --- Character ---------------------------------------------------------------
+
+/**
+ * A Character is framing, not pixels: its facts are the Canvas and what it owns.
+ *
+ * A new Character is blank and has to be given footage and a Canvas, in that
+ * order, so the next step is offered here rather than described — and it stays
+ * offered on the Alignment face too, because that is where opening a Character
+ * lands.
+ */
+function characterInspector(ctx: WorkbenchContext, characterId: string): void {
+  const section = make('section', 'inspector-section');
+  section.dataset.inspectorSection = 'character';
+  section.appendChild(subheading('Character'));
+
+  const character = ctx.state.scan?.characters.find((entry) => entry.id === characterId);
+  const list = make('dl', 'kv');
+  addRow(list, 'character', characterId);
+  addRow(list, 'drafts', String(character?.drafts.length ?? 0));
+  addRow(list, 'assets', String(character?.assets.length ?? 0));
+  section.appendChild(list);
+  section.appendChild(
+    make('p', 'muted', 'Its Canvas and Anchor are edited on the Alignment face.'),
+  );
+  section.appendChild(recordingPicker(ctx, characterId));
+  ctx.regions.inspector.appendChild(section);
 }
 
 // --- Recording ---------------------------------------------------------------
@@ -79,13 +114,8 @@ function recordingInspector(ctx: WorkbenchContext): void {
   addRow(list, 'segments', String(cutList.cuts.length));
   addRow(list, 'hash', cutList.hash.replace(/^sha256:/, '').slice(0, 12));
   section.appendChild(list);
-  section.appendChild(
-    make(
-      'p',
-      'muted',
-      'Drag a segment edge in the filmstrip to re-cut, then Extract a segment to start a Draft.',
-    ),
-  );
+  section.appendChild(make('h4', 'ttl mini', 'Segments'));
+  section.appendChild(segmentEditor(ctx, recordingId));
   ctx.regions.inspector.appendChild(section);
 }
 
@@ -121,13 +151,12 @@ function draftInspector(ctx: WorkbenchContext): void {
   }
   ctx.regions.inspector.appendChild(facts);
 
+  // The Repair *tools* live under the frame in the stage; what stays here is the
+  // part you read rather than reach for: the warnings and the replay log.
   const repair = make('section', 'inspector-section');
   repair.dataset.inspectorSection = 'repair';
-  repair.appendChild(subheading('Repair'));
-  const controls = make('div', 'repair-controls');
-  controls.dataset.repairControls = '';
-  repairControls(ctx, controls);
-  repair.appendChild(controls);
+  repair.appendChild(subheading('Repair log'));
+  repair.appendChild(repairLog(ctx));
   ctx.regions.inspector.appendChild(repair);
 
   ctx.regions.inspector.appendChild(commitSection(ctx));
@@ -138,87 +167,6 @@ function draftInspector(ctx: WorkbenchContext): void {
 function draftDelayMs(draft: ClipDraft, frame: number): number {
   const index = Math.min(frame, draft.delaysMs.length - 1);
   return draft.delaysMs[index] ?? draft.delaysMs[0] ?? 0;
-}
-
-/** Fill the `[data-repair-controls]` slot: tools, brush settings, warnings, op list. */
-function repairControls(ctx: WorkbenchContext, controls: HTMLElement): void {
-  const { state } = ctx;
-  if (!state.draftDescriptor || state.target.kind !== 'draft') {
-    controls.appendChild(make('p', 'muted', 'Select a Draft to repair its frames.'));
-    return;
-  }
-
-  const tools = make('div', 'repair-tools');
-  const toolButton = (tool: typeof state.tool, label: string): void => {
-    const button = make('button', 'btn small', label);
-    button.dataset.repairTool = tool;
-    button.classList.toggle('on', state.tool === tool);
-    button.addEventListener('click', () => {
-      state.tool = tool;
-      ctx.renderInspector();
-    });
-    tools.appendChild(button);
-  };
-  toolButton('paint', 'Brush');
-  toolButton('erase', 'Eraser');
-  toolButton('rect', 'Rect');
-  toolButton('eyedropper', 'Eyedropper');
-  controls.appendChild(tools);
-
-  const settings = make('div', 'repair-settings');
-  settings.appendChild(
-    labeled(
-      'Colour',
-      colorInput(state.brushColor, (value) => {
-        state.brushColor = value;
-        state.tool = 'paint';
-      }),
-    ),
-  );
-  settings.appendChild(
-    labeled(
-      'Size',
-      sizeInput(state.brushSize, (value) => {
-        state.brushSize = Math.max(1, Math.round(value));
-      }),
-    ),
-  );
-  settings.appendChild(
-    labeled(
-      'Scope',
-      scopeSelect(state.scope, (value) => {
-        state.scope = value;
-      }),
-    ),
-  );
-  controls.appendChild(settings);
-
-  const undo = make('button', 'btn small', 'Undo') as HTMLButtonElement;
-  undo.dataset.repairUndo = '';
-  undo.disabled = (state.repair?.operations.length ?? 0) === 0;
-  undo.addEventListener('click', () => void ctx.run('Undo repair', () => undoRepair(ctx)));
-  controls.appendChild(undo);
-
-  for (const warning of state.repair?.warnings ?? []) {
-    controls.appendChild(warningRow(warning));
-  }
-
-  controls.appendChild(make('h4', 'ttl sub', 'Operations'));
-  const list = make('ol', 'repair-ops');
-  list.dataset.repairOps = '';
-  const operations = state.repair?.operations ?? [];
-  if (operations.length === 0) {
-    list.appendChild(make('li', 'muted', 'No Repair operations yet.'));
-  }
-  operations.forEach((operation, index) => {
-    const item = make('li', 'repair-op');
-    item.dataset.repairOp = '';
-    item.dataset.repairOpIndex = String(index);
-    item.dataset.repairTool = operation.tool;
-    item.textContent = `${operation.tool} · frames [${operation.frames.start}–${operation.frames.end})`;
-    list.appendChild(item);
-  });
-  controls.appendChild(list);
 }
 
 /** Commit the Draft into an immutable Clip. */
@@ -288,10 +236,12 @@ function discardSection(ctx: WorkbenchContext): HTMLElement {
   const button = make('button', 'btn small ghost', 'Discard draft') as HTMLButtonElement;
   button.dataset.discardDraft = '';
   button.addEventListener('click', () => {
-    if (!window.confirm(`Discard draft "${target.draftId}"?`)) {
-      return;
-    }
-    void ctx.run('Discard draft', () => discardDraft(ctx, target.characterId, target.draftId));
+    void ctx.run('Discard draft', async () => {
+      if (!(await confirmAction(`Discard draft "${target.draftId}"?`, 'Discard'))) {
+        return;
+      }
+      await discardDraft(ctx, target.characterId, target.draftId);
+    });
   });
   section.appendChild(button);
   return section;
@@ -470,14 +420,20 @@ function deleteControls(
   assetId: string,
 ): HTMLElement {
   const wrap = make('div', 'asset-delete');
-  wrap.appendChild(make('h4', 'ttl sub', 'Delete'));
+  wrap.appendChild(make('h4', 'ttl mini', 'Delete'));
   const button = make('button', 'btn small ghost', 'Delete asset') as HTMLButtonElement;
   button.dataset.assetDelete = '';
   button.addEventListener('click', () => {
-    if (!window.confirm(`Delete ${assetKind} "${assetId}"? This cannot be undone.`)) {
-      return;
-    }
+    // The ask runs inside `run` so the whole gesture — wait, then delete — is
+    // one tracked action rather than a fire-and-forget tail after it.
     void ctx.run('Delete asset', async () => {
+      const asked = await confirmAction(
+        `Delete ${assetKind} "${assetId}"? This cannot be undone.`,
+        'Delete',
+      );
+      if (!asked) {
+        return;
+      }
       await ctx.api.deleteAsset(characterId, assetKind, assetId);
       // The Asset is gone, so the target has to move off it.
       ctx.state.asset = null;
@@ -545,7 +501,7 @@ function alignInspector(ctx: WorkbenchContext): void {
   }
 
   if (state.alignment.clips.length > 0) {
-    section.appendChild(make('h4', 'ttl sub', 'Committed Clips'));
+    section.appendChild(make('h4', 'ttl mini', 'Committed Clips'));
     const list = make('ul', 'align-clips');
     for (const clip of state.alignment.clips) {
       const item = make('li', 'align-clip');
@@ -583,7 +539,54 @@ function alignInspector(ctx: WorkbenchContext): void {
   section.appendChild(expandRow);
   section.appendChild(expand);
 
+  section.appendChild(frameFromFootage(ctx));
   ctx.regions.inspector.appendChild(section);
+}
+
+/**
+ * The step that retires a blank Character's provisional Canvas: derive the framing
+ * from the open Recording and write it. Only offered while a Recording is open, and
+ * explained when it is not, so the placeholder is never left in place by accident.
+ */
+function frameFromFootage(ctx: WorkbenchContext): HTMLElement {
+  const wrap = make('section', 'inspector-section');
+  wrap.dataset.inspectorSection = 'framing';
+  wrap.appendChild(subheading('Framing'));
+
+  const characterId = ctx.state.activeCharacterId;
+  const recordingId = ctx.state.recordingId;
+  if (characterId === null || recordingId === null) {
+    wrap.appendChild(
+      make('p', 'muted', 'Open a Recording from the Character to frame its Canvas from a frame.'),
+    );
+    return wrap;
+  }
+
+  const cut = (ctx.state.cutList?.cuts ?? []).find(
+    (segment) => ctx.state.frame >= segment.startFrame && ctx.state.frame < segment.endFrame,
+  );
+  wrap.appendChild(
+    make(
+      'p',
+      'muted',
+      `Frames the Canvas from ${recordingId} frame ${cut ? cut.startFrame : ctx.state.frame}` +
+        `${cut ? ` (cut "${cut.id}")` : ''}.`,
+    ),
+  );
+
+  const button = make('button', 'btn small', 'Frame canvas from frame');
+  button.dataset.frameCanvasRun = '';
+  button.addEventListener('click', () => {
+    void ctx.run('Frame canvas', async () => {
+      await ctx.api.frameCanvas(characterId, {
+        recordingId,
+        ...(cut === undefined ? {} : { cutId: cut.id }),
+      });
+      await refreshAlignment(ctx, characterId);
+    });
+  });
+  wrap.appendChild(button);
+  return wrap;
 }
 
 /** The active Draft's offset as currently known to the client. */
@@ -666,6 +669,9 @@ async function applyExpand(ctx: WorkbenchContext): Promise<void> {
 
 async function refreshAlignment(ctx: WorkbenchContext, characterId: string): Promise<void> {
   ctx.state.alignment = await ctx.api.readCharacterAlignment(characterId);
+  // The canvas may have just changed; the expand inputs follow it until edited.
+  ctx.state.expandWidth = ctx.state.alignment.canvas.width;
+  ctx.state.expandHeight = ctx.state.alignment.canvas.height;
   ctx.renderStage();
   ctx.renderInspector();
 }

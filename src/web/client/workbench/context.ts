@@ -16,6 +16,8 @@ export interface Regions {
   readonly stage: HTMLElement;
   readonly filmstrip: HTMLElement;
   readonly inspector: HTMLElement;
+  /** The shell header: breadcrumb and faces. */
+  readonly header: HTMLElement;
   readonly context: HTMLElement;
 }
 
@@ -41,6 +43,8 @@ export interface WorkbenchContext {
   loadDraft(characterId: string, draftId: string): Promise<void>;
   /** Open a committed Asset (guarded). */
   loadAsset(characterId: string, assetKind: 'clip' | 'sequence', assetId: string): Promise<void>;
+  /** Open a Character itself: its Alignment face, where its Canvas is framed. */
+  loadCharacter(characterId: string): Promise<void>;
   /** Show a Character's alignment face (guarded). */
   loadAlignment(characterId: string): Promise<void>;
   /** Open an Export (guarded). */

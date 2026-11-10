@@ -52,9 +52,14 @@ change the Segment's frame range.
 In the workbench the same operations are on the Clip editor's stage: the Recording is
 previewed while it plays, a Segment is added from the fields under the list, renamed,
 deleted, or dragged in the filmstrip, and **Extract** turns it into a Draft on the
-same screen. Extracting needs a Character whose Canvas can hold the Segment, so the
-stage also offers **New Character**, which derives the Anchor and Canvas from the
-Segment's frames.
+same screen.
+
+Extracting needs a Character whose Canvas can hold the Segment, so the stage names the
+target Character above the Segment list. Work is Character-first: pick or create a
+Character in the Library, open a Recording from its page, and cut. With no Character
+yet, Extract offers to create one from the Segment itself; if the Segment is bigger
+than the Character's Canvas it offers the explicit expand instead of failing. A new
+Character starts blank (see [alignment.md](./alignment.md)), never mid-flow.
 
 ## Overlap is not policed
 

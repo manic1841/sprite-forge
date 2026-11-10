@@ -332,9 +332,10 @@ async function runCreateCharacter(
     anchorYPx === undefined;
 
   try {
-    // Either the Canvas is given outright, or it is derived from a Recording's
-    // first frame (user story 42); a partial set is ambiguous and rejected.
-    let canvas: { width: number; height: number; anchor: { x: number; y: number } };
+    // Either the Canvas is given outright, derived from a Recording's first frame
+    // (user story 42), or left out entirely to start the Character **blank** on a
+    // provisional Canvas. A partial set is ambiguous and rejected.
+    let canvas: { width: number; height: number; anchor: { x: number; y: number } } | undefined;
     if (allExplicit) {
       canvas = { width: widthPx, height: heightPx, anchor: { x: anchorXPx, y: anchorYPx } };
     } else if (noneExplicit && recording) {
@@ -343,9 +344,11 @@ async function runCreateCharacter(
         ...(cut !== undefined ? { cutId: cut } : {}),
       });
       canvas = derived.canvas;
+    } else if (noneExplicit) {
+      canvas = undefined;
     } else {
       return fail(
-        'provide --width, --height, --anchor-x and --anchor-y, or --recording [--cut] to derive them',
+        'provide --width, --height, --anchor-x and --anchor-y, --recording [--cut] to derive them, or nothing for a blank Character',
       );
     }
 

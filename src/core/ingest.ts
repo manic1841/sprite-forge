@@ -174,9 +174,60 @@ export interface RecordingFrame {
   data: Buffer;
 }
 
+/** Per-frame delays of a Recording, in ms, read straight from its source. */
+export interface RecordingDelays {
+  recordingId: string;
+  /** One delay per frame; never collapsed to a uniform rate. */
+  delaysMs: number[];
+}
+
 /**
- * Read one frame of a Recording as PNG.
+ * Read a Recording's per-frame delays.
  *
+ * Delays are not stored (format-spec §2 Rule 2.2), so a preview that respects the
+ * capture's own timing — rather than a made-up frame rate — reads them from the
+ * source at play time.
+ */
+export async function readRecordingDelays(
+  root: string,
+  recordingId: string,
+): Promise<RecordingDelays> {
+  if (!isValidId(recordingId)) {
+    throw new StoreError(
+      `Invalid recording id "${recordingId}": must match /^[a-z][a-z0-9-]*$/.`,
+    );
+  }
+
+  const relPath = sourcePath(recordingId);
+  if (!(await pathExists(root, relPath))) {
+    throw new StoreError(
+      `Recording "${recordingId}" has no recording file (${relPath} is missing).`,
+    );
+  }
+  const bytes = await readBinaryFile(root, relPath);
+
+  let metadata: Metadata;
+  try {
+    metadata = await sharp(bytes, { animated: true }).metadata();
+  } catch (error) {
+    throw new StoreError(
+      `Cannot decode recording file for "${recordingId}": ${(error as Error).message}`,
+    );
+  }
+
+  const frameCount = metadata.pages ?? 1;
+  const delay = metadata.delay ?? [];
+  if (delay.length !== frameCount) {
+    throw new StoreError(
+      `Recording file for "${recordingId}" does not report per-frame delays ` +
+        `(expected ${frameCount}, got ${delay.length}).`,
+    );
+  }
+  // A decoded delay of 0 is legal in a GIF but stalls a timer, so it floors at 1.
+  return { recordingId, delaysMs: delay.map((value) => Math.max(1, value)) };
+}
+
+/**
  * The filmstrip is a scrubber, so picking a frame has to show something; the
  * source is an animated file and the browser cannot slice it. The frame is
  * composited over the opaque background the GIF itself carries, so what is

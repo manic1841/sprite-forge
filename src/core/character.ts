@@ -41,13 +41,26 @@ export interface Canvas {
 export interface CreateCharacterOptions {
   /** Caller-assigned Character id; validated against the id grammar. Becomes the folder name. */
   characterId: string;
-  /** Canvas width in pixels; must be a positive even integer so `anchor.x` is an integer. */
-  width: number;
-  /** Canvas height in pixels; must be a positive integer. */
-  height: number;
-  /** The foot-base Anchor; must satisfy the invariant enforced below. */
-  anchor: CanvasAnchor;
+  /**
+   * Canvas width in pixels; must be a positive even integer so `anchor.x` is an
+   * integer. Omitted entirely for a **blank** Character (see {@link BLANK_CANVAS}).
+   */
+  width?: number;
+  /** Canvas height in pixels; must be a positive integer. Omitted for a blank Character. */
+  height?: number;
+  /** The foot-base Anchor. Omitted together with `width`/`height` for a blank Character. */
+  anchor?: CanvasAnchor;
 }
+
+/**
+ * The Canvas a **blank** Character starts on.
+ *
+ * A Character is a level above Recordings: it can be created before any footage
+ * exists, then given real framing from a frame later (derive) or grown (expand).
+ * The placeholder is small and symmetric so it is obviously provisional, yet
+ * already satisfies the Anchor invariant.
+ */
+export const BLANK_CANVAS: Canvas = { width: 32, height: 32, anchor: { x: 16, y: 32 } };
 
 /** The Character as created by {@link createCharacter}. */
 export interface CreatedCharacter {
@@ -64,13 +77,14 @@ export interface CreatedCharacter {
  *
  * The id grammar and the Anchor invariant are both **hard errors**: nothing is
  * written unless the Canvas is valid, so the store never holds a half-created
- * Character with a broken Canvas.
+ * Character with a broken Canvas. With no Canvas given, the Character starts on
+ * {@link BLANK_CANVAS} and is framed later.
  */
 export async function createCharacter(
   root: string,
   options: CreateCharacterOptions,
 ): Promise<CreatedCharacter> {
-  const { characterId, width, height, anchor } = options;
+  const { characterId } = options;
 
   // The id becomes the folder name, so it must satisfy the id grammar before
   // anything touches the store.
@@ -81,7 +95,16 @@ export async function createCharacter(
   }
 
   // Rule 3.1 needs `anchor.x == width / 2`; an odd width has no integer centre, so
-  // reject it explicitly rather than silently truncating the Anchor.
+  // reject it explicitly rather than silently truncating the Anchor. Giving no
+  // dimensions at all means "start blank".
+  if (options.width === undefined || options.height === undefined) {
+    const canvas: Canvas = { ...BLANK_CANVAS, anchor: { ...BLANK_CANVAS.anchor } };
+    validateArtifact('canvas', canvas);
+    await writeJsonFile(root, canvasPath(characterId), canvas);
+    return { id: characterId, dir: characterDir(characterId), canvas };
+  }
+
+  const { width, height } = options;
   if (!Number.isInteger(width) || width < 1 || width % 2 !== 0) {
     throw new StoreError(
       `Canvas width must be a positive even integer so the Anchor can sit at its ` +
@@ -89,7 +112,11 @@ export async function createCharacter(
     );
   }
 
-  const canvas: Canvas = { width, height, anchor: { x: anchor.x, y: anchor.y } };
+  const canvas: Canvas = {
+    width,
+    height,
+    anchor: { x: options.anchor?.x ?? width / 2, y: options.anchor?.y ?? height },
+  };
 
   // The schema closes the object and checks the shapes; the cross-artifact rule
   // enforces the Anchor invariant (Rule 3.1) that JSON Schema cannot express.

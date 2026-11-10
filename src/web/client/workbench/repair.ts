@@ -7,7 +7,7 @@
  */
 
 import type { WorkbenchContext } from './context.js';
-import { make } from './dom.js';
+import { colorInput, labeled, make, scopeSelect, sizeInput } from './dom.js';
 import type { RepairOperationInput, RepairTool, RepairWarning } from '../types.js';
 import type { UiTool } from './state.js';
 
@@ -148,4 +148,99 @@ export function warningRow(warning: RepairWarning): HTMLElement {
   const row = make('p', 'repair-warning', warning.message);
   row.setAttribute('data-repair-warning', warning.code);
   return row;
+}
+
+/**
+ * The Repair tools, as a bar under the frame they paint on.
+ *
+ * Tools sit with the canvas rather than in the inspector: the eye is on the
+ * pixels while a tool is chosen, so putting the picker on the far side of the
+ * screen is a round trip for every stroke. The inspector keeps the log.
+ */
+export function repairBar(ctx: WorkbenchContext): HTMLElement {
+  const { state } = ctx;
+  const bar = make('div', 'repair-bar');
+  bar.dataset.repairBar = '';
+
+  const tools = make('div', 'repair-tools');
+  const toolButton = (tool: UiTool, label: string): void => {
+    const button = make('button', 'btn small', label);
+    button.dataset.repairTool = tool;
+    button.classList.toggle('on', state.tool === tool);
+    button.setAttribute('aria-pressed', String(state.tool === tool));
+    button.addEventListener('click', () => {
+      state.tool = tool;
+      ctx.renderStage();
+    });
+    tools.appendChild(button);
+  };
+  toolButton('paint', 'Brush');
+  toolButton('erase', 'Eraser');
+  toolButton('rect', 'Rect');
+  toolButton('eyedropper', 'Eyedropper');
+  bar.appendChild(tools);
+
+  const settings = make('div', 'repair-settings');
+  settings.appendChild(
+    labeled(
+      'Colour',
+      colorInput(state.brushColor, (value) => {
+        state.brushColor = value;
+        state.tool = 'paint';
+      }),
+    ),
+  );
+  settings.appendChild(
+    labeled(
+      'Size',
+      sizeInput(state.brushSize, (value) => {
+        state.brushSize = Math.max(1, Math.round(value));
+      }),
+    ),
+  );
+  settings.appendChild(
+    labeled(
+      'Scope',
+      scopeSelect(state.scope, (value) => {
+        state.scope = value;
+      }),
+    ),
+  );
+  bar.appendChild(settings);
+
+  const undo = make('button', 'btn small', 'Undo') as HTMLButtonElement;
+  undo.dataset.repairUndo = '';
+  undo.disabled = (state.repair?.operations.length ?? 0) === 0;
+  undo.addEventListener('click', () => void ctx.run('Undo repair', () => undoRepair(ctx)));
+  bar.appendChild(undo);
+
+  return bar;
+}
+
+/** The Repair log: validity warnings, then the replayed operations, newest last. */
+export function repairLog(ctx: WorkbenchContext): HTMLElement {
+  const log = make('div', 'repair-log');
+  log.dataset.repairLog = '';
+
+  for (const warning of ctx.state.repair?.warnings ?? []) {
+    log.appendChild(warningRow(warning));
+  }
+
+  const list = make('ol', 'repair-ops');
+  list.dataset.repairOps = '';
+  const operations = ctx.state.repair?.operations ?? [];
+  if (operations.length === 0) {
+    list.appendChild(make('li', 'muted', 'No Repair operations yet.'));
+  }
+  operations.forEach((operation, index) => {
+    const item = make('li', 'repair-op');
+    item.dataset.repairOp = '';
+    item.dataset.repairOpIndex = String(index);
+    item.dataset.repairTool = operation.tool;
+    item.textContent = `${operation.tool} · frames [${operation.frames.start}–${operation.frames.end})`;
+    list.appendChild(item);
+  });
+  log.appendChild(list);
+
+  return log;
 }

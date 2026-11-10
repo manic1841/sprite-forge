@@ -1,120 +1,213 @@
 /**
- * The Library rail: everything the store currently holds, grouped by kind.
+ * The Library rail: the store, laid out in the order its levels depend on.
  *
- * Import comes first under Recordings; below it, Recordings, Characters, Drafts,
- * committed Assets and Exports. The rail is a *view* of a scan — it owns no
- * state beyond the selection highlight.
+ * A **Character** comes first because work starts there: it owns both the
+ * Canvas/Anchor and everything made for it — its Drafts and its committed Assets
+ * — so those nest *inside* their Character rather than sitting in separate flat
+ * sections beside it. A Recording is source material fed into a Character, so it
+ * follows and carries its own Segments the same way. Exports close the list: they
+ * are produced from a Character, not held by one.
+ *
+ * The rail is an index, so it carries only what identifies an item: a name, and a
+ * count for the section holding it. Paths, kinds and forms are all demoted — the
+ * two forms that *add* to the store open from a `+` in their section header. Only
+ * the open Character and the open Recording are expanded, which is what keeps a
+ * desktop window free of scrolling however much the store holds.
  */
 
 import type { WorkbenchContext } from './context.js';
-import { heading, make, subheading } from './dom.js';
+import { characterSection } from './characters.js';
+import { heading, make, railSection } from './dom.js';
 import { importForm } from './importForm.js';
-import { activeAsset, activeDraft, activeExport } from './state.js';
+import { selectSegment } from './stageCut.js';
+import { activeCharacter, activeExport } from './state.js';
+import type { Segment } from '../types.js';
 
 /** Render the rail from the latest scan. */
 export function renderLibrary(ctx: WorkbenchContext): void {
   const { rail } = ctx.regions;
   const { state } = ctx;
+
+  // Both open levels are read before the rail is cleared: they derive from the
+  // target, and the rail is rebuilt from scratch below.
+  const openCharacter = activeCharacter(state);
+  const openRecording =
+    state.target.kind === 'recording' ? state.target.recordingId : (state.recordingId ?? null);
+  const openExport = activeExport(state);
+  const recordings = state.scan?.recordings ?? [];
+  const characters = state.scan?.characters ?? [];
+  const exports = state.scan?.exports ?? [];
+
   rail.innerHTML = '';
   rail.appendChild(heading('Library'));
 
-  // Recordings: the Import form on top, then what already exists.
-  rail.appendChild(subheading('Recordings'));
-  rail.appendChild(importForm(ctx));
+  // Characters come first: a Character is the level work starts from, and a
+  // Recording is source material fed *into* one.
+  rail.appendChild(
+    railSection({
+      title: 'Characters',
+      count: characters.length === 0 ? undefined : characters.length,
+      add: {
+        label: 'New Character',
+        attribute: 'railCharacterAdd',
+        onClick: () => openForm(ctx, 'character'),
+      },
+    }),
+  );
+  rail.appendChild(characterSection(ctx, openCharacter));
 
-  const recordings = make('div', 'list');
-  recordings.dataset.librarySection = 'recordings';
-  for (const recording of state.scan?.recordings ?? []) {
-    const item = make('button', 'asset');
-    item.dataset.recording = recording.id;
-    item.classList.toggle('sel', recording.id === state.recordingId);
-    item.append(
-      make('span', 'asset-name', recording.id),
-      make('span', 'asset-sub', recording.dir),
-    );
-    item.addEventListener('click', () => void ctx.loadRecording(recording.id));
-    recordings.appendChild(item);
+  // Recordings: source material, with Import behind its `+`.
+  rail.appendChild(
+    railSection({
+      title: 'Recordings',
+      count: recordings.length === 0 ? undefined : recordings.length,
+      add: {
+        label: 'Import a Recording',
+        attribute: 'railImportAdd',
+        onClick: () => openForm(ctx, 'import'),
+      },
+    }),
+  );
+  if (state.railForm === 'import') {
+    rail.appendChild(importForm(ctx));
   }
-  rail.appendChild(recordings);
-
-  rail.appendChild(subheading('Drafts'));
-  const drafts = make('div', 'list');
-  drafts.dataset.librarySection = 'drafts';
-  const open = activeDraft(state);
-  for (const character of state.scan?.characters ?? []) {
-    for (const draft of character.drafts) {
-      const item = make('button', 'asset');
-      item.dataset.draft = draft.id;
-      item.dataset.draftCharacter = character.id;
-      item.classList.toggle(
-        'sel',
-        open?.characterId === character.id && open.draftId === draft.id,
-      );
-      item.append(
-        make('span', 'asset-name', draft.id),
-        make('span', 'asset-sub', character.id),
-      );
-      item.addEventListener('click', () => void ctx.loadDraft(character.id, draft.id));
-      drafts.appendChild(item);
-    }
+  if (recordings.length === 0 && state.railForm !== 'import') {
+    rail.appendChild(make('p', 'rail-empty', 'no Recordings yet'));
   }
-  rail.appendChild(drafts);
+  rail.appendChild(recordingSection(ctx, openRecording));
 
-  rail.appendChild(subheading('Committed assets'));
-  const assets = make('div', 'list');
-  assets.dataset.librarySection = 'assets';
-  const openAsset = activeAsset(state);
-  for (const character of state.scan?.characters ?? []) {
-    for (const asset of character.assets) {
-      const item = make('button', 'asset');
-      item.dataset.asset = asset.id;
-      item.dataset.assetKind = asset.kind;
-      item.dataset.character = character.id;
-      item.classList.toggle(
-        'sel',
-        openAsset?.characterId === character.id &&
-          openAsset.assetId === asset.id &&
-          openAsset.assetKind === asset.kind,
-      );
-      item.append(
-        make('span', 'asset-name', asset.id),
-        make('span', 'tag', asset.kind),
-      );
-      // A committed Asset opens on the clip face, where it plays back and can be
-      // forked; the Alignment face is one click away for when placement is the job.
-      item.addEventListener('click', () => void ctx.loadAsset(character.id, asset.kind, asset.id));
-      assets.appendChild(item);
-    }
+  rail.appendChild(
+    railSection({ title: 'Exports', count: exports.length === 0 ? undefined : exports.length }),
+  );
+  if (exports.length === 0) {
+    rail.appendChild(make('p', 'rail-empty', 'nothing exported yet'));
   }
-  rail.appendChild(assets);
-
-  rail.appendChild(subheading('Exports'));
-  const exports = make('div', 'list');
-  exports.dataset.librarySection = 'exports';
-  const openTarget = activeExport(state);
-  for (const exported of state.scan?.exports ?? []) {
+  rail.appendChild(itemList('exports', exports, (exported) => {
     const item = make('button', 'asset');
     item.dataset.exportTarget = exported.target;
-    item.classList.toggle('sel', exported.target === openTarget);
-    item.append(
-      make('span', 'asset-name', exported.target),
-      make('span', 'asset-sub', exported.dir),
-    );
+    item.classList.toggle('sel', exported.target === openExport);
+    item.appendChild(make('span', 'asset-name', exported.target));
     item.addEventListener('click', () => void ctx.loadExport(exported.target));
-    exports.appendChild(item);
-  }
-  rail.appendChild(exports);
+    return item;
+  }));
 
   rail.appendChild(validationPanel(ctx));
 }
 
-/** The whole-store check: one button, and whatever it last reported. */
-function validationPanel(ctx: WorkbenchContext): HTMLElement {
-  const section = make('section', 'validation');
-  section.dataset.validationPanel = '';
-  section.appendChild(subheading('Store check'));
+/** Open one of the rail's create forms, closing the other. */
+function openForm(ctx: WorkbenchContext, form: 'import' | 'character'): void {
+  ctx.state.railForm = ctx.state.railForm === form ? 'none' : form;
+  ctx.renderLibrary();
+}
 
-  const button = make('button', 'btn small', 'Validate store') as HTMLButtonElement;
+/** A section's rows, built by `row` and tagged with the section they belong to. */
+function itemList<T>(
+  section: string,
+  entries: readonly T[],
+  row: (entry: T) => HTMLElement,
+): HTMLElement {
+  const list = make('div', 'list');
+  list.dataset.librarySection = section;
+  for (const entry of entries) {
+    list.appendChild(row(entry));
+  }
+  return list;
+}
+
+/**
+ * The Recordings: each one a row, and — while it is open — the Segments cut from
+ * it.
+ *
+ * This mirrors the Characters section because the shape is the same: a Recording
+ * owns its cut list (ADR-0007), so its Segments nest under it and appear only
+ * while it is open. A Segment row **selects** rather than loads: the Recording is
+ * already on screen, and reloading it would reset the playhead and the mark.
+ */
+function recordingSection(ctx: WorkbenchContext, open: string | null): HTMLElement {
+  const selected = ctx.state.target.kind === 'recording' ? ctx.state.target.recordingId : null;
+  const list = make('div', 'list');
+  list.dataset.librarySection = 'recordings';
+  for (const recording of ctx.state.scan?.recordings ?? []) {
+    list.appendChild(recordingGroup(ctx, recording.id, recording.id === open, recording.id === selected));
+  }
+  return list;
+}
+
+/** One Recording, and its Segments while it is the open one. */
+function recordingGroup(
+  ctx: WorkbenchContext,
+  recordingId: string,
+  open: boolean,
+  selected: boolean,
+): HTMLElement {
+  // The cut list is only held for the open Recording, so the count is too.
+  const cuts = open ? (ctx.state.cutList?.cuts ?? []) : [];
+  const group = make('div', 'char-group');
+  group.dataset.recordingGroup = recordingId;
+
+  const head = make('button', 'asset char-head') as HTMLButtonElement;
+  head.dataset.recording = recordingId;
+  head.setAttribute('aria-expanded', String(open));
+  head.classList.toggle('sel', selected);
+  head.classList.toggle('open', open);
+  const chevron = make('span', 'chev', open ? '▾' : '▸');
+  chevron.setAttribute('aria-hidden', 'true');
+  head.append(
+    chevron,
+    make('span', 'asset-name', recordingId),
+    make('span', 'rail-count', open ? String(cuts.length) : ''),
+  );
+  head.addEventListener('click', () => void ctx.loadRecording(recordingId));
+  group.appendChild(head);
+
+  if (open) {
+    group.appendChild(recordingContents(ctx, recordingId, cuts));
+  }
+  return group;
+}
+
+/** The open Recording's Segments, as a nested branch. */
+function recordingContents(
+  ctx: WorkbenchContext,
+  recordingId: string,
+  cuts: readonly Segment[],
+): HTMLElement {
+  const body = make('div', 'char-body');
+  const branch = make('div', 'char-branch');
+  branch.dataset.charBranch = 'segments';
+  branch.appendChild(make('h4', 'ttl grp', 'Segments'));
+
+  if (cuts.length === 0) {
+    branch.appendChild(make('p', 'rail-empty', 'none yet — mark a range on the strip'));
+    body.appendChild(branch);
+    return body;
+  }
+
+  const list = make('div', 'list');
+  for (const segment of cuts) {
+    const item = make('button', 'asset');
+    item.dataset.segment = segment.id;
+    item.dataset.segmentRecording = recordingId;
+    item.classList.toggle('sel', segment.id === ctx.state.selectedCut);
+    item.append(
+      make('span', 'asset-name', segment.id),
+      make('span', 'asset-sub', `[${segment.startFrame}, ${segment.endFrame})`),
+    );
+    item.addEventListener('click', () => selectSegment(ctx, segment));
+    list.appendChild(item);
+  }
+  branch.appendChild(list);
+  body.appendChild(branch);
+  return body;
+}
+
+
+/** The whole-store check, as one quiet footer line until it has something to say. */
+function validationPanel(ctx: WorkbenchContext): HTMLElement {
+  const section = make('footer', 'rail-foot');
+  section.dataset.validationPanel = '';
+
+  const button = make('button', 'rail-foot-btn', 'Validate store') as HTMLButtonElement;
   button.dataset.validateRun = '';
   button.addEventListener('click', () => {
     void ctx.run('Validate store', async () => {
@@ -130,11 +223,15 @@ function validationPanel(ctx: WorkbenchContext): HTMLElement {
   if (!report) {
     return section;
   }
-  const lines = make('ul', 'validation-list');
-  lines.dataset.validationReport = String(report.ok);
+  section.appendChild(
+    make('p', 'rail-foot-note', report.problems.length === 0 ? 'every artifact validates' : ''),
+  );
   if (report.problems.length === 0) {
-    lines.appendChild(make('li', 'muted', 'Every artifact validates.'));
+    section.dataset.validationReport = 'true';
+    return section;
   }
+  section.dataset.validationReport = 'false';
+  const lines = make('ul', 'validation-list');
   for (const problem of report.problems) {
     const item = make('li', 'warning');
     item.dataset.validationProblem = problem.path;

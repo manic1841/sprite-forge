@@ -8,6 +8,7 @@
 
 import type {
   AlignmentState,
+  Canvas,
   CharacterAlignment,
   ClipDraft,
   CommittedAsset,
@@ -21,6 +22,7 @@ import type {
   Facing,
   IngestedRecording,
   PlacementOffset,
+  RecordingDelays,
   RepairOperationInput,
   RepairState,
   ReproducibilityReport,
@@ -45,16 +47,26 @@ export interface WorkbenchApi {
   /** Read a Recording's cut list. */
   readCutList(recordingId: string): Promise<CutList>;
   /**
+   * Read a Recording's per-frame delays.
+   *
+   * Delays are not part of the cut list, so playback asks for them separately
+   * rather than inventing a frame rate.
+   */
+  readRecordingDelays(recordingId: string): Promise<RecordingDelays>;
+  /**
    * The URL a Recording frame's PNG is served from, for an `<img src>`.
    * Synchronous: it is a URL, not a fetch.
    */
   recordingFrameUrl(recordingId: string, index: number): string;
   /** Preview the Canvas/Anchor a Recording (or Segment) would derive. */
   deriveAnchor(recordingId: string, cutId?: string): Promise<DerivedAnchor>;
-  /** Create a Character with an explicit Canvas/Anchor. */
+  /**
+   * Create a Character. Without a Canvas the Character starts **blank** on a
+   * provisional one, to be framed from footage later.
+   */
   createCharacter(
     id: string,
-    canvas: { width: number; height: number; anchorX: number; anchorY: number },
+    canvas?: { width: number; height: number; anchorX: number; anchorY: number },
   ): Promise<CreatedCharacter>;
   /** Extract a Segment into a Clip Draft. */
   extractClipDraft(
@@ -117,6 +129,14 @@ export interface WorkbenchApi {
   ): Promise<ClipDraft>;
   /** Grow a Character's Canvas and re-bake its committed Clips. */
   expandCanvas(characterId: string, width: number, height: number): Promise<ExpandCanvasResult>;
+  /**
+   * Frame a blank Character from a Segment: replace its provisional Canvas with the
+   * framing the footage implies (grow-only once the Character has work).
+   */
+  frameCanvas(
+    characterId: string,
+    request: { recordingId: string; cutId?: string },
+  ): Promise<Canvas>;
   /**
    * The URL a committed Asset's sheet is served from, for an `<img src>` (the
    * Alignment stage ghosts Clips on the Canvas with it).
@@ -196,6 +216,8 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
         body: JSON.stringify({ id, dataBase64, filename }),
       }),
     readCutList: (recordingId) => call<CutList>(`/recordings/${recordingId}/cuts`),
+    readRecordingDelays: (recordingId) =>
+      call<RecordingDelays>(`/recordings/${recordingId}/delays`),
     recordingFrameUrl: (recordingId, index) =>
       `${base}/recordings/${recordingId}/frames/${index}`,
     deriveAnchor: (recordingId, cutId) =>
@@ -269,6 +291,11 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
       call<ExpandCanvasResult>(`/characters/${characterId}/expand-canvas`, {
         method: 'POST',
         body: JSON.stringify({ width, height }),
+      }),
+    frameCanvas: (characterId, request) =>
+      call<Canvas>(`/characters/${characterId}/frame-canvas`, {
+        method: 'POST',
+        body: JSON.stringify(request),
       }),
     sheetUrl: (characterId, kind, id) =>
       `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet`,

@@ -23,6 +23,39 @@ export function heading(text: string): HTMLElement {
   return make('h3', 'ttl', text);
 }
 
+/**
+ * A rail section header: its title, an optional count, and at most one action.
+ *
+ * The action is a bare `+` on the right rather than a labelled form that is
+ * always open, so a section shows what it holds and nothing else. `count` is
+ * quiet, right-aligned, and omitted when there is nothing to count.
+ */
+export function railSection(options: {
+  title: string;
+  count?: number;
+  add?: { label: string; attribute: string; onClick: () => void };
+}): HTMLElement {
+  const row = make('div', 'rail-head');
+  row.appendChild(subheading(options.title));
+
+  if (options.count !== undefined) {
+    row.appendChild(make('span', 'rail-count', String(options.count)));
+  } else if (options.add) {
+    // Keeps the `+` on the same edge whether or not a count precedes it.
+    row.appendChild(make('span', 'rail-count'));
+  }
+
+  if (options.add) {
+    const button = make('button', 'rail-add', '+') as HTMLButtonElement;
+    button.dataset[options.add.attribute] = '';
+    button.setAttribute('aria-label', options.add.label);
+    button.title = options.add.label;
+    button.addEventListener('click', options.add.onClick);
+    row.appendChild(button);
+  }
+  return row;
+}
+
 /** A section sub-heading inside a region. */
 export function subheading(text: string): HTMLElement {
   const el = make('h3', 'ttl sub');

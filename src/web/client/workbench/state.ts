@@ -21,8 +21,14 @@ import type {
   StoreScan,
 } from '../types.js';
 
-/** The modes of the stage: which *face* of the active thing is on screen. */
-export const WORKBENCH_MODES = ['clip', 'align', 'export'] as const;
+/**
+ * The faces of the stage: which *view of the active thing* is on screen.
+ *
+ * A face belongs to what is open, not to a fixed toolbar — Cutting only means
+ * something for a Recording, and Alignment only for something with a Canvas — so
+ * the mode bar offers just the faces the current target has.
+ */
+export const WORKBENCH_MODES = ['cut', 'clip', 'align', 'export'] as const;
 export type WorkbenchMode = (typeof WORKBENCH_MODES)[number];
 
 /**
@@ -36,9 +42,8 @@ export type UiTool = 'paint' | 'erase' | 'rect' | 'eyedropper';
 /**
  * What the workbench currently has open.
  *
- * The stage and inspector follow this, not the mode: a loaded Recording and a
- * loaded Draft both live in the clip face, so a click on either keeps the whole
- * workspace on one screen instead of swapping it out.
+ * The target decides which faces exist and which one opens: it is the single
+ * subject of the whole workspace, so nothing else has to be inferred from a mode.
  */
 export type Target =
   | { kind: 'none' }
@@ -76,6 +81,37 @@ export interface WorkbenchState {
   recordingId: string | null;
   cutList: CutList | null;
   frame: number;
+  /**
+   * The open Recording's per-frame delays, in ms.
+   *
+   * Read from the source rather than stored, so playback honours the capture's
+   * own timing instead of an invented frame rate. Empty until it has loaded.
+   */
+  recordingDelaysMs: number[];
+  /** Whether the filmstrip is currently playing the Recording back. */
+  playing: boolean;
+  /**
+   * A frame range picked on the filmstrip, before it is written as a Segment.
+   *
+   * The strip is where a cut is *made*: dragging marks the range, Play confirms
+   * it, and only then is it saved. Half-open, like the stored Segment it becomes.
+   */
+  selection: { startFrame: number; endFrame: number } | null;
+  /**
+   * The Segment the inspector is editing, if one is selected.
+   *
+   * Segments are edited in the inspector against a selection made on the
+   * filmstrip, so the stage stays pixels only and no list of buttons is repeated
+   * for every cut.
+   */
+  selectedCut: string | null;
+  /**
+   * The Character a cut Segment is extracted *into*.
+   *
+   * Kept on state, not read off the select on every click, so it survives a
+   * re-render and so a Recording can be worked against one Character throughout.
+   */
+  extractCharacterId: string | null;
 
   /** The loaded Draft. */
   draftDescriptor: ClipDraft | null;
@@ -120,6 +156,13 @@ export interface WorkbenchState {
   pendingImportId: string;
   importIdTouched: boolean;
   importNotice: string | null;
+  /**
+   * Which of the rail's create forms is open, if any.
+   *
+   * The rail lists what exists; the two forms that *add* to it only open when
+   * asked for, so the scan path is never interrupted by empty inputs.
+   */
+  railForm: 'none' | 'import' | 'character';
 }
 
 /** A fresh state: nothing open, defaults on the tools. */
@@ -131,6 +174,11 @@ export function createState(): WorkbenchState {
     recordingId: null,
     cutList: null,
     frame: 0,
+    recordingDelaysMs: [],
+    playing: false,
+    selection: null,
+    selectedCut: null,
+    extractCharacterId: null,
     draftDescriptor: null,
     draftFrame: 0,
     repair: null,
@@ -164,6 +212,7 @@ export function createState(): WorkbenchState {
     pendingImportId: '',
     importIdTouched: false,
     importNotice: null,
+    railForm: 'none',
   };
 }
 
@@ -187,6 +236,53 @@ export function activeAsset(
         assetId: state.target.assetId,
       }
     : null;
+}
+
+/**
+ * The faces each kind of target has, default face first.
+ *
+ * The bar shows exactly this list, so an irrelevant face is never offered: a
+ * Recording cannot be aligned, a Character has no pixels to repair, and an
+ * Export has nothing to cut. Order is by the work's own progression — cutting is
+ * where a Recording starts; Alignment is secondary to a Draft's repair. Export is
+ * offered wherever there is a Character to export from.
+ */
+const FACES: Record<Target['kind'], readonly WorkbenchMode[]> = {
+  none: ['clip'],
+  recording: ['cut'],
+  draft: ['clip', 'align', 'export'],
+  asset: ['clip', 'align', 'export'],
+  character: ['align', 'export'],
+  export: ['export'],
+};
+
+/** The faces the current target offers, default first. */
+export function facesFor(target: Target): readonly WorkbenchMode[] {
+  return FACES[target.kind];
+}
+
+/** The face a target opens on. */
+export function defaultFace(target: Target): WorkbenchMode {
+  return FACES[target.kind][0]!;
+}
+
+/**
+ * The Character whose work is open, or `null`.
+ *
+ * Anything hanging off a Character — a Draft, an Asset, the Alignment face — makes
+ * that Character the one in play, which is what the rail expands and what the
+ * Alignment face falls back to. A Recording belongs to no Character, so it keeps
+ * pointing at whichever Character was last worked on.
+ */
+export function activeCharacter(state: WorkbenchState): string | null {
+  if (
+    state.target.kind === 'draft' ||
+    state.target.kind === 'asset' ||
+    state.target.kind === 'character'
+  ) {
+    return state.target.characterId;
+  }
+  return state.activeCharacterId;
 }
 
 /** The loaded Export target, or `null`. */

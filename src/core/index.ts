@@ -8,14 +8,15 @@
 export { scan, readStoreTree } from './scan.js';
 export type { CharacterTree, StoreTree } from './scan.js';
 
-export { ingestRecording, readRecordingFrame } from './ingest.js';
+export { ingestRecording, readRecordingDelays, readRecordingFrame } from './ingest.js';
 export type {
   IngestRecordingOptions,
   IngestedRecording,
+  RecordingDelays,
   RecordingFrame,
 } from './ingest.js';
 
-export { createCharacter } from './character.js';
+export { BLANK_CANVAS, createCharacter } from './character.js';
 export type {
   Canvas,
   CanvasAnchor,
@@ -82,6 +83,7 @@ export type {
 
 export {
   expandCanvas,
+  frameCanvasFromSegment,
   readCharacterAlignment,
   readDraftAlignment,
   setPlacementOffset,
@@ -94,6 +96,7 @@ export type {
   CharacterScopedOptions,
   ExpandCanvasOptions,
   ExpandCanvasResult,
+  FrameCanvasFromSegmentOptions,
   PlacementOffset,
   ReadDraftAlignmentOptions,
   SetPlacementOffsetOptions,

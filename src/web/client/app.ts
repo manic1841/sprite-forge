@@ -1,18 +1,24 @@
 /**
  * The browser workbench shell.
  *
- *   rail (Library) | [ modes, stage, filmstrip ] | inspector (contextual)
+ *   header (context · faces)
+ *   rail (Library) | stage (display + its tools) | inspector (contextual)
+ *                  | filmstrip (only where a face has a time axis)
  *
- * The shell owns the four persistent regions, the state object and the wiring
- * between them; each region's content lives in its own module under
- * `./workbench/`. A view receives a {@link WorkbenchContext} and never imports a
- * sibling, so the collaboration surface is that one interface.
+ * The shell owns the persistent regions, the state object and the wiring between
+ * them; each region's content lives in its own module under `./workbench/`. A
+ * view receives a {@link WorkbenchContext} and never imports a sibling, so the
+ * collaboration surface is that one interface.
  *
  * The **mode switch swaps only the stage**. Which *thing* is open is the
  * `target`, not the mode: a Recording and a Draft both live in the clip face, so
  * cutting and repairing stay on one screen. Nothing here holds business logic —
  * every read and write goes through {@link WorkbenchApi}, which the Node server
  * turns into core calls.
+ *
+ * The faces live in the shell header rather than inside the stage. A face switch
+ * must not rebuild the chrome around the work, and the breadcrumb is chrome: it
+ * names what is open, not what the stage is drawing.
  */
 
 import type { WorkbenchApi } from './api.js';
@@ -20,19 +26,25 @@ import type { WorkbenchContext } from './workbench/context.js';
 import { make } from './workbench/dom.js';
 import { renderInspector as inspectorView } from './workbench/inspector.js';
 import { renderLibrary as libraryView } from './workbench/library.js';
-import { renderFilmstrip as filmstripView } from './workbench/filmstrip.js';
+import { renderFilmstrip as filmstripView, stopPlayback } from './workbench/filmstrip.js';
 import { alignmentStageView } from './workbench/stageAlign.js';
 import { clipStageView } from './workbench/stageClip.js';
+import { cutStageView } from './workbench/stageCut.js';
 import { exportStageView } from './workbench/stageExport.js';
-import { createState, slugifyId, WORKBENCH_MODES } from './workbench/state.js';
+import { createState, defaultFace, facesFor, slugifyId } from './workbench/state.js';
 import type { WorkbenchMode, WorkbenchState } from './workbench/state.js';
 
 export { slugifyId };
 export type { WorkbenchMode, WorkbenchState };
 
+/**
+ * One word each: the faces read as a set of views of the open target, not as
+ * sentences.
+ */
 const MODE_LABEL: Record<WorkbenchMode, string> = {
-  clip: 'Clip editor',
-  align: 'Alignment',
+  cut: 'Cut',
+  clip: 'Clip',
+  align: 'Align',
   export: 'Export',
 };
 
@@ -72,6 +84,8 @@ export interface WorkbenchHandle {
   loadRecording(recordingId: string): Promise<void>;
   /** Load a Draft: read its descriptor and show its frames in the Clip editor. */
   loadDraft(characterId: string, draftId: string): Promise<void>;
+  /** Open a Character: its Alignment face, where its Canvas is framed. */
+  loadCharacter(characterId: string): Promise<void>;
   /** Load a Character's alignment view: its Canvas and every Clip/Draft offset. */
   loadAlignment(characterId: string): Promise<void>;
   /** Load an Export: read and show its live, validated Manifest. */
@@ -94,27 +108,25 @@ export function mountWorkbench(
   const root = make('div', 'workbench');
   root.dataset.mode = state.mode;
 
+  // The header is the shell's, not the stage's: switching face must leave it
+  // standing. The breadcrumb sits left, the faces right.
+  const header = make('header', 'context-bar');
+  header.dataset.region = 'context-bar';
+  const contextPill = make('span', 'pill');
+  contextPill.dataset.region = 'context';
+  const faces = make('nav', 'faces');
+  faces.dataset.region = 'faces';
+  // The faces are rebuilt per target: a face only exists while it means
+  // something, so they cannot be made once up front.
+  const modeButtons: HTMLButtonElement[] = [];
+  header.append(contextPill, faces);
+
+  const body = make('div', 'shell-body');
+
   const rail = make('aside', 'rail');
   rail.dataset.region = 'rail';
 
   const centre = make('div', 'centre');
-
-  const modes = make('header', 'modes');
-  modes.dataset.region = 'modes';
-  const modeButtons = WORKBENCH_MODES.map((mode) => {
-    const button = make('button', 'btn');
-    button.dataset.mode = mode;
-    button.textContent = MODE_LABEL[mode];
-    // These are toggles of one stage, not links: the pressed state is what tells a
-    // screen reader which face is up.
-    button.setAttribute('aria-pressed', 'false');
-    button.addEventListener('click', () => setMode(mode));
-    modes.appendChild(button);
-    return button;
-  });
-  const contextPill = make('span', 'pill');
-  contextPill.dataset.region = 'context';
-  modes.appendChild(contextPill);
 
   const stage = make('main', 'stage');
   stage.dataset.region = 'stage';
@@ -125,8 +137,9 @@ export function mountWorkbench(
   const inspector = make('aside', 'inspector');
   inspector.dataset.region = 'inspector';
 
-  centre.append(modes, stage, filmstrip);
-  root.append(rail, centre, inspector);
+  centre.append(stage, filmstrip);
+  body.append(rail, centre, inspector);
+  root.append(header, body);
   container.appendChild(root);
 
   // --- context --------------------------------------------------------------
@@ -136,7 +149,7 @@ export function mountWorkbench(
     api,
     state,
     root,
-    regions: { rail, stage, filmstrip, inspector, context: contextPill },
+    regions: { rail, stage, filmstrip, inspector, header, context: contextPill },
 
     render() {
       renderLibrary();
@@ -154,6 +167,7 @@ export function mountWorkbench(
     loadRecording: openRecording,
     loadDraft: openDraft,
     loadAsset: openAsset,
+    loadCharacter,
     loadAlignment: openAlignment,
     loadExport: openExport,
     run,
@@ -167,9 +181,35 @@ export function mountWorkbench(
     libraryView(ctx);
   }
 
+  /**
+   * Rebuild the mode bar from the faces the target has.
+   *
+   * With one face there is nothing to switch between, but the button stays: it
+   * names where you are, which is worth more than an empty bar.
+   */
+  function renderModes(): void {
+    for (const button of modeButtons.splice(0)) {
+      button.remove();
+    }
+    for (const mode of facesFor(state.target)) {
+      const button = make('button', 'btn') as HTMLButtonElement;
+      button.dataset.mode = mode;
+      button.textContent = MODE_LABEL[mode];
+      // These are toggles of one stage, not links: the pressed state is what tells
+      // a screen reader which face is up.
+      button.setAttribute('aria-pressed', 'false');
+      button.classList.toggle('on', mode === state.mode);
+      button.setAttribute('aria-pressed', String(mode === state.mode));
+      button.addEventListener('click', () => setMode(mode));
+      faces.appendChild(button);
+      modeButtons.push(button);
+    }
+  }
+
   function renderStage(): void {
-    // Contract: only the stage's contents change here. The rail, inspector and
-    // filmstrip nodes are never touched by a mode switch.
+    // Contract: a mode switch touches the stage's contents and nothing else. The
+    // rail, the header (breadcrumb and faces), the inspector and the filmstrip
+    // node all survive it.
     stage.innerHTML = '';
     // A failed load leaves the stage showing why, so a rejected artifact never
     // looks like a dead button.
@@ -183,6 +223,9 @@ export function mountWorkbench(
   }
 
   function stageView(): HTMLElement {
+    if (state.mode === 'cut') {
+      return cutStageView(ctx);
+    }
     if (state.mode === 'align') {
       return alignmentStageView(ctx);
     }
@@ -234,6 +277,15 @@ export function mountWorkbench(
   }
 
   function renderFilmstrip(): void {
+    // The strip is the cut face's timeline: a Draft or an Export has nothing to
+    // scrub here, so it would only take height away from them. Collapsed, it
+    // keeps a hairline so the layout does not jump when the face changes.
+    const wanted = state.mode === 'cut';
+    filmstrip.hidden = !wanted;
+    if (!wanted) {
+      filmstrip.innerHTML = '';
+      return;
+    }
     filmstripView(ctx);
   }
 
@@ -254,6 +306,10 @@ export function mountWorkbench(
       contextPill.textContent = `export ${state.target.target}`;
       return;
     }
+    if (state.target.kind === 'character') {
+      contextPill.textContent = `character ${state.target.characterId}`;
+      return;
+    }
     if (state.recordingId) {
       contextPill.textContent = `${state.recordingId} · frame ${state.frame}`;
       return;
@@ -263,18 +319,20 @@ export function mountWorkbench(
 
   // --- modes ----------------------------------------------------------------
   function setMode(mode: WorkbenchMode): void {
-    state.mode = mode;
-    root.dataset.mode = mode;
-    for (const button of modeButtons) {
-      const on = button.dataset.mode === mode;
-      button.classList.toggle('on', on);
-      button.setAttribute('aria-pressed', String(on));
-    }
+    const from = state.mode;
+    // A face only exists while the open target has it, so a request for a face it
+    // does not have falls back to the target's opening face instead of a blank one.
+    state.mode = facesFor(state.target).includes(mode) ? mode : defaultFace(state.target);
+    root.dataset.mode = state.mode;
+    renderModes();
     renderStage();
+    renderFilmstrip();
     renderInspector();
+    // The pill names what the face is showing, so a mode change refreshes it too.
+    renderContext();
 
     // Entering Alignment loads the Character's Canvas and offsets.
-    if (mode === 'align') {
+    if (state.mode === 'align') {
       const characterId =
         state.target.kind === 'draft'
           ? state.target.characterId
@@ -285,8 +343,10 @@ export function mountWorkbench(
         track(loadAlignment(characterId));
       }
     }
-    // Entering Export refreshes the live manifest of the loaded target.
-    if (mode === 'export' && state.target.kind === 'export') {
+    // Entering Export refreshes the live manifest. A load ends by opening its own
+    // face, so this only fires on the transition — otherwise the read would
+    // re-enter itself forever.
+    if (from !== 'export' && state.mode === 'export' && state.target.kind === 'export') {
       track(loadExport(state.target.target));
     }
   }
@@ -337,11 +397,19 @@ export function mountWorkbench(
     state.target = { kind: 'recording', recordingId };
     state.recordingId = recordingId;
     state.frame = 0;
+    state.selectedCut = null;
+    state.selection = null;
     state.cutList = await api.readCutList(recordingId);
+    // Delays feed playback only; a Recording that cannot report them still scrubs,
+    // so the fallback is a plain frame rate rather than a failed load.
+    state.recordingDelaysMs = await api
+      .readRecordingDelays(recordingId)
+      .then((delays) => delays.delaysMs)
+      .catch(() => []);
+    stopPlayback(state);
     state.loadError = null;
-    if (state.mode !== 'clip') {
-      setMode('clip');
-    }
+    // Cutting is the only face a Recording has, so it is where a load lands.
+    setMode(defaultFace(state.target));
     renderLibrary();
     renderStage();
     renderFilmstrip();
@@ -357,9 +425,7 @@ export function mountWorkbench(
     state.draftDescriptor = await api.readClipDraft(characterId, draftId);
     state.repair = await api.readRepair(characterId, draftId);
     state.loadError = null;
-    if (state.mode !== 'clip') {
-      setMode('clip');
-    }
+    setMode(defaultFace(state.target));
     renderLibrary();
     renderStage();
     renderContext();
@@ -400,9 +466,7 @@ export function mountWorkbench(
     // Opening an Asset drops you on the face that can act on it: the clip face for
     // playback and fork, the alignment face for a Sequence's composition.
     state.loadError = null;
-    if (state.mode !== 'clip') {
-      setMode('clip');
-    }
+    setMode(defaultFace(state.target));
     renderLibrary();
     renderStage();
     renderContext();
@@ -413,6 +477,7 @@ export function mountWorkbench(
     state.target = { kind: 'export', target };
     state.manifest = await api.readManifest(target);
     state.loadError = null;
+    setMode(defaultFace(state.target));
     renderLibrary();
     renderStage();
     renderInspector();
@@ -441,6 +506,24 @@ export function mountWorkbench(
     return guarded(() => readAlignment(characterId), () => {
       state.alignment = null;
     });
+  }
+
+  /**
+   * Open a Character itself.
+   *
+   * A Character owns no pixels, only the Canvas every Asset is aligned to, so its
+   * one face is Alignment. Setting the target first means the inspector and the
+   * mode bar both follow the Character, not whatever was open before.
+   */
+  function loadCharacter(characterId: string): Promise<void> {
+    state.target = { kind: 'character', characterId };
+    state.activeCharacterId = characterId;
+    // `setMode('align')` already tracks the alignment read for the active
+    // Character, so it is the one place the load is kicked off.
+    setMode(defaultFace(state.target));
+    renderLibrary();
+    renderContext();
+    return lastLoad;
   }
 
   function loadExport(target: string): Promise<void> {
@@ -482,9 +565,10 @@ export function mountWorkbench(
   }
 
   // --- initial render -------------------------------------------------------
-  setMode('clip');
+  // Nothing is open, so the only face is the empty Clip editor; `setMode` renders
+  // the bar, the stage and the filmstrip together.
+  setMode(defaultFace(state.target));
   renderLibrary();
-  renderFilmstrip();
   renderContext();
   renderInspector();
 
@@ -525,6 +609,7 @@ export function mountWorkbench(
     setMode,
     loadRecording: openRecording,
     loadDraft: openDraft,
+    loadCharacter,
     loadAlignment: openAlignment,
     loadExport: openExport,
     settled: () => lastLoad,

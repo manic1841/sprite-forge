@@ -30,6 +30,7 @@ import {
   extractClipDraft,
   ForgeError,
   forkAsset,
+  frameCanvasFromSegment,
   ingestRecording,
   readAssetSheet,
   readCharacterAlignment,
@@ -40,6 +41,7 @@ import {
   readDraftRepairFrame,
   readCutList,
   readExportManifest,
+  readRecordingDelays,
   readRecordingFrame,
   readSequence,
   removeSegment,
@@ -167,6 +169,27 @@ export async function handleApiRequest(
           characterId,
           width: requiredNumber(body, 'width'),
           height: requiredNumber(body, 'height'),
+        }),
+      );
+    }
+
+    // /api/characters/<characterId>/frame-canvas — frame a blank Character from a
+    // Segment (replaces the provisional Canvas; grow-only once work exists).
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'frame-canvas' &&
+      segments.length === 4
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      const body = asRecord(request.body);
+      const cutId = requiredOptionalString(body, 'cutId');
+      return ok(
+        await frameCanvasFromSegment(storeRoot, {
+          characterId,
+          recordingId: requiredString(body, 'recordingId'),
+          ...(cutId === undefined ? {} : { cutId }),
         }),
       );
     }
@@ -325,6 +348,15 @@ export async function handleApiRequest(
       return { status: 200, body: frame.data, contentType: frame.contentType };
     }
 
+    // GET /api/recordings/<recordingId>/delays — per-frame delays for playback.
+    if (
+      method === 'GET' &&
+      matches(segments, ['api', 'recordings', segments[2] ?? '', 'delays'])
+    ) {
+      const recordingId = decodeURIComponent(segments[2]!);
+      return ok(await readRecordingDelays(storeRoot, recordingId));
+    }
+
     // GET /api/recordings/<recordingId>/anchor?cut=<cutId> — preview a derived Canvas.
     if (
       method === 'GET' &&
@@ -340,16 +372,27 @@ export async function handleApiRequest(
       );
     }
 
-    // POST /api/characters — create a Character.
+    // POST /api/characters — create a Character. A body without a Canvas starts it
+    // on the provisional blank Canvas; framing is derived or expanded afterwards.
     if (method === 'POST' && matches(segments, ['api', 'characters'])) {
       const body = asRecord(request.body);
+      const width = optionalNumber(body, 'width');
+      const height = optionalNumber(body, 'height');
+      const anchorX = optionalNumber(body, 'anchorX');
+      const anchorY = optionalNumber(body, 'anchorY');
+      const canvas =
+        width === undefined || height === undefined
+          ? {}
+          : {
+              width,
+              height,
+              anchor: { x: anchorX ?? width / 2, y: anchorY ?? height },
+            };
       return {
         status: 201,
         body: await createCharacter(storeRoot, {
           characterId: requiredString(body, 'id'),
-          width: requiredNumber(body, 'width'),
-          height: requiredNumber(body, 'height'),
-          anchor: { x: requiredNumber(body, 'anchorX'), y: requiredNumber(body, 'anchorY') },
+          ...canvas,
         }),
       };
     }

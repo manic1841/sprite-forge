@@ -8,7 +8,7 @@
 // contextual inspector. Behaviour that cannot be pinned structurally (dragging a
 // range edge, real painting) is verified by running `pnpm web` against a temp store.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountWorkbench, slugifyId } from '../src/web/client/app.js';
 import { clampRange } from '../src/web/client/timeline.js';
 import type { WorkbenchApi } from '../src/web/client/api.js';
@@ -87,6 +87,10 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
       delaysMs: [50, 50, 60, 50],
     }),
     readCutList: async () => CUTS,
+    readRecordingDelays: async (recordingId) => ({
+      recordingId,
+      delaysMs: [50, 50, 60, 50, 50, 50, 50, 50],
+    }),
     addSegment: async () => CUTS,
     setSegmentRange: async () => CUTS,
     removeSegment: async () => CUTS,
@@ -125,6 +129,7 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
       rebakedSequences: [],
       repairWarnings: [],
     }),
+    frameCanvas: async () => ALIGNMENT.canvas,
     sheetUrl: (characterId, kind, id) =>
       `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet`,
     exportCharacter: async () => EXPORT_RESULT,
@@ -224,11 +229,80 @@ beforeEach(() => {
   document.body.innerHTML = '';
   container = document.createElement('div');
   document.body.appendChild(container);
-  // jsdom leaves confirm()/prompt() unimplemented; without a stub every
-  // confirmation resolves falsy and the action silently never runs.
-  vi.spyOn(window, 'confirm').mockReturnValue(true);
-  vi.spyOn(window, 'prompt').mockReturnValue(null);
 });
+
+/**
+ * Answer the in-page dialog.
+ *
+ * The workbench does not use `window.confirm`/`prompt` — the embedded browser
+ * throws on `prompt()` — so a confirmation is a node to click. It is appended
+ * synchronously by the click that raised it, so this may follow that click
+ * immediately; the action's own promise still needs `settled()` afterwards.
+ *
+ * `value` fills the ask's input, which is only present for a prompt.
+ */
+function answerDialog(accept = true, value?: string): void {
+  const input = document.querySelector<HTMLInputElement>('[data-dialog-input]');
+  if (input && value !== undefined) {
+    input.value = value;
+  }
+  const selector = accept ? '[data-dialog-confirm]' : '[data-dialog-cancel]';
+  document.querySelector<HTMLElement>(selector)!.click();
+}
+
+/**
+ * Open one of the rail's create forms from its section `+`.
+ *
+ * The rail lists what exists; the Import and New Character forms are revealed on
+ * demand so the index is never interrupted by empty inputs.
+ */
+function openRailForm(
+  wb: ReturnType<typeof mountWorkbench>,
+  form: 'import' | 'character',
+): HTMLElement {
+  const selector = form === 'import' ? '[data-rail-import-add]' : '[data-rail-character-add]';
+  wb.root.querySelector<HTMLElement>(selector)!.click();
+  return wb.root.querySelector('[data-region="rail"]')!;
+}
+
+/**
+ * Open a Character in the rail so the Drafts and Assets it owns are rendered.
+ *
+ * They are nested under it and only shown while it is open, so a test that reads
+ * one has to open the owner first.
+ */
+async function openCharacter(
+  wb: ReturnType<typeof mountWorkbench>,
+  characterId: string,
+): Promise<void> {
+  wb.root.querySelector<HTMLElement>(`[data-character="${characterId}"]`)!.click();
+  await wb.settled();
+}
+
+/**
+ * Select a Segment from the Library rail.
+ *
+ * Segments are edited against a selection (a rail row, or a band on the strip),
+ * so the buttons only exist once one is picked.
+ */
+async function selectSegment(
+  wb: ReturnType<typeof mountWorkbench>,
+  cutId: string,
+): Promise<void> {
+  wb.root.querySelector<HTMLElement>(`[data-region="rail"] [data-segment="${cutId}"]`)!.click();
+  await wb.settled();
+}
+
+/** Mark the current frame as a one-frame range and save it under `id`. */
+async function saveSegmentAtPlayhead(
+  wb: ReturnType<typeof mountWorkbench>,
+  id: string,
+): Promise<void> {
+  wb.root.querySelector<HTMLElement>('[data-pick-start]')!.click();
+  wb.root.querySelector<HTMLElement>('[data-pick-save]')!.click();
+  answerDialog(true, id);
+  await wb.settled();
+}
 
 describe('the workbench shell', () => {
   it('renders the four persistent regions', async () => {
@@ -241,7 +315,19 @@ describe('the workbench shell', () => {
     expect(wb.root.querySelector('[data-region="filmstrip"]')).not.toBeNull();
   });
 
-  it('swaps the stage and contextually re-renders the inspector when the mode changes', async () => {
+  it('lists Characters above Recordings: work starts at a Character', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    // A Recording is source material fed into a Character, so it comes second.
+    expect(
+      [...wb.root.querySelectorAll('[data-region="rail"] [data-library-section]')].map(
+        (el) => (el as HTMLElement).dataset.librarySection,
+      ),
+    ).toEqual(['characters', 'recordings', 'exports']);
+  });
+
+  it('offers only the faces the open target has, and swaps the stage between them', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
 
@@ -249,34 +335,66 @@ describe('the workbench shell', () => {
     const inspector = wb.root.querySelector('[data-region="inspector"]');
     const filmstrip = wb.root.querySelector('[data-region="filmstrip"]');
     const stage = wb.root.querySelector('[data-region="stage"]');
-    const railHtml = rail!.innerHTML;
-    const filmstripHtml = filmstrip!.innerHTML;
+    const header = wb.root.querySelector('[data-region="context-bar"]');
 
+    // Nothing open: there is one face and nothing to switch to.
     expect(wb.mode).toBe('clip');
     expect(stage!.querySelector('[data-stage-view="clip-editor"]')).not.toBeNull();
     expect((inspector as HTMLElement).dataset.inspectorFor).toBe('clip');
+    expect(wb.root.querySelector('[data-mode="export"]')).toBeNull();
 
-    wb.root.querySelector<HTMLElement>('[data-mode="export"]')!.click();
+    // A Draft has the Clip editor, Alignment and Export, and no filmstrip to scrub.
+    await wb.loadDraft('hero', 'wip');
+    expect((filmstrip as HTMLElement).hidden).toBe(true);
+    expect(
+      [...wb.root.querySelectorAll('[data-mode]')].map((el) => (el as HTMLElement).dataset.mode),
+    ).toEqual(['clip', 'align', 'export']);
+    // The faces are short, single words: a set of views, not sentences.
+    expect(
+      [...wb.root.querySelectorAll('[data-mode]')].map((el) => el.textContent),
+    ).toEqual(['Clip', 'Align', 'Export']);
+
+    // The header is outside the stage, so a face switch cannot rebuild it.
+    expect(stage!.querySelector('[data-mode]')).toBeNull();
+
+    // Opening the Draft does mark it in the rail; that snapshot is what must survive.
+    const railHtml = rail!.innerHTML;
+    wb.root.querySelector<HTMLElement>('[data-mode="align"]')!.click();
+    await wb.settled();
 
     // The stage is the region whose committed view swaps.
-    expect(wb.mode).toBe('export');
-    expect(stage!.querySelector('[data-stage-view="export"]')).not.toBeNull();
+    expect(wb.mode).toBe('align');
+    expect(stage!.querySelector('[data-stage-view="alignment"]')).not.toBeNull();
     expect(stage!.querySelector('[data-stage-view="clip-editor"]')).toBeNull();
 
-    // Every region persists as a node; rail and filmstrip are never touched.
+    // Every region persists as a node; the header and the rail are never touched.
     expect(wb.root.querySelector('[data-region="rail"]')).toBe(rail);
     expect(wb.root.querySelector('[data-region="inspector"]')).toBe(inspector);
     expect(wb.root.querySelector('[data-region="filmstrip"]')).toBe(filmstrip);
+    expect(wb.root.querySelector('[data-region="context-bar"]')).toBe(header);
     expect(rail!.innerHTML).toBe(railHtml);
-    expect(filmstrip!.innerHTML).toBe(filmstripHtml);
+    // The breadcrumb is unchanged too: the face changed, not the thing.
+    expect(wb.root.querySelector('[data-region="context"]')!.textContent).toContain('hero/wip');
 
-    // The inspector region persists, but its content is contextual to the mode.
-    expect((inspector as HTMLElement).dataset.inspectorFor).toBe('export');
+    // The inspector region persists, but its content is contextual to the face.
+    expect((inspector as HTMLElement).dataset.inspectorFor).toBe('align');
+  });
+
+  it('clamps to a face the target has when asked for one it does not', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    await wb.loadRecording('idle');
+    expect(wb.mode).toBe('cut');
+
+    // A Recording has no Alignment face, so the request falls back to Cutting.
+    wb.setMode('align');
+    expect(wb.mode).toBe('cut');
   });
 });
 
 describe('the Library', () => {
-  it('lists Recordings and committed Assets from the store scan', async () => {
+  it('lists Recordings, and a Character with what it owns', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
 
@@ -284,16 +402,36 @@ describe('the Library', () => {
     const recordings = [...rail.querySelectorAll('[data-recording]')].map(
       (el) => (el as HTMLElement).dataset.recording,
     );
+
+    expect(recordings).toEqual(['idle', 'fat-walk']);
+    // Nothing of the Character's is listed until it is opened: only the open
+    // branch is expanded, which is what keeps the rail one screen tall.
+    expect(rail.querySelector('[data-asset]')).toBeNull();
+    expect(rail.querySelector('[data-character="hero"]')).not.toBeNull();
+
+    await openCharacter(wb, 'hero');
     const assets = [...rail.querySelectorAll('[data-asset]')].map((el) => ({
       id: (el as HTMLElement).dataset.asset,
       kind: (el as HTMLElement).dataset.assetKind,
     }));
-
-    expect(recordings).toEqual(['idle', 'fat-walk']);
     expect(assets).toEqual([
       { id: 'walk', kind: 'clip' },
       { id: 'greeting', kind: 'sequence' },
     ]);
+  });
+
+  it('collapses a Character again when another one is opened', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    await openCharacter(wb, 'hero');
+    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    expect(rail.querySelector('[data-asset]')).not.toBeNull();
+
+    // Opening a Draft keeps that Character open — it is the Draft's owner.
+    rail.querySelector<HTMLElement>('[data-draft="wip"]')!.click();
+    await wb.settled();
+    expect(rail.querySelector('[data-asset]')).not.toBeNull();
   });
 
   it('makes a Recording the active item when it is clicked', async () => {
@@ -360,10 +498,144 @@ describe('the filmstrip', () => {
   });
 });
 
+describe('playing a Recording back', () => {
+  /** Playback is timer-driven, so these run on fake timers from a loaded Recording. */
+  async function playing(): Promise<ReturnType<typeof mountWorkbench>> {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    return wb;
+  }
+
+  const play = (wb: ReturnType<typeof mountWorkbench>): void => {
+    wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-recording-play]')!.click();
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    // A pending playback tick would otherwise survive the timer swap and keep
+    // rescheduling itself on real timers, so the process never exits.
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('advances from the selected frame at the Recording’s own delays', async () => {
+    const wb = await playing();
+
+    wb.root.querySelector<HTMLElement>('[data-frame="2"]')!.click();
+    play(wb);
+    expect(wb.activeFrame).toBe(2);
+
+    vi.advanceTimersByTime(60);
+    expect(wb.activeFrame).toBe(3);
+
+    // The big preview and the strip follow the frame without a re-render.
+    const image = wb.root.querySelector<HTMLImageElement>('[data-recording-frame]')!;
+    expect(image.getAttribute('src')).toBe('/api/recordings/idle/frames/3');
+    expect(wb.root.querySelector('[data-region="filmstrip"]')!.getAttribute('data-active-frame'))
+      .toBe('3');
+  });
+
+  it("stops at the Segment's last frame and resets the toggle", async () => {
+    const wb = await playing();
+    play(wb);
+
+    vi.advanceTimersByTime(50 * (CUTS.frameCount + 2));
+
+    // "walk" is [1, 4), so the run ends on frame 3 and never enters "turn".
+    expect(wb.activeFrame).toBe(3);
+    const button = wb.root.querySelector<HTMLElement>('[data-recording-play]')!;
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(button.textContent).toBe('▶ Play');
+  });
+
+  it('toggles to Pause, and pausing leaves the frame where it is', async () => {
+    const wb = await playing();
+    play(wb);
+
+    const button = wb.root.querySelector<HTMLElement>('[data-recording-play]')!;
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(button.textContent).toBe('⏸ Pause');
+
+    vi.advanceTimersByTime(50);
+    const paused = wb.activeFrame;
+    button.click();
+    vi.advanceTimersByTime(500);
+
+    expect(wb.activeFrame).toBe(paused);
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('plays only the Segment the playhead is in, stopping at its end', async () => {
+    const wb = await playing();
+    // "walk" covers [1, 4): playing from inside it runs to 3 and no further.
+    wb.root.querySelector<HTMLElement>('[data-frame="2"]')!.click();
+    play(wb);
+
+    expect(wb.activeFrame).toBe(2);
+    vi.advanceTimersByTime(50 * 20);
+
+    expect(wb.activeFrame).toBe(3);
+    expect(wb.root.querySelector<HTMLElement>('[data-recording-play]')!.getAttribute(
+      'aria-pressed',
+    )).toBe('false');
+  });
+
+  it('replays a Segment from its start when played at its last frame', async () => {
+    const wb = await playing();
+    // Frame 7 is the last frame of "turn" [5, 8).
+    wb.root.querySelector<HTMLElement>('[data-frame="7"]')!.click();
+
+    play(wb);
+
+    expect(wb.activeFrame).toBe(5);
+  });
+
+  it('plays the Segment after the playhead when it sits before the first cut', async () => {
+    const wb = await playing();
+    // Frame 0 is before the first cut, so the playhead resolves to "walk" [1, 4).
+    expect(wb.activeFrame).toBe(0);
+    play(wb);
+
+    expect(wb.activeFrame).toBe(1);
+    vi.advanceTimersByTime(50 * 20);
+
+    expect(wb.activeFrame).toBe(3);
+  });
+
+  it('plays the whole Recording only when it has no Segment at all', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({ readCutList: async () => ({ ...CUTS, cuts: [] }) }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    play(wb);
+    vi.advanceTimersByTime(50 * 20);
+
+    expect(wb.activeFrame).toBe(CUTS.frameCount - 1);
+  });
+
+  it('takes over from playback when a frame is picked by hand', async () => {
+    const wb = await playing();
+    play(wb);
+    vi.advanceTimersByTime(50);
+
+    wb.root.querySelector<HTMLElement>('[data-frame="6"]')!.click();
+    vi.advanceTimersByTime(500);
+
+    expect(wb.activeFrame).toBe(6);
+  });
+});
+
 describe('the Clip editor stage', () => {
   it('lists Drafts in the Library and makes one active on click', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
+    await openCharacter(wb, 'hero');
 
     const draftItems = wb.root.querySelectorAll('[data-region="rail"] [data-draft]');
     expect([...draftItems].map((el) => (el as HTMLElement).dataset.draft)).toEqual(['wip']);
@@ -422,10 +694,11 @@ describe('the Clip editor stage', () => {
     expect(keys).toEqual(
       expect.arrayContaining(['character', 'draft', 'recording', 'frames', 'frame', 'delay']),
     );
-    // The slot #27 extends (brush colour/size + operation list).
+    // The log stays in the inspector; the tools themselves moved to the stage.
     expect(
-      inspector.querySelector('[data-inspector-section="repair"] [data-repair-controls]'),
+      inspector.querySelector('[data-inspector-section="repair"] [data-repair-log]'),
     ).not.toBeNull();
+    expect(wb.root.querySelector('[data-region="stage"] [data-repair-bar]')).not.toBeNull();
   });
 
   it('keeps the active Draft when the mode changes, swapping only the stage', async () => {
@@ -450,14 +723,12 @@ describe('the Clip editor stage', () => {
 });
 
 describe('the Clip editor Repair controls', () => {
-  it('renders the brush, eyedropper, scope, undo and operation list in the slot', async () => {
+  it('renders the brush, eyedropper, scope, undo under the frame and the log beside it', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
     await wb.loadDraft('hero', 'wip');
 
-    const controls = wb.root.querySelector(
-      '[data-inspector-section="repair"] [data-repair-controls]',
-    )!;
+    const controls = wb.root.querySelector('[data-region="stage"] [data-repair-bar]')!;
     expect(controls).not.toBeNull();
     expect(controls.querySelector('[data-repair-tool="paint"]')).not.toBeNull();
     expect(controls.querySelector('[data-repair-tool="erase"]')).not.toBeNull();
@@ -467,7 +738,10 @@ describe('the Clip editor Repair controls', () => {
     expect(controls.querySelector('[data-repair-size]')).not.toBeNull();
     expect(controls.querySelector('[data-repair-scope]')).not.toBeNull();
     expect(controls.querySelector('[data-repair-undo]')).not.toBeNull();
-    expect(controls.querySelector('[data-repair-ops]')).not.toBeNull();
+    // The operations are read, not reached for: they stay in the inspector.
+    expect(
+      wb.root.querySelector('[data-inspector-section="repair"] [data-repair-ops]'),
+    ).not.toBeNull();
   });
 
   it('reflects a Draft’s existing Repair in the operation list', async () => {
@@ -510,8 +784,8 @@ describe('the Alignment stage', () => {
   it('ghosts Clips on the shared Canvas against the Anchor', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
-    wb.setMode('align');
-    await wb.settled();
+    // A Character's one face is Alignment, so opening it is how you get here.
+    await wb.loadCharacter('hero');
 
     const view = wb.root.querySelector('[data-stage-view="alignment"]')!;
     const canvas = view.querySelector('[data-alignment-canvas]') as HTMLElement;
@@ -705,7 +979,7 @@ describe('importing a capture', () => {
     });
     await wb.ready;
 
-    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const rail = openRailForm(wb, 'import');
     const fileInput = rail.querySelector<HTMLInputElement>('[data-import-file]')!;
     const idInput = rail.querySelector<HTMLInputElement>('[data-import-id]')!;
     expect(idInput.value).toBe('');
@@ -727,7 +1001,7 @@ describe('importing a capture', () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
 
-    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const rail = openRailForm(wb, 'import');
     const fileInput = rail.querySelector<HTMLInputElement>('[data-import-file]')!;
     const idInput = rail.querySelector<HTMLInputElement>('[data-import-id]')!;
 
@@ -749,7 +1023,7 @@ describe('importing a capture', () => {
     });
     await wb.ready;
 
-    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const rail = openRailForm(wb, 'import');
     const fileInput = rail.querySelector<HTMLInputElement>('[data-import-file]')!;
     Object.defineProperty(fileInput, 'files', { value: [gifFile()], configurable: true });
     fileInput.dispatchEvent(new Event('change'));
@@ -766,7 +1040,7 @@ describe('importing a capture', () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
 
-    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const rail = openRailForm(wb, 'import');
     rail.querySelector<HTMLFormElement>('[data-import-form]')!.requestSubmit();
     await wb.settled();
 
@@ -787,7 +1061,7 @@ describe('the recording workspace', () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
 
-    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    const rail = openRailForm(wb, 'import');
     const form = rail.querySelector('[data-import-form]')!;
     const first = rail.querySelector('[data-recording]')!;
 
@@ -811,14 +1085,15 @@ describe('the recording workspace', () => {
     );
   });
 
-  it('adds, renames and deletes segments from the stage', async () => {
+  it('saves a marked range as a Segment, then renames and deletes it', async () => {
     const added: unknown[] = [];
     const removed: string[] = [];
     const wb = mountWorkbench(container, {
       api: fakeApi({
         addSegment: async (_id, segment) => {
           added.push(segment);
-          return CUTS;
+          // The store answers with the cut list it now holds, so the new cut is in it.
+          return { ...CUTS, cuts: [...CUTS.cuts, { ...segment, id: segment.id }] };
         },
         removeSegment: async (_id, cutId) => {
           removed.push(cutId);
@@ -829,19 +1104,16 @@ describe('the recording workspace', () => {
     await wb.ready;
     await wb.loadRecording('idle');
 
-    const stage = wb.root.querySelector('[data-region="stage"]')!;
-    (stage.querySelector('[data-segment-id]') as HTMLInputElement).value = 'jump';
-    (stage.querySelector('[data-segment-start]') as HTMLInputElement).value = '2';
-    (stage.querySelector('[data-segment-end]') as HTMLInputElement).value = '5';
-    (stage.querySelector('[data-segment-add]') as HTMLFormElement).requestSubmit();
-    await wb.settled();
+    // Cutting is a gesture on the strip: mark from the playhead, then save it.
+    wb.root.querySelector<HTMLElement>('[data-frame="2"]')!.click();
+    await saveSegmentAtPlayhead(wb, 'jump');
+    expect(added).toEqual([{ id: 'jump', startFrame: 2, endFrame: 3 }]);
 
-    expect(added).toEqual([{ id: 'jump', startFrame: 2, endFrame: 5 }]);
-
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    stage.querySelector<HTMLElement>('[data-segment-delete="walk"]')!.click();
+    const inspector = wb.root.querySelector('[data-region="inspector"]')!;
+    inspector.querySelector<HTMLElement>('[data-segment-delete="jump"]')!.click();
+    answerDialog();
     await wb.settled();
-    expect(removed).toEqual(['walk']);
+    expect(removed).toEqual(['jump']);
   });
 
   it('keeps a segment when the delete confirmation is dismissed', async () => {
@@ -858,15 +1130,16 @@ describe('the recording workspace', () => {
     await wb.loadRecording('idle');
 
     vi.spyOn(window, 'confirm').mockReturnValue(false);
-    const stage = wb.root.querySelector('[data-region="stage"]')!;
-    stage.querySelector<HTMLElement>('[data-segment-delete="walk"]')!.click();
+    await selectSegment(wb, 'walk');
+    const inspector = wb.root.querySelector('[data-region="inspector"]')!;
+    inspector.querySelector<HTMLElement>('[data-segment-delete="walk"]')!.click();
+    answerDialog(false);
     await wb.settled();
     expect(removed).toEqual([]);
   });
 
-  it('renames a segment through the prompt', async () => {
+  it('renames a segment through the ask', async () => {
     const renamed: string[] = [];
-    vi.spyOn(window, 'prompt').mockReturnValue('stride');
     const wb = mountWorkbench(container, {
       api: fakeApi({
         renameSegment: async (_id, cutId, newId) => {
@@ -878,12 +1151,14 @@ describe('the recording workspace', () => {
     await wb.ready;
     await wb.loadRecording('idle');
 
+    await selectSegment(wb, 'walk');
     wb.root.querySelector<HTMLElement>('[data-segment-rename="walk"]')!.click();
+    answerDialog(true, 'stride');
     await wb.settled();
     expect(renamed).toEqual(['walk->stride']);
   });
 
-  it('creates a Character from the derived framing', async () => {
+  it('creates a blank Character without needing a Recording', async () => {
     const created: Array<{ id: string; canvas: unknown }> = [];
     const wb = mountWorkbench(container, {
       api: fakeApi({
@@ -894,17 +1169,89 @@ describe('the recording workspace', () => {
       }),
     });
     await wb.ready;
-    await wb.loadRecording('idle');
 
-    const stage = wb.root.querySelector('[data-region="stage"]')!;
-    (stage.querySelector('[data-character-id]') as HTMLInputElement).value = 'hero';
-    (stage.querySelector('[data-character-add]') as HTMLFormElement).requestSubmit();
+    // Characters are their own Library level, so the form opens in the rail, not
+    // under the Recording's frame.
+    const rail = openRailForm(wb, 'character');
+    (rail.querySelector('[data-character-id]') as HTMLInputElement).value = 'hero';
+    (rail.querySelector('[data-character-add]') as HTMLFormElement).requestSubmit();
     await wb.settled();
 
-    // The Canvas is explicit: it comes from the derived Anchor, not from later.
-    expect(created).toEqual([
-      { id: 'hero', canvas: { width: 4, height: 6, anchorX: 2, anchorY: 6 } },
-    ]);
+    // No Canvas: the Character starts on the provisional one and is framed later.
+    expect(created).toEqual([{ id: 'hero', canvas: undefined }]);
+    // A new Character opens on its Alignment face.
+    expect(wb.mode).toBe('align');
+  });
+
+  it('opens a Character from the Library on its Alignment face', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+
+    const rail = wb.root.querySelector('[data-region="rail"]')!;
+    rail.querySelector<HTMLElement>('[data-character="hero"]')!.click();
+    await wb.settled();
+
+    expect(wb.mode).toBe('align');
+    expect(wb.alignment).not.toBeNull();
+    expect(wb.root.querySelector('[data-alignment-canvas]')).not.toBeNull();
+  });
+
+  /**
+   * The Alignment face is where a Character lands, so that is where footage is
+   * opened: the inspector carries the Recording picker and the way to import one
+   * when none exist yet.
+   */
+  it('opens a Recording for the Character from its Alignment inspector', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+
+    const form = wb.root.querySelector<HTMLFormElement>(
+      '[data-character-recording-form]',
+    )!;
+    expect(form).not.toBeNull();
+    (form.querySelector('[data-character-recording]') as HTMLSelectElement).value = 'fat-walk';
+    form.requestSubmit();
+    await wb.settled();
+
+    expect(wb.activeRecording).toBe('fat-walk');
+  });
+
+  it('points an empty Character inspector at importing a Recording', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({ scan: async () => ({ ...SCAN, recordings: [] }) }),
+    });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+
+    const inspector = wb.root.querySelector('[data-region="inspector"]')!;
+    expect(inspector.querySelector('[data-character-recording-open]')).toBeNull();
+    inspector.querySelector<HTMLElement>('[data-character-recording-import]')!.click();
+    await wb.settled();
+
+    expect(wb.root.querySelector('[data-region="rail"] [data-import-file]')).not.toBeNull();
+  });
+
+  it('frames the Canvas from the open Recording', async () => {
+    const framed: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        frameCanvas: async (characterId, request) => {
+          framed.push({ characterId, ...request });
+          return ALIGNMENT.canvas;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    await wb.loadCharacter('hero');
+
+    const button = wb.root.querySelector<HTMLElement>('[data-frame-canvas-run]');
+    expect(button).not.toBeNull();
+    button!.click();
+    await wb.settled();
+
+    expect(framed).toEqual([{ characterId: 'hero', recordingId: 'idle' }]);
   });
 
   it('extracts a segment straight into a Draft on the same screen', async () => {
@@ -920,13 +1267,68 @@ describe('the recording workspace', () => {
     await wb.ready;
     await wb.loadRecording('idle');
 
+    await selectSegment(wb, 'walk');
     wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!.click();
+    // No target was chosen, so Extract asks which Character to use.
+    answerDialog();
     await wb.settled();
 
     expect(extracted).toEqual([{ characterId: 'hero', recordingId: 'idle', cutId: 'walk' }]);
     // The new Draft is open, so repair can start without leaving the stage.
     expect(wb.activeDraft).toEqual({ characterId: 'hero', draftId: 'wip' });
     expect(wb.root.querySelector('[data-draft-frame]')).not.toBeNull();
+  });
+
+  it('creates the Character on extract when there is none to point at', async () => {
+    const created: Array<{ id: string; canvas: unknown }> = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        scan: async () => ({ ...SCAN, characters: [] }),
+        deriveAnchor: async () =>
+          ({
+            frame: 0,
+            bounds: { x: 0, y: 0, width: 4, height: 6 },
+            anchor: { x: 2, y: 6 },
+            canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
+          }) as DerivedAnchor,
+        createCharacter: async (id, canvas) => {
+          created.push({ id, canvas });
+          return { id, dir: `characters/${id}` } as unknown as CreatedCharacter;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    await selectSegment(wb, 'walk');
+    const button = wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!;
+    // No Character exists at all, so the only thing to do is name one.
+    expect(button.textContent).toBe('Extract → New Character…');
+    button.click();
+    answerDialog(true, 'kitty');
+    await wb.settled();
+
+    // The new Character is framed from the Segment, so the pixels fit on arrival.
+    expect(created).toEqual([
+      { id: 'kitty', canvas: { width: 4, height: 6, anchorX: 2, anchorY: 6 } },
+    ]);
+    expect(wb.activeDraft).toEqual({ characterId: 'kitty', draftId: 'wip' });
+  });
+
+  it('leaves the Recording alone when the new Character is cancelled', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({ scan: async () => ({ ...SCAN, characters: [] }) }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    await selectSegment(wb, 'walk');
+    wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!.click();
+    answerDialog(false);
+    await wb.settled();
+
+    expect(wb.activeDraft).toBeNull();
+    expect(wb.root.querySelector('[data-segment-extract="walk"]')).not.toBeNull();
   });
 
   it('commits the open Draft into a Clip', async () => {
@@ -967,13 +1369,18 @@ describe('committed assets', () => {
       }),
     });
     await wb.ready;
+    await openCharacter(wb, 'hero');
 
+    // Opening a Character re-renders the rail; only the playback's own requests
+    // from here on are the ones under test.
+    sheets.length = 0;
     wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
     await wb.settled();
 
     // An asset is immutable, so opening one lands on a read-only playback face.
     expect(wb.mode).toBe('clip');
-    expect(sheets).toEqual(['hero/clip/walk']);
+    // The sheet is addressed once per render of the playback, always the same one.
+    expect(new Set(sheets)).toEqual(new Set(['hero/clip/walk']));
     const frame = wb.root.querySelector<HTMLElement>('[data-asset-frame]');
     expect(frame?.dataset.assetFrame).toBe('0');
     expect(wb.root.querySelector('[data-inspector-section="asset"]')).not.toBeNull();
@@ -982,8 +1389,8 @@ describe('committed assets', () => {
   it('steps the playback through the sheet without leaving the Asset', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
-    await (wb as unknown as { loadAsset: typeof wb.loadAlignment }) &&
-      wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
+    await openCharacter(wb, 'hero');
+    wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
     await wb.settled();
 
     const stage = wb.root.querySelector('[data-region="stage"]')!;
@@ -1005,6 +1412,7 @@ describe('committed assets', () => {
       }),
     });
     await wb.ready;
+    await openCharacter(wb, 'hero');
     wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
     await wb.settled();
 
@@ -1031,6 +1439,7 @@ describe('committed assets', () => {
       }),
     });
     await wb.ready;
+    await openCharacter(wb, 'hero');
     wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
     await wb.settled();
 
@@ -1051,11 +1460,13 @@ describe('committed assets', () => {
       }),
     });
     await wb.ready;
+    await openCharacter(wb, 'hero');
     wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
     await wb.settled();
 
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     wb.root.querySelector<HTMLElement>('[data-asset-delete]')!.click();
+    answerDialog();
     await wb.settled();
 
     expect(deleted).toEqual(['hero/clip/walk']);
@@ -1070,11 +1481,13 @@ describe('committed assets', () => {
       }),
     });
     await wb.ready;
+    await openCharacter(wb, 'hero');
     wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
     await wb.settled();
 
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     wb.root.querySelector<HTMLElement>('[data-asset-delete]')!.click();
+    answerDialog();
     await wb.settled();
 
     expect(wb.root.querySelector('[data-action-error]')?.textContent).toContain('greeting');
@@ -1087,6 +1500,7 @@ describe('sequence composition', () => {
   it('forks the Clip list into an editable composition', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
+    await openCharacter(wb, 'hero');
     wb.root.querySelector<HTMLElement>('[data-asset="greeting"]')!.click();
     await wb.settled();
 
@@ -1108,6 +1522,7 @@ describe('sequence composition', () => {
       }),
     });
     await wb.ready;
+    await openCharacter(wb, 'hero');
     wb.root.querySelector<HTMLElement>('[data-asset="greeting"]')!.click();
     await wb.settled();
     wb.root.querySelector<HTMLElement>('[data-sequence-edit]')!.click();
@@ -1142,6 +1557,7 @@ describe('export contract fields', () => {
       }),
     });
     await wb.ready;
+    await wb.loadCharacter('hero');
     wb.setMode('export');
 
     const stage = wb.root.querySelector('[data-region="stage"]')!;
@@ -1168,6 +1584,7 @@ describe('export contract fields', () => {
   it('keeps the half-typed form across a re-render', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
+    await wb.loadCharacter('hero');
     wb.setMode('export');
 
     const stage = wb.root.querySelector('[data-region="stage"]')!;
@@ -1176,7 +1593,7 @@ describe('export contract fields', () => {
       new Event('input'),
     );
     // A re-render of the stage (a mode toggle away and back) must not wipe it.
-    wb.setMode('clip');
+    wb.setMode('align');
     wb.setMode('export');
 
     expect(
@@ -1199,6 +1616,7 @@ describe('discard and store check', () => {
     await wb.loadDraft('hero', 'wip');
 
     wb.root.querySelector<HTMLElement>('[data-discard-draft]')!.click();
+    answerDialog();
     await wb.settled();
 
     expect(discarded).toEqual(['hero/wip']);

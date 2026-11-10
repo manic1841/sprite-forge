@@ -64,7 +64,16 @@
 
 .wb-shell .workbench {
   display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
+}
+
+/* The three columns share one row under the header, so the header can span the
+   full width and never move when a face changes. */
+.wb-shell .shell-body {
+  display: flex;
+  flex: 1;
   min-height: 0;
 }
 
@@ -88,6 +97,23 @@
   border-left: 1px solid var(--u-line-2);
 }
 
+/* On a desktop the rail is an index to be scanned, not a scroll pane: the levels
+   are compact and only the open Character expands, so an ordinary store fits the
+   window. The scroll pane stays for stores that outgrow it. */
+@media (min-width: 860px) {
+  .wb-shell .rail {
+    padding: 12px 12px 14px;
+  }
+
+  .wb-shell .rail .asset {
+    padding: 4px 8px;
+  }
+
+  .wb-shell .char-body .asset {
+    padding: 2px 6px;
+  }
+}
+
 .wb-shell .centre {
   display: flex;
   flex-direction: column;
@@ -98,10 +124,12 @@
 
 /* ------------------------------------------------------------------ chrome */
 
-.wb-shell .modes {
+/* The header is the shell's: breadcrumb left, faces right. It is a row of its
+   own so a face switch re-lights a button instead of rebuilding the bar. */
+.wb-shell .context-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
   flex: none;
   height: 48px;
   padding: 0 14px;
@@ -109,8 +137,14 @@
   background: var(--u-bg);
 }
 
-.wb-shell .pill {
+.wb-shell .faces {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
+}
+
+.wb-shell .pill {
   padding: 3px 9px;
   border-radius: 999px;
   background: var(--u-tint);
@@ -119,6 +153,8 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ----------------------------------------------------------------- buttons */
@@ -168,7 +204,6 @@
 
 /* inside the mock the one action of a form is an accent outline, not a second
    solid: the page's own solid pill stays the only filled button on screen */
-.wb-shell .import .btn,
 .wb-shell .export-form .btn:last-of-type,
 .wb-shell .commit-row .btn:last-child {
   border: 1px solid var(--u-accent);
@@ -177,7 +212,6 @@
   font-weight: 600;
 }
 
-.wb-shell .import .btn:hover,
 .wb-shell .export-form .btn:last-of-type:hover,
 .wb-shell .commit-row .btn:last-child:hover:not(:disabled) {
   background: color-mix(in oklab, var(--u-accent) 22%, var(--u-bg));
@@ -211,18 +245,28 @@
 
 /* ------------------------------------------------------------- rail lists */
 
+/* One heading scheme for the whole shell, in the product's own typeface rather than
+the mono capitals: the rail's sections and the inspector's are the same rank, so
+they share a rule. Region titles are the only emphasis; every level below them is
+carried by colour and spacing, not by shouting. */
 .wb-shell .ttl {
   margin: 0 0 8px;
-  font: 500 11px/1.4 var(--ui-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--u-muted);
+  font: 600 13px/1.4 var(--ui-font);
+  letter-spacing: 0;
+  color: var(--u-ink);
 }
 
 .wb-shell .ttl.sub {
   margin-top: 12px;
-  font-size: 10.5px;
-  letter-spacing: 0.12em;
+  font: 500 11.5px/1.4 var(--ui-font);
+  letter-spacing: 0;
+  color: var(--u-muted);
+}
+
+/* a third level, for the labels inside a section */
+.wb-shell .ttl.mini {
+  font: 400 11.5px/1.4 var(--ui-font);
+  letter-spacing: 0;
   color: var(--u-soft);
 }
 
@@ -272,9 +316,196 @@
   color: var(--u-muted);
 }
 
+/* ------------------------------------------------- rail: the store's levels */
+
+/* A section head is a title, a quiet count, and at most one `+`. The forms that
+   add to the store open from that `+`, so the rail reads as an index and never as
+   a row of empty inputs. */
+.wb-shell .rail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.wb-shell .rail-head:first-of-type {
+  margin-top: 2px;
+}
+
+.wb-shell .rail-head .ttl.sub {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .rail-count {
+  min-width: 1ch;
+  font: 400 11px/1 var(--ui-mono);
+  color: var(--u-soft);
+  text-align: right;
+}
+
+.wb-shell .rail-add {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--u-muted);
+  font: 400 14px/1 var(--ui-font);
+  cursor: pointer;
+  transition: background-color 160ms var(--u-ease), color 160ms var(--u-ease);
+}
+
+.wb-shell .rail-add:hover {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+.wb-shell .rail-add:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.wb-shell .rail-empty {
+  margin: 2px 0 0;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-soft);
+}
+
+/* a revealed rail form: the same dashed block the Import use to be, tightened */
+.wb-shell .rail-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 2px;
+  padding: 8px;
+  border: 1px dashed var(--u-line-2);
+  border-radius: 8px;
+}
+
+.wb-shell .rail-form-row {
+  display: flex;
+  gap: 6px;
+}
+
+.wb-shell .rail-form input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--u-line-2);
+  background: var(--u-fill);
+  color: var(--u-ink);
+  font: inherit;
+}
+
+.wb-shell .rail-form input:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.wb-shell .rail-form .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.wb-shell .rail-form .btn {
+  flex: none;
+}
+
+.wb-shell .rail-hint {
+  margin: 0;
+  font: 400 11px/1.45 var(--ui-mono);
+  color: var(--u-soft);
+  word-break: break-word;
+}
+
+/* the store check closes the rail as one quiet line */
+.wb-shell .rail-foot {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--u-line);
+}
+
+.wb-shell .rail-foot:empty {
+  display: none;
+}
+
+.wb-shell .rail-foot-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--u-muted);
+  font: 400 11px/1.4 var(--ui-mono);
+  cursor: pointer;
+}
+
+.wb-shell .rail-foot-btn:hover {
+  color: var(--u-ink);
+  text-decoration: underline;
+}
+
+.wb-shell .rail-foot-note {
+  margin: 6px 0 0;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-soft);
+}
+
 .wb-shell .muted {
   color: var(--u-muted);
 }
+
+/* ------------------------------------------------- rail: the store's levels */
+
+/* Recordings sit at the top with no owner; a Character owns everything below it,
+   so its Drafts and Assets are indented under its own row and shown only while
+   it is open. One open branch is what keeps the rail short on a desktop window. */
+.wb-shell .char-head {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  column-gap: 4px;
+  align-items: center;
+}
+
+.wb-shell .char-head .chev {
+  color: var(--u-soft);
+  font-size: 9px;
+}
+
+.wb-shell .char-head.open .chev {
+  color: var(--u-accent-text);
+}
+
+.wb-shell .char-body {
+  margin: 0 0 4px 8px;
+  padding-left: 9px;
+  border-left: 1px solid var(--u-line);
+}
+
+.wb-shell .char-branch {
+  margin-top: 7px;
+}
+
+.wb-shell .char-body .rail-empty {
+  margin-top: 2px;
+}
+
+.wb-shell .ttl.grp {
+  margin: 0 0 3px;
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--u-soft);
+}
+
 
 /* ------------------------------------------------------------------- stage */
 
@@ -289,7 +520,9 @@
   justify-items: stretch;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  /* the picture is fitted to the space and the panels are capped, so on a desktop
+     the stage is a fixed pane; a narrow window keeps its scroll as a fallback */
+  overflow: hidden;
   padding: 16px 22px 26px;
   background-image: radial-gradient(circle at 50% 0%, var(--u-fill) 0%, transparent 62%);
   --fx-bg: #141a18;
@@ -335,8 +568,12 @@
 
 .wb-shell .stage-view>.recording-viewer,
 .wb-shell .stage-view>.draft-viewer {
-  flex: 1 1 auto;
-  min-height: 0;
+  /* The viewer takes what the panels below it leave, rather than a full viewport
+     of its own: `flex-basis: 0` plus `min-height: 0` lets the picture give way
+     when there is a panel underneath, so the stage never has to scroll to show a
+     whole frame. */
+  flex: 1 1 0;
+  min-height: 64px;
   justify-content: center;
 }
 
@@ -359,13 +596,31 @@
   margin-top: 8px;
 }
 
-/* a stage's blocks keep a readable column and sit centred, not stretched */
+/* a stage's blocks keep a readable column and sit centred, not stretched. When a
+   picture shares the stage they are capped instead of free to grow: the picture
+   keeps the height they leave, and only a panel that genuinely outgrows its share
+   scrolls on its own. A face with no picture (Export) lets its block have the
+   whole stage, so the cap only applies alongside a viewer. */
 .wb-shell .stage-view>.segments,
-.wb-shell .stage-view>.repair-controls,
+.wb-shell .stage-view>.repair-log,
 .wb-shell .stage-view>.align-clips,
-.wb-shell .stage-view>.records {
+.wb-shell .stage-view>.records,
+.wb-shell .stage-view>.export-form {
   width: min(100%, 620px);
   margin-inline: auto;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.segments,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.repair-log,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.align-clips,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.records,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.export-form {
+  max-height: 46%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
 }
 
 .wb-shell .stage-view>.export-form {
@@ -382,13 +637,97 @@
   background: var(--u-surface);
 }
 
+/* The strip only exists on a face with a time axis. Collapsed it keeps its top
+   border, so the boundary is still drawn and the stage does not jump a hairline
+   when the face changes. */
+.wb-shell .filmstrip[hidden] {
+  display: block;
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--u-line);
+  background: transparent;
+}
+
+/* The range picker: a thin track under the frames. Cutting is a gesture on the
+   strip, so it needs a surface of its own — not another row of inputs. */
+.wb-shell .pick {
+  position: relative;
+  height: 12px;
+  margin-top: 4px;
+  border: 1px dashed var(--u-line-2);
+  border-radius: 3px;
+  background: var(--u-fill);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.wb-shell .pick-band {
+  position: absolute;
+  inset-block: 0;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--u-accent) 55%, transparent);
+  pointer-events: none;
+}
+
+.wb-shell .pick-band.sel {
+  box-shadow: inset 0 0 0 1px var(--u-accent);
+}
+
+.wb-shell .filmstrip-selection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wb-shell .filmstrip-selection .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wb-shell .filmstrip-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 6px;
   font: 400 11px/1.4 var(--ui-mono);
   color: var(--u-muted);
+}
+
+/* the how-to sits under the strip it describes */
+.wb-shell .filmstrip-hint {
+  margin: 6px 0 0;
+  font: 400 11px/1.5 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+.wb-shell .filmstrip-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* the counter yields first: the play toggle keeps its width */
+.wb-shell .filmstrip-controls .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .filmstrip-play {
+  flex: none;
+  padding: 1px 8px;
+  font: 400 11px/1.6 var(--ui-mono);
+}
+
+.wb-shell .filmstrip-play[aria-pressed='true'] {
+  color: var(--u-ink);
+  border-color: var(--u-line-2);
 }
 
 .wb-shell .film {
@@ -459,6 +798,12 @@
   background: var(--u-tint-2);
   border-left: 2px solid var(--u-accent);
   border-right: 2px solid var(--u-accent);
+  cursor: pointer;
+}
+
+/* the selected band is the one the inspector is editing */
+.wb-shell .cut.sel {
+  background: color-mix(in oklab, var(--u-accent) 26%, var(--u-bg));
 }
 
 .wb-shell .timeline:empty::after {
@@ -487,9 +832,47 @@
   display: inline-flex;
   gap: 2px;
   padding: 2px;
-  margin-bottom: 12px;
   border: 1px solid var(--u-line-2);
   border-radius: 8px;
+}
+
+/* The bar sits under the frame it paints on: tools on the left, brush settings
+   beside them, Undo pushed to the far end where a step-back belongs. */
+.wb-shell .repair-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.wb-shell .repair-bar .repair-tools {
+  margin-bottom: 0;
+}
+
+/* the inspector stacks its fields; across a bar they sit in a row */
+.wb-shell .repair-bar .repair-settings {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+/* the inspector stacks its fields full width; across a bar they stay compact */
+.wb-shell .repair-bar .field {
+  gap: 6px;
+}
+
+.wb-shell .repair-bar input[type="number"] {
+  width: 52px;
+}
+
+.wb-shell .repair-bar select {
+  width: auto;
+}
+
+.wb-shell .repair-bar [data-repair-undo] {
+  margin-left: auto;
 }
 
 .wb-shell .repair-tools .btn {
@@ -666,9 +1049,8 @@
 
 .wb-shell .choices legend {
   padding: 0;
-  font: 500 10.5px/1.4 var(--ui-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font: 500 11.5px/1.4 var(--ui-font);
+  letter-spacing: 0;
   color: var(--u-muted);
 }
 
@@ -681,30 +1063,13 @@
   cursor: pointer;
 }
 
-.wb-shell .import {
+/* Characters are a Library level, so their form opens in the rail rather than as
+   a row under the picture. */
+.wb-shell .characters {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 2px 0 14px;
-  padding: 10px;
-  border: 1px dashed var(--u-line-2);
-  border-radius: 8px;
-}
-
-.wb-shell .import .field {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 3px;
-}
-
-.wb-shell .import .btn {
-  align-self: flex-start;
-}
-
-.wb-shell .import .muted {
-  margin: 0;
-  font: 400 11px/1.45 var(--ui-mono);
-  word-break: break-word;
+  gap: 2px;
+  margin-bottom: 2px;
 }
 
 .wb-shell .segments .field {
@@ -722,7 +1087,6 @@
 }
 
 .wb-shell .segment-add,
-.wb-shell .character-add,
 .wb-shell .asset-actions,
 .wb-shell .commit-row,
 .wb-shell .fork {
@@ -731,6 +1095,24 @@
   flex-wrap: wrap;
   gap: 6px;
   margin: 6px 0;
+}
+
+/* the Character inspector carries the way into footage, and the sidebar is too
+   narrow for a select and a button side by side */
+.wb-shell .inspector .segment-add {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.wb-shell .inspector .segment-add select {
+  width: 100%;
+  min-width: 0;
+}
+
+.wb-shell .inspector .segment-add .btn {
+  align-self: flex-start;
 }
 
 .wb-shell .segments {
@@ -763,6 +1145,38 @@
 
 .wb-shell .segment .asset-name {
   flex: 1;
+}
+
+/* A Segment row in the rail: name and range on one line, like an index entry. */
+.wb-shell .asset[data-segment] {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-shell .asset[data-segment] .asset-sub {
+  flex: none;
+}
+
+/* --- segment editor (inspector) ------------------------------------------- */
+
+.wb-shell .segment-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-shell .segment-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--u-line);
+}
+
+.wb-shell .segment-detail p {
+  margin: 0;
 }
 
 .wb-shell .sequence-item {
@@ -800,11 +1214,15 @@
 .wb-shell .export-form .field {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 4px 12px;
 }
 
+/* aligned to the control's first line, not to its middle, so a multi-line field
+   (the bindings JSON) keeps its label above the box */
+.wb-shell .export-form .field>.k,
 .wb-shell .export-form .field>.field-label {
+  padding-top: 4px;
   white-space: nowrap;
 }
 
@@ -848,7 +1266,10 @@
   display: flex;
   flex: 1 1 0;
   width: 100%;
-  min-height: 0;
+  /* Takes the viewer's spare height, so the percentage-sized frame below has a
+     definite box to resolve against. `min-height` keeps a sliver of picture even
+     when a long draft strip competes for the same space. */
+  min-height: 56px;
   align-items: center;
   justify-content: center;
   gap: 16px;
@@ -875,20 +1296,26 @@
   flex-wrap: wrap;
   gap: 4px;
   justify-content: center;
+  /* a long draft gives the strip its own scroll rather than eating the picture's
+     height */
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 30%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
 }
 
+/* the frame is sized by the space left, so the cap is the height there is, not a
+   fixed 560px: `max-width` still keeps a wide frame from stretching the column */
 .wb-shell .draft-frame,
 .wb-shell .recording-frame {
-  /* the window is tall, so the picture takes a width that keeps the pixels
-     readable and leaves the rest as air on the stage ground */
-  /* the picture grows with the stage, so the canvas fills the window instead of
-     floating in a hole; object-fit keeps the pixels square */
-  /* a zero basis, so the picture takes the stage's spare height and the pixels
-     are letterboxed into it rather than the frame floating in a hole */
-  flex: 1 1 0;
-  width: min(100%, 600px);
-  min-height: 0;
+  flex: 0 1 auto;
+  width: auto;
   height: auto;
+  max-height: 100%;
+  max-width: min(100%, 600px);
+  min-height: 0;
   object-fit: contain;
   border: 1px solid var(--u-line-2);
   border-radius: 8px;
@@ -921,7 +1348,8 @@
 
 /* ----------------------------------------------------------- repair + align */
 
-.wb-shell .repair-controls {
+/* the inspector keeps the log the bar no longer needs to show */
+.wb-shell .repair-log {
   padding: 10px;
   border: 1px dashed var(--u-line-2);
   border-radius: 8px;
@@ -931,14 +1359,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 8px;
 }
 
 .wb-shell .repair-settings {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  margin-bottom: 8px;
 }
 
 .wb-shell .repair-ops {
@@ -1035,9 +1461,8 @@
 .wb-shell .load-error-title {
   display: block;
   margin-bottom: 4px;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font: 600 12px/1.4 var(--ui-font);
+  letter-spacing: 0;
 }
 
 .wb-shell .load-error-message {
@@ -1079,7 +1504,8 @@
 
   .wb-shell .draft-frame,
   .wb-shell .recording-frame {
-    width: 210px;
+    /* the frame is sized by the stage height now, so a narrow window only caps it */
+    max-width: 100%;
   }
 }
 
@@ -1092,6 +1518,10 @@
   }
 
   .wb-shell .workbench {
+    flex-direction: column;
+  }
+
+  .wb-shell .shell-body {
     flex-direction: column;
   }
 
@@ -1112,12 +1542,13 @@
 
   .wb-shell .stage {
     padding: 16px;
+    /* a stacked strip is too short to fit picture plus panels: it scrolls */
+    overflow: auto;
   }
 
   .wb-shell .draft-frame,
   .wb-shell .recording-frame {
-    width: 100%;
-    max-width: 260px;
+    max-width: 100%;
   }
 }
 
@@ -1126,7 +1557,7 @@
     display: none;
   }
 
-  .wb-shell .modes {
+  .wb-shell .faces {
     overflow: hidden;
   }
 }
@@ -1137,4 +1568,119 @@
   .wb-shell .asset {
     transition: none;
   }
+}
+
+/* ------------------------------------------------- dialogs (confirm / ask) */
+/* Drawn in the page, not by the browser: `window.prompt` is missing in some of
+   the places the workbench runs. The backdrop is fixed and lives outside the
+   shell, so the shell styles are restated here rather than inherited. */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 45%);
+}
+
+.dialog {
+  width: min(100%, 380px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--u-line-2);
+  background: var(--u-surface);
+  color: var(--u-ink);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+  font: 400 13px/1.5 var(--ui-font);
+}
+
+.dialog-message {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.dialog input {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--u-line-2);
+  background: var(--u-fill);
+  color: var(--u-ink);
+  font: inherit;
+}
+
+.dialog input:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+/* a choice row: the radio, then a label with an optional note under it */
+.dialog-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.dialog-choice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.dialog-choice:hover {
+  background: var(--u-fill-2);
+}
+
+.dialog-choice:has(input:checked) {
+  background: var(--u-tint);
+}
+
+.dialog-choice input {
+  height: auto;
+  margin: 0;
+  accent-color: var(--u-accent);
+}
+
+.dialog-choice-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog-choice-note {
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-actions .btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 0;
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+  font: 500 12.5px/1 var(--ui-font);
+  cursor: pointer;
+}
+
+.dialog-actions .btn.ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--u-line-2);
+  color: var(--u-muted);
 }

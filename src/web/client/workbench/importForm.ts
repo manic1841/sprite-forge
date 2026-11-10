@@ -1,9 +1,9 @@
 /**
  * The Import form: pick a capture, name it, register it.
  *
- * Ingest is the store's front door. The form sits at the **top** of the
- * Recordings section so the newest thing you can do comes before the things that
- * already exist. The file is read here and travels as base64 because a browser
+ * Ingest is the store's front door, but it is not where reading the store starts,
+ * so the form opens from the Recordings section's `+` and closes again once a
+ * capture is in. The file is read here and travels as base64 because a browser
  * cannot hand the server a path.
  */
 
@@ -14,7 +14,7 @@ import { make } from './dom.js';
 /** Build the Import form, wired into `ctx`. */
 export function importForm(ctx: WorkbenchContext): HTMLElement {
   const { state } = ctx;
-  const form = make('form', 'import');
+  const form = make('form', 'rail-form');
   form.dataset.importForm = '';
 
   const fileRow = make('label', 'field');
@@ -25,18 +25,19 @@ export function importForm(ctx: WorkbenchContext): HTMLElement {
   fileInput.dataset.importFile = '';
   fileRow.appendChild(fileInput);
 
-  const idRow = make('label', 'field');
-  idRow.append(make('span', 'k', 'id'));
+  const idRow = make('div', 'rail-form-row');
   const idInput = document.createElement('input');
   idInput.dataset.importId = '';
-  idInput.placeholder = 'mgba-2026-09';
+  idInput.placeholder = 'recording id';
+  idInput.setAttribute('aria-label', 'Recording id');
   idInput.value = state.pendingImportId;
-  idRow.appendChild(idInput);
 
-  const button = make('button', 'btn', 'Import') as HTMLButtonElement;
+  const button = make('button', 'btn small', 'Import') as HTMLButtonElement;
   button.type = 'submit';
   button.dataset.importRun = '';
-  const message = make('p', 'muted');
+  idRow.append(idInput, button);
+
+  const message = make('p', 'rail-hint');
   message.dataset.importMessage = '';
   if (state.importNotice !== null) {
     message.textContent = state.importNotice;
@@ -60,7 +61,7 @@ export function importForm(ctx: WorkbenchContext): HTMLElement {
     ctx.track(runImport(ctx, message));
   });
 
-  form.append(fileRow, idRow, button, message);
+  form.append(fileRow, idRow, message);
   return form;
 }
 
@@ -83,6 +84,7 @@ async function runImport(ctx: WorkbenchContext, message: HTMLElement): Promise<v
     state.pendingFile = null;
     state.pendingImportId = '';
     state.importIdTouched = false;
+    state.railForm = 'none';
     state.importNotice = `imported ${recording.id} (${recording.frameCount} frame(s))`;
     await ctx.rescan();
     await ctx.loadRecording(recording.id);

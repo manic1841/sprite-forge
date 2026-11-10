@@ -1,15 +1,16 @@
 /**
- * The Clip-editor stage, and the one workspace the whole job lives in.
+ * The Clip-editor stage: a **Draft**'s frames plus painting, or a committed
+ * **Asset**'s playback.
  *
- * Two things can be open here: a **Recording** (preview, scrub, segments) and a
- * **Draft** (frames plus painting). The target, not the mode, decides which — so
- * cutting a Recording and repairing a Draft never needs a different screen, and
- * extracting a Segment drops you straight onto the Draft it produced.
+ * A Recording is not here — cutting is its own face (see `stageCut.ts`), because a
+ * Segment means nothing while repairing. Extract is the join: it leaves the cut
+ * face for the Draft it produced, so the two faces hand over rather than overlap.
  */
 
 import type { WorkbenchContext } from './context.js';
-import { labeled, make, numberInput } from './dom.js';
-import { attachPainting } from './repair.js';
+import { confirmAction, promptText } from './dialog.js';
+import { addRow, labeled, make } from './dom.js';
+import { attachPainting, repairBar } from './repair.js';
 import { activeAsset, activeDraft } from './state.js';
 
 /** Render the clip face for whatever is open. */
@@ -25,17 +26,9 @@ export function clipStageView(ctx: WorkbenchContext): HTMLElement {
     assetView(ctx, view);
     return view;
   }
-  if (ctx.state.target.kind === 'recording') {
-    recordingView(ctx, view);
-    return view;
-  }
   view.dataset.emptyState = 'clip-editor';
   view.appendChild(
-    make(
-      'p',
-      'muted',
-      'Clip editor — pick a Recording in the Library to cut it, or a Draft to repair it.',
-    ),
+    make('p', 'muted', 'Clip editor — pick a Draft in the Library to repair it.'),
   );
   return view;
 }
@@ -261,283 +254,6 @@ async function commitSequence(ctx: WorkbenchContext, characterId: string): Promi
   await ctx.rescan();
 }
 
-// --- Recording face: preview, scrub, segments --------------------------------
-
-function recordingView(ctx: WorkbenchContext, view: HTMLElement): void {
-  const { state } = ctx;
-  const recordingId = state.recordingId;
-  const cutList = state.cutList;
-  if (!recordingId || !cutList) {
-    view.appendChild(make('p', 'muted', 'Load a Recording to preview it.'));
-    return;
-  }
-
-  const preview = make('div', 'recording-viewer');
-  preview.dataset.recordingViewer = '';
-  preview.dataset.recording = recordingId;
-  preview.dataset.activeFrame = String(state.frame);
-
-  const prev = make('button', 'btn ghost', '◀') as HTMLButtonElement;
-  prev.dataset.frameStep = 'prev';
-  prev.disabled = state.frame <= 0;
-  prev.addEventListener('click', () => stepFrame(ctx, -1));
-
-  const img = document.createElement('img');
-  img.className = 'recording-frame';
-  img.dataset.recordingFrame = '';
-  img.dataset.frameIndex = String(state.frame);
-  img.src = ctx.api.recordingFrameUrl(recordingId, state.frame);
-  img.alt = `${recordingId} frame ${state.frame}`;
-
-  const next = make('button', 'btn ghost', '▶') as HTMLButtonElement;
-  next.dataset.frameStep = 'next';
-  next.disabled = state.frame >= cutList.frameCount - 1;
-  next.addEventListener('click', () => stepFrame(ctx, 1));
-
-  const counter = make('span', 'pill');
-  counter.dataset.recordingFrameCounter = '';
-  counter.textContent = `frame ${state.frame} / ${cutList.frameCount}`;
-
-  const row = make('div', 'draft-stage');
-  row.append(prev, img, next);
-  preview.append(row, counter);
-  view.appendChild(preview);
-
-  view.appendChild(segmentPanel(ctx, recordingId));
-}
-
-function stepFrame(ctx: WorkbenchContext, delta: number): void {
-  const frameCount = ctx.state.cutList?.frameCount ?? 0;
-  if (frameCount === 0) {
-    return;
-  }
-  ctx.state.frame = Math.max(0, Math.min(frameCount - 1, ctx.state.frame + delta));
-  ctx.renderStage();
-  ctx.renderFilmstrip();
-  ctx.renderContext();
-  ctx.renderInspector();
-}
-
-/** The segment list: rename, re-cut by hand, extract to a Draft, or delete. */
-function segmentPanel(ctx: WorkbenchContext, recordingId: string): HTMLElement {
-  const panel = make('section', 'segments');
-  panel.dataset.segmentPanel = '';
-  panel.appendChild(make('h3', 'ttl sub', 'Segments'));
-
-  const characters = ctx.state.scan?.characters ?? [];
-  const extractRow = make('label', 'field');
-  extractRow.append(make('span', 'k', 'extract into'));
-  const characterSelect = document.createElement('select');
-  characterSelect.dataset.extractCharacter = '';
-  // Default to the Character already in play, so a re-render does not silently
-  // retarget the Extract button at whichever Character sorts first.
-  const preferred = ctx.state.activeCharacterId ?? characters[0]?.id;
-  for (const character of characters) {
-    const option = document.createElement('option');
-    option.value = character.id;
-    option.textContent = character.id;
-    option.selected = character.id === preferred;
-    characterSelect.appendChild(option);
-  }
-  extractRow.appendChild(characterSelect);
-  panel.appendChild(extractRow);
-
-  const list = make('ul', 'segment-list');
-  list.dataset.segmentList = '';
-  for (const segment of ctx.state.cutList?.cuts ?? []) {
-    const item = make('li', 'segment');
-    item.dataset.segment = segment.id;
-    item.append(
-      make('span', 'asset-name', segment.id),
-      make('span', 'asset-sub', `[${segment.startFrame}, ${segment.endFrame})`),
-    );
-
-    const extract = make('button', 'btn small', 'Extract') as HTMLButtonElement;
-    extract.dataset.segmentExtract = segment.id;
-    extract.disabled = (characterSelect.value || characters[0]?.id) === undefined;
-    extract.addEventListener('click', () => {
-      void ctx.run('Extract segment', () =>
-        extractSegment(ctx, recordingId, segment.id, characterSelect.value),
-      );
-    });
-
-    const rename = make('button', 'btn small ghost', 'Rename') as HTMLButtonElement;
-    rename.dataset.segmentRename = segment.id;
-    rename.addEventListener('click', () => {
-      void ctx.run('Rename segment', () => renameSegment(ctx, recordingId, segment.id));
-    });
-
-    const remove = make('button', 'btn small ghost', 'Delete') as HTMLButtonElement;
-    remove.dataset.segmentDelete = segment.id;
-    remove.addEventListener('click', () => {
-      // Deleting a Segment is not undoable, so it asks first.
-      if (!window.confirm(`Delete segment "${segment.id}"?`)) {
-        return;
-      }
-      void ctx.run('Delete segment', () => removeSegment(ctx, recordingId, segment.id));
-    });
-
-    item.append(extract, rename, remove);
-    list.appendChild(item);
-  }
-  if ((ctx.state.cutList?.cuts ?? []).length === 0) {
-    list.appendChild(make('li', 'muted', 'No segments yet — add one below.'));
-  }
-  panel.appendChild(list);
-
-  const addForm = make('form', 'segment-add');
-  addForm.dataset.segmentAdd = '';
-  const idInput = document.createElement('input');
-  idInput.dataset.segmentId = '';
-  idInput.placeholder = 'walk';
-  const startInput = numberInput(ctx.state.frame, 'start', () => {});
-  startInput.dataset.segmentStart = '';
-  const endInput = numberInput(
-    Math.min(ctx.state.frame + 1, ctx.state.cutList?.frameCount ?? 0),
-    'end',
-    () => {},
-  );
-  endInput.dataset.segmentEnd = '';
-  const button = make('button', 'btn small', 'Add') as HTMLButtonElement;
-  button.type = 'submit';
-  button.dataset.segmentAddRun = '';
-  const message = make('p', 'muted');
-  message.dataset.segmentMessage = '';
-
-  addForm.addEventListener('submit', (event) => {
-    event.preventDefault();
-    void ctx.run('Add segment', () =>
-      addSegment(ctx, recordingId, idInput, startInput, endInput, message),
-    );
-  });
-
-  addForm.append(idInput, startInput, endInput, button, message);
-  panel.appendChild(addForm);
-  panel.appendChild(newCharacterRow(ctx, recordingId));
-  return panel;
-}
-
-/** Create a Character whose Canvas/Anchor is derived from the current Frame. */
-function newCharacterRow(ctx: WorkbenchContext, recordingId: string): HTMLElement {
-  const form = make('form', 'character-add');
-  form.dataset.characterAdd = '';
-  const idInput = document.createElement('input');
-  idInput.dataset.characterId = '';
-  idInput.placeholder = 'hero';
-  const button = make('button', 'btn small', 'New Character') as HTMLButtonElement;
-  button.type = 'submit';
-  button.dataset.characterAddRun = '';
-  const message = make('p', 'muted');
-  message.dataset.characterMessage = '';
-
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    void ctx.run('Create Character', () =>
-      createCharacter(ctx, recordingId, idInput.value.trim(), message),
-    );
-  });
-
-  form.append(idInput, button, message);
-  return form;
-}
-
-async function createCharacter(
-  ctx: WorkbenchContext,
-  recordingId: string,
-  characterId: string,
-  message: HTMLElement,
-): Promise<void> {
-  if (!characterId) {
-    message.textContent = 'a character id is required';
-    return;
-  }
-  try {
-    // Derive framing from the Segment under the playhead (or the whole Recording at
-    // frame 0). A Segment gives a Canvas wide enough for all of its frames, so the
-    // Extract that follows cannot be rejected for spilling off the Canvas.
-    const cut = (ctx.state.cutList?.cuts ?? []).find(
-      (segment) => ctx.state.frame >= segment.startFrame && ctx.state.frame < segment.endFrame,
-    );
-    const derived = await ctx.api.deriveAnchor(recordingId, cut?.id);
-    await ctx.api.createCharacter(characterId, {
-      width: derived.canvas.width,
-      height: derived.canvas.height,
-      anchorX: derived.canvas.anchor.x,
-      anchorY: derived.canvas.anchor.y,
-    });
-    await ctx.rescan();
-    ctx.renderStage();
-  } catch (error) {
-    message.textContent = (error as Error).message;
-  }
-}
-
-async function addSegment(
-  ctx: WorkbenchContext,
-  recordingId: string,
-  idInput: HTMLInputElement,
-  startInput: HTMLInputElement,
-  endInput: HTMLInputElement,
-  message: HTMLElement,
-): Promise<void> {
-  const id = idInput.value.trim();
-  const startFrame = Number(startInput.value);
-  const endFrame = Number(endInput.value);
-  if (!id) {
-    message.textContent = 'a segment id is required';
-    return;
-  }
-  if (!Number.isInteger(startFrame) || !Number.isInteger(endFrame) || endFrame <= startFrame) {
-    message.textContent = 'end must be after start';
-    return;
-  }
-  try {
-    ctx.state.cutList = await ctx.api.addSegment(recordingId, { id, startFrame, endFrame });
-    ctx.renderStage();
-    ctx.renderFilmstrip();
-    ctx.renderInspector();
-  } catch (error) {
-    message.textContent = (error as Error).message;
-  }
-}
-
-async function renameSegment(
-  ctx: WorkbenchContext,
-  recordingId: string,
-  cutId: string,
-): Promise<void> {
-  const next = window.prompt(`Rename segment "${cutId}" to:`, cutId);
-  if (!next || next === cutId) {
-    return;
-  }
-  ctx.state.cutList = await ctx.api.renameSegment(recordingId, cutId, next);
-  ctx.renderStage();
-  ctx.renderFilmstrip();
-  ctx.renderInspector();
-}
-
-async function removeSegment(
-  ctx: WorkbenchContext,
-  recordingId: string,
-  cutId: string,
-): Promise<void> {
-  ctx.state.cutList = await ctx.api.removeSegment(recordingId, cutId);
-  ctx.renderStage();
-  ctx.renderFilmstrip();
-  ctx.renderInspector();
-}
-
-async function extractSegment(
-  ctx: WorkbenchContext,
-  recordingId: string,
-  cutId: string,
-  characterId: string,
-): Promise<void> {
-  const draft = await ctx.api.extractClipDraft(characterId, { recordingId, cutId });
-  await ctx.rescan();
-  await ctx.loadDraft(characterId, draft.id);
-}
-
 // --- Draft face: the frames, and painting ------------------------------------
 
 function draftView(ctx: WorkbenchContext, view: HTMLElement): void {
@@ -583,6 +299,8 @@ function draftView(ctx: WorkbenchContext, view: HTMLElement): void {
 
   const row = make('div', 'draft-stage');
   row.append(prev, img, next);
+  // The tools hang under the frame they paint on; the inspector keeps the log.
+  const bar = repairBar(ctx);
 
   const cells = make('div', 'draft-frames');
   cells.setAttribute('role', 'list');
@@ -597,7 +315,7 @@ function draftView(ctx: WorkbenchContext, view: HTMLElement): void {
     cells.appendChild(cell);
   }
 
-  viewer.append(row, counter, cells);
+  viewer.append(row, bar, counter, cells);
   view.appendChild(viewer);
 }
 

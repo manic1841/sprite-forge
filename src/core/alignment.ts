@@ -11,6 +11,10 @@
  *   - the explicit **expand canvas** — the one deliberate, Character-wide re-bake
  *     (ADR-0006): grow the Canvas about the Anchor and re-bake every committed Clip.
  *
+ * It also frames a blank Character from footage (`frameCanvasFromSegment`): a
+ * Character can exist before any Recording does, so its provisional Canvas has to
+ * be replaceable by real framing rather than sitting there forever.
+ *
  * The offset is applied at bake time (`commitDraft`) and in this module's reads;
  * the Draft's stored frames remain the automatic placement, so a Repair script —
  * authored against those frames — stays valid when only the offset moves. Only a
@@ -22,6 +26,7 @@ import sharp from 'sharp';
 import { rebakeSequenceSheet } from './assets.js';
 import type { RgbaImage } from './background.js';
 import type { Canvas } from './character.js';
+import { deriveAnchor } from './draft.js';
 import { readClipDraft, writeClipDraft, type ClipDraft } from './draft.js';
 import { StoreError } from './errors.js';
 import { placeOnCanvas } from './frames.js';
@@ -264,6 +269,62 @@ export async function expandCanvas(
   await writeJsonFile(root, canvasPath(characterId), canvas);
 
   return { canvas, rebakedClips, rebakedSequences, repairWarnings };
+}
+
+/** Inputs for {@link frameCanvasFromSegment}. */
+export interface FrameCanvasFromSegmentOptions {
+  characterId: string;
+  /** The Recording the framing is read from. */
+  recordingId: string;
+  /** The Segment whose frames size the Canvas; omitted uses the Recording's frame 0. */
+  cutId?: string;
+}
+
+/**
+ * Frame a **blank** Character from footage.
+ *
+ * A Character created ahead of any footage starts on a provisional Canvas
+ * ({@link BLANK_CANVAS}); this replaces it with the framing the footage implies, so
+ * the placeholder is never left in place by accident.
+ *
+ * A Character that already has work keeps `expandCanvas`'s grow-only rule: content
+ * drawn on the old Canvas cannot be cropped without a re-bake, so shrinking is
+ * refused rather than silently done. With nothing drawn yet the Canvas is simply
+ * written, which is what lets a provisional Canvas be smaller than the subject.
+ */
+export async function frameCanvasFromSegment(
+  root: string,
+  options: FrameCanvasFromSegmentOptions,
+): Promise<Canvas> {
+  const { characterId, recordingId, cutId } = options;
+  assertValidId(characterId, 'character', 'characterId');
+
+  const derived = await deriveAnchor(root, {
+    recordingId,
+    ...(cutId === undefined ? {} : { cutId }),
+  });
+  const canvas = derived.canvas;
+  const old = await readCanvas(root, characterId);
+
+  if (old.width === canvas.width && old.height === canvas.height) {
+    return old;
+  }
+
+  const drawn =
+    (await listDirectories(root, clipsDir(characterId))).length > 0 ||
+    (await listDirectories(root, draftsDir(characterId))).length > 0 ||
+    (await listDirectories(root, sequencesDir(characterId))).length > 0;
+
+  if (!drawn || (canvas.width >= old.width && canvas.height >= old.height)) {
+    validateArtifact('canvas', canvas, { artifact: canvasPath(characterId) });
+    await writeJsonFile(root, canvasPath(characterId), canvas);
+    return canvas;
+  }
+
+  throw new StoreError(
+    `Framing wants ${canvas.width}x${canvas.height}, but "${characterId}" is drawn on ` +
+      `${old.width}x${old.height} and expand can only grow. Expand to that size instead.`,
+  );
 }
 
 /** Read every Clip/Draft offset for a Character — the Alignment stage's view model. */

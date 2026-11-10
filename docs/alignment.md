@@ -23,6 +23,18 @@ A Character's Canvas and Anchor live in `characters/<id>/canvas.json`:
   and the Anchor sits on the bottom edge (`anchor.y == height`). Because of the
   symmetry, a `flipX` draw stays aligned and needs no extra offset.
 
+## A blank Character
+
+A Character is a level above Recordings: it can be created before any footage exists,
+so a session can start from the subject rather than from a capture. Such a Character
+starts on a **provisional Canvas** (32×32, Anchor at 16,32) that is obviously not
+final.
+
+Framing is derived from a real frame, on the Alignment face: *frame canvas from frame*
+writes the Canvas the open Recording's frame implies. Once anything is drawn on the
+Canvas, framing follows the grow-only rule of *expand canvas* below (shrinking would
+crop), and the tool says so instead of silently doing either.
+
 ## Adding a Clip
 
 A new Clip **adopts the Character's Canvas**. If the Clip does not fit — its content

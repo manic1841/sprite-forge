@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   addSegment,
+  BLANK_CANVAS,
   createCharacter,
   deriveAnchor,
+  frameCanvasFromSegment,
   ingestRecording,
   scan,
   StoreError,
@@ -113,6 +115,19 @@ describe('createCharacter', () => {
       expect(tree.characters[0]?.dir).toBe('characters/hero');
     });
   });
+
+  it('creates a **blank** Character on the provisional Canvas when no framing is given', async () => {
+    await withStore(async (store) => {
+      // A Character can exist before any footage does: it is the level work starts
+      // from, so nothing about a Recording is needed to create one.
+      const created = await createCharacter(store.root, { characterId: 'hero' });
+
+      expect(created.canvas).toEqual(BLANK_CANVAS);
+      expect(store.readJson('characters/hero/canvas.json')).toEqual(BLANK_CANVAS);
+      validateArtifact('canvas', store.readJson('characters/hero/canvas.json'));
+      await expect(validateStore(store.root)).resolves.toBeDefined();
+    });
+  });
 });
 
 describe('deriveAnchor', () => {
@@ -164,6 +179,79 @@ describe('deriveAnchor', () => {
         // Anchor at the Canvas bottom-centre, with the union box fully inside it.
         expect(derived.anchor).toEqual({ x: 2, y: 4 });
         expect(derived.canvas).toEqual({ width: 4, height: 4, anchor: { x: 2, y: 4 } });
+      });
+    });
+  });
+});
+
+describe('frameCanvasFromSegment', () => {
+  it('replaces a blank Character\'s provisional Canvas with the framing the footage implies', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await ingestRecording(store.root, { recordingId: 'rec', sourcePath: gif.path });
+        await createCharacter(store.root, { characterId: 'hero' });
+
+        const canvas = await frameCanvasFromSegment(store.root, {
+          characterId: 'hero',
+          recordingId: 'rec',
+        });
+
+        // Same framing deriving would produce, and it is now what is stored.
+        expect(canvas).toEqual({ width: 4, height: 5, anchor: { x: 2, y: 5 } });
+        expect(store.readJson('characters/hero/canvas.json')).toEqual(canvas);
+        await expect(validateStore(store.root)).resolves.toBeDefined();
+      });
+    });
+  });
+
+  it('is a no-op when the Canvas already has the derived framing', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await ingestRecording(store.root, { recordingId: 'rec', sourcePath: gif.path });
+        await createCharacter(store.root, {
+          characterId: 'hero',
+          width: 4,
+          height: 5,
+          anchor: { x: 2, y: 5 },
+        });
+
+        const canvas = await frameCanvasFromSegment(store.root, {
+          characterId: 'hero',
+          recordingId: 'rec',
+        });
+        expect(canvas).toEqual({ width: 4, height: 5, anchor: { x: 2, y: 5 } });
+      });
+    });
+  });
+
+  it('refuses to shrink a Character that already has work drawn on its Canvas', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await ingestRecording(store.root, { recordingId: 'rec', sourcePath: gif.path });
+        // A Canvas larger than the subject, with a Draft on it.
+        await createCharacter(store.root, {
+          characterId: 'hero',
+          width: 40,
+          height: 40,
+          anchor: { x: 20, y: 40 },
+        });
+        await addSegment(store.root, { recordingId: 'rec', id: 'walk', startFrame: 0, endFrame: 2 });
+        const { extractClipDraft } = await import('../src/core/index.js');
+        await extractClipDraft(store.root, { characterId: 'hero', recordingId: 'rec', cutId: 'walk' });
+
+        const failure = await frameCanvasFromSegment(store.root, {
+          characterId: 'hero',
+          recordingId: 'rec',
+        }).catch((error) => error);
+
+        expect(failure).toBeInstanceOf(StoreError);
+        expect((failure as Error).message).toMatch(/can only grow/i);
+        // The old Canvas is untouched.
+        expect(store.readJson('characters/hero/canvas.json')).toEqual({
+          width: 40,
+          height: 40,
+          anchor: { x: 20, y: 40 },
+        });
       });
     });
   });
