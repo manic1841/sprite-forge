@@ -1,0 +1,48 @@
+{
+    "name": "sprite-forge",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "remoteUser": "node",
+    "features": {
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
+    // The store deliberately has no preset path: unconfigured runs use the in-repo
+    // `store/` default, which sits on the bind mount and survives rebuilds (ADR-0011).
+    // The volume keeps the pnpm content-addressable store out of the bind mount so
+    // it also survives rebuilds without polluting the repo.
+    "mounts": [
+        "source=sprite-forge-pnpm-store,target=/home/node/.local/share/pnpm/store,type=volume"
+    ],
+    // Container startup duties (the ownership repair is idempotent):
+    //
+    // 1. Docker creates named-volume mount points root-owned, so the store volume
+    //    at /home/node/.local/share/pnpm/store is root:root and pnpm (running as
+    //    `node`) fails with `EACCES ... mkdir .../store/v10`. The Dockerfile chown
+    //    cannot help because the volume shadows that directory. Hand the pnpm data
+    //    dir to the remote user before installing.
+    // 2. Only the workspace folder itself is mounted from the host, and /workspaces
+    //    is created root-owned. VS Code puts new git worktrees next to the repo
+    //    (/workspaces/<repo>.worktrees/...), so the remote user needs write access
+    //    to /workspaces or worktree creation fails with "Permission denied". The
+    //    recursive chown also repairs stray root-owned entries such as the default
+    //    `store/` of ADR-0011.
+    // 3. `pnpm install` is guarded: doc-only branches (e.g. `main`) have no
+    //    package.json, and a bare install there would fail the whole creation.
+    "postCreateCommand": "sudo chown -R node:node /home/node/.local/share/pnpm /workspaces && sudo chmod -R u+rwX /home/node/.local/share/pnpm && if [ -f package.json ]; then pnpm install; fi",
+    // A fresh container gets a fresh root-owned mount point for the same volume, so
+    // the store repair has to run on plain restarts too, not just on creation.
+    "postStartCommand": "sudo chown -R node:node /home/node/.local/share/pnpm && sudo chmod -R u+rwX /home/node/.local/share/pnpm",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "vitest.explorer",
+                "EditorConfig.EditorConfig"
+            ],
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "typescript.tsdk": "node_modules/typescript/lib"
+            }
+        }
+    }
+}
