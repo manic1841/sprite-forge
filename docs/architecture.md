@@ -37,6 +37,12 @@ The store is an **external data root** the tool points at; it is not part of the
 repo. It has no catalog or index file — the tree *is* the truth, discovered by
 scanning. See [ADR-0003](./adr/0003-external-asset-store-discovered-by-scanning.md).
 
+The root is resolved from `--store`, then `SPRITE_FORGE_STORE`, then the default
+`store/` relative to the current working directory. The default is a startup
+convenience for the web UI, not a claim that the store belongs in the repo; the
+resolved absolute path is always shown. See
+[ADR-0011](./adr/0011-store-path-defaults-to-store.md).
+
 ```text
 <store root>/
 ├─ recordings/<recording-id>/   # raw inputs (read-only): source.gif + cuts.json

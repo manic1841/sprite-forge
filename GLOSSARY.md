@@ -74,7 +74,9 @@ its lineage.
 _Avoid_: library item, resource, material
 
 **Asset store**:
-The directory tree that holds every Asset and its provenance.
+The directory tree that holds every Asset and its provenance. Its root is chosen by
+`--store`, then `SPRITE_FORGE_STORE`, else defaults to `store/` under the working
+directory.
 _Avoid_: catalog, repository
 
 **Library**:

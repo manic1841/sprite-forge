@@ -9,8 +9,9 @@ dist/
 coverage/
 *.tsbuildinfo
 
-# Local store path
+# Local store path; scratch unless deliberately checked in (ADR-0011)
 store/
+/store/
 
 # taste-skill gate run artifacts under the landing page (screenshots, Chrome profiles)
 site/.taste-skill/chrome-*/

@@ -73,6 +73,11 @@ A committed Asset is a Clip or a Sequence. Beyond these, a store also holds
 scanning, not by an index file — but neither drafts nor scanning are part of this
 contract (see §10).
 
+How the store root is chosen is likewise outside this contract: `--store`, then
+`SPRITE_FORGE_STORE`, else `store/` under the working directory
+([ADR-0011](./adr/0011-store-path-defaults-to-store.md)). Paths inside every
+artifact are relative to the store root regardless of where it sits.
+
 ## 2. `cuts.json` — the Recording's cut list
 
 Schema: [`schemas/cuts.schema.json`](../schemas/cuts.schema.json).
