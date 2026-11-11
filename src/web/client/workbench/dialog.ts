@@ -28,6 +28,13 @@ export interface DialogOption {
   label: string;
   /** A second line under the label, e.g. what the option holds. */
   note?: string;
+  /**
+   * Whether the option *creates* something rather than picking a stored one.
+   *
+   * A create row is drawn apart from the list it ends — separated, and with a `+` —
+   * so it is never mistaken for one more existing item.
+   */
+  kind?: 'create';
 }
 
 /** Build the shared shell: a modal form with a message, an optional input, two buttons. */
@@ -63,12 +70,17 @@ function build(
   }
 
   // A choice is a radio list rather than a `select`: every option stays readable,
-  // and each can carry a note.
+  // and each can carry a note. Options that *create* something are held back into
+  // a footer under the list, so they stay in view however long the list scrolls and
+  // never read as one more stored item.
   const choices = options.choices;
   if (choices) {
     const list = document.createElement('div');
     list.className = 'dialog-choices';
     list.dataset.dialogChoices = '';
+    const creates = document.createElement('div');
+    creates.className = 'dialog-creates';
+    creates.dataset.dialogCreates = '';
     choices.forEach((choice, index) => {
       const row = document.createElement('label');
       row.className = 'dialog-choice';
@@ -86,9 +98,17 @@ function build(
         words.append(makeSpan('dialog-choice-note', choice.note));
       }
       row.append(radio, words);
-      list.appendChild(row);
+      if (choice.kind === undefined) {
+        list.appendChild(row);
+        return;
+      }
+      row.classList.add(`is-${choice.kind}`);
+      creates.appendChild(row);
     });
-    form.appendChild(list);
+    form.append(list);
+    if (creates.childElementCount > 0) {
+      form.appendChild(creates);
+    }
   }
 
   const actions = document.createElement('div');

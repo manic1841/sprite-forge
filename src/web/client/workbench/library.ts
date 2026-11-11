@@ -30,9 +30,15 @@ export function renderLibrary(ctx: WorkbenchContext): void {
 
   // Both open levels are read before the rail is cleared: they derive from the
   // target, and the rail is rebuilt from scratch below.
-  const openCharacter = activeCharacter(state);
+  // The rail holds one open branch at a time: a Recording and a Character are
+  // alternate subjects, so focusing either collapses the other and leaving both
+  // collapses both. The cut list is source material, not a standing expansion, so
+  // it is opened by its own row rather than by the Recording being loaded.
   const openRecording =
-    state.target.kind === 'recording' ? state.target.recordingId : (state.recordingId ?? null);
+    state.target.kind === 'recording' && state.railOpenRecording === state.target.recordingId
+      ? state.target.recordingId
+      : null;
+  const openCharacter = openRecording === null ? activeCharacter(state) : null;
   const openExport = activeExport(state);
   const recordings = state.scan?.recordings ?? [];
   const characters = state.scan?.characters ?? [];
@@ -157,7 +163,13 @@ function recordingGroup(
     make('span', 'asset-name', recordingId),
     make('span', 'rail-count', open ? String(cuts.length) : ''),
   );
-  head.addEventListener('click', () => void ctx.loadRecording(recordingId));
+  head.addEventListener('click', () => {
+    // The row is also the branch's disclosure: pressing the one already open folds
+    // it away again rather than re-loading into an unchanged screen.
+    ctx.state.railOpenRecording =
+      ctx.state.railOpenRecording === recordingId ? null : recordingId;
+    void ctx.loadRecording(recordingId);
+  });
   group.appendChild(head);
 
   if (open) {

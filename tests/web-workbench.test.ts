@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountWorkbench, slugifyId } from '../src/web/client/app.js';
 import { clampRange } from '../src/web/client/timeline.js';
+import { draftScale } from '../src/web/client/workbench/repair.js';
 import type { WorkbenchApi } from '../src/web/client/api.js';
 import type {
   AlignmentState,
@@ -280,27 +281,58 @@ async function openCharacter(
 }
 
 /**
- * Select a Segment from the Library rail.
+ * Select a Segment from the strip's band.
  *
- * Segments are edited against a selection (a rail row, or a band on the strip),
- * so the buttons only exist once one is picked.
+ * Bands are the cut list's own copy, so this works whether or not the rail has the
+ * Recording's branch open. Segments are edited against a selection, so the buttons
+ * only exist once one is picked.
  */
 async function selectSegment(
   wb: ReturnType<typeof mountWorkbench>,
   cutId: string,
 ): Promise<void> {
-  wb.root.querySelector<HTMLElement>(`[data-region="rail"] [data-segment="${cutId}"]`)!.click();
+  wb.root.querySelector<HTMLElement>(`[data-region="filmstrip"] [data-cut="${cutId}"]`)!.click();
   await wb.settled();
 }
 
-/** Mark the current frame as a one-frame range and save it under `id`. */
+/**
+ * Give every element a real track-sized rect.
+ *
+ * The strip is rebuilt when a gesture starts, so a rect stubbed on one node
+ * would be lost mid-drag; stubbing the prototype survives the rebuild.
+ */
+function measureTrack(width = 80): void {
+  const rect = { left: 0, top: 0, width, height: 24, right: width, bottom: 24, x: 0, y: 0 };
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(rect as DOMRect);
+}
+
+const pointer = (type: string, x: number): PointerEvent =>
+  new PointerEvent(type, { clientX: x, clientY: 0, button: 0, bubbles: true });
+
+/**
+ * Drag the track into a new range at the playhead and save it under `id`.
+ *
+ * Saving asks twice — a name, then the Character the cut belongs to — so both
+ * dialogs are answered here; the Character answer is the preselected one.
+ */
 async function saveSegmentAtPlayhead(
   wb: ReturnType<typeof mountWorkbench>,
   id: string,
 ): Promise<void> {
-  wb.root.querySelector<HTMLElement>('[data-pick-start]')!.click();
+  const width = 80;
+  measureTrack(width);
+  const frames = wb.root.querySelectorAll('[data-region="filmstrip"] [data-frame]').length;
+  // The band is a drag, so a one-frame cut is a drag that never leaves its frame.
+  const x = ((wb.activeFrame + 0.5) / frames) * width;
+  const track = wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-pick]')!;
+  track.dispatchEvent(pointer('pointerdown', x));
+  window.dispatchEvent(pointer('pointerup', x));
   wb.root.querySelector<HTMLElement>('[data-pick-save]')!.click();
   answerDialog(true, id);
+  // The second ask is raised after the first answer resolves, so it is not in the
+  // DOM yet on the line above.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  answerDialog(true);
   await wb.settled();
 }
 
@@ -342,6 +374,11 @@ describe('the workbench shell', () => {
     expect(stage!.querySelector('[data-stage-view="clip-editor"]')).not.toBeNull();
     expect((inspector as HTMLElement).dataset.inspectorFor).toBe('clip');
     expect(wb.root.querySelector('[data-mode="export"]')).toBeNull();
+
+    // A lone face is type, not a button: nothing to press because nothing to switch.
+    const lone = wb.root.querySelector('[data-mode]')!;
+    expect(lone.tagName).toBe('SPAN');
+    expect(lone.textContent).toBe('Clip');
 
     // A Draft has the Clip editor, Alignment and Export, and no filmstrip to scrub.
     await wb.loadDraft('hero', 'wip');
@@ -443,6 +480,56 @@ describe('the Library', () => {
 
     expect(wb.activeRecording).toBe('fat-walk');
   });
+
+  it('reveals a Recording’s Segments only while it is the open one', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    const rail = wb.root.querySelector<HTMLElement>('[data-region="rail"]')!;
+
+    // Collapsed by default: the cut list is a branch, not standing furniture.
+    expect(rail.querySelector('[data-segment]')).toBeNull();
+
+    rail.querySelector<HTMLElement>('[data-recording="idle"]')!.click();
+    await wb.settled();
+    expect(rail.querySelectorAll('[data-segment]').length).toBeGreaterThan(0);
+
+    // A rail Segment row selects it: the row is a pick, not another load.
+    rail.querySelector<HTMLElement>('[data-segment="walk"]')!.click();
+    await wb.settled();
+    expect(wb.root.querySelector('[data-segment-delete="walk"]')).not.toBeNull();
+
+    // Opening a Character leaves the Recording, so its branch folds away with it.
+    rail.querySelector<HTMLElement>('[data-character="hero"]')!.click();
+    await wb.settled();
+    expect(rail.querySelector('[data-recording="idle"]')!.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    expect(rail.querySelector('[data-segment]')).toBeNull();
+  });
+
+  it('keeps one branch open: a Recording closes the Character above it', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    const rail = wb.root.querySelector<HTMLElement>('[data-region="rail"]')!;
+
+    await openCharacter(wb, 'hero');
+    expect(rail.querySelector('[data-asset]')).not.toBeNull();
+
+    rail.querySelector<HTMLElement>('[data-recording="idle"]')!.click();
+    await wb.settled();
+
+    expect(rail.querySelector('[data-character="hero"]')!.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    expect(rail.querySelector('[data-asset]')).toBeNull();
+
+    // The same row folds its own branch away again.
+    rail.querySelector<HTMLElement>('[data-recording="idle"]')!.click();
+    await wb.settled();
+    expect(rail.querySelector('[data-segment]')).toBeNull();
+    // ...without leaving the Recording: the branch is disclosure, not navigation.
+    expect(wb.activeRecording).toBe('idle');
+  });
 });
 
 describe('the filmstrip', () => {
@@ -493,8 +580,83 @@ describe('the filmstrip', () => {
       { id: 'walk', start: '1', end: '4' },
       { id: 'turn', start: '5', end: '8' },
     ]);
-    // Each range exposes edges to drag, wired to the core-backed API.
-    expect(wb.root.querySelectorAll('[data-region="filmstrip"] [data-cut-handle]')).toHaveLength(4);
+    // Only the band being edited exposes edges, so a dense Recording is not a
+    // field of grab points: press a band first, then its edges.
+    expect(wb.root.querySelectorAll('[data-region="filmstrip"] [data-cut-handle]')).toHaveLength(0);
+    wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-cut="walk"]')!.click();
+    expect(wb.root.querySelectorAll('[data-region="filmstrip"] [data-cut-handle]')).toHaveLength(2);
+  });
+
+  it('marks a range on the same rail the cut bands live on', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    measureTrack();
+    const track = wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-pick]')!;
+
+    track.dispatchEvent(pointer('pointerdown', 10));
+    window.dispatchEvent(pointer('pointermove', 30));
+    window.dispatchEvent(pointer('pointerup', 30));
+
+    expect(wb.root.querySelector('[data-region="filmstrip"] [data-pick-save]')).not.toBeNull();
+    expect(wb.activeFrame).toBe(1);
+  });
+
+  it('keeps marking and editing exclusive, so Play has one target', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    const track = wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-pick]')!;
+    measureTrack();
+    const strip = (): HTMLElement => wb.root.querySelector('[data-region="filmstrip"]')!;
+
+    // Marking drops the edited Segment...
+    wb.root.querySelector<HTMLElement>('[data-cut="walk"]')!.click();
+    expect(strip().querySelectorAll('[data-cut-handle]')).toHaveLength(2);
+    wb.root.querySelector<HTMLElement>('[data-pick]')!.dispatchEvent(pointer('pointerdown', 10));
+    window.dispatchEvent(pointer('pointerup', 10));
+    expect(strip().querySelectorAll('[data-cut-handle]')).toHaveLength(0);
+
+    // ...and pressing a band drops the mark.
+    expect(wb.root.querySelector('[data-region="filmstrip"] [data-pick-save]')).not.toBeNull();
+    strip().querySelector<HTMLElement>('[data-cut="turn"]')!.click();
+    expect(wb.root.querySelector('[data-region="filmstrip"] [data-pick-save]')).toBeNull();
+  });
+
+  it('saves a re-cut on release and puts it back on Escape', async () => {
+    const written: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        setSegmentRange: async (recordingId, cutId, startFrame, endFrame) => {
+          written.push({ recordingId, cutId, startFrame, endFrame });
+          return CUTS;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    measureTrack();
+
+    wb.root.querySelector<HTMLElement>('[data-cut="walk"]')!.click();
+    await wb.settled();
+    const handle = (): HTMLElement =>
+      wb.root.querySelector<HTMLElement>('[data-cut="walk"] [data-cut-handle="end"]')!;
+
+    // Releasing is the save: a trim is a direct edit of a stored range.
+    handle().dispatchEvent(pointer('pointerdown', 60));
+    window.dispatchEvent(pointer('pointermove', 50));
+    window.dispatchEvent(pointer('pointerup', 50));
+    await wb.settled();
+    expect(written).toEqual([{ recordingId: 'idle', cutId: 'walk', startFrame: 1, endFrame: 5 }]);
+
+    // Escape abandons a drag instead of writing it.
+    written.length = 0;
+    handle().dispatchEvent(pointer('pointerdown', 60));
+    window.dispatchEvent(pointer('pointermove', 70));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    window.dispatchEvent(pointer('pointerup', 70));
+    await wb.settled();
+    expect(written).toEqual([]);
   });
 });
 
@@ -680,8 +842,127 @@ describe('the Clip editor stage', () => {
     ).toBe('/api/characters/hero/drafts/wip/frames/2');
   });
 
-  it('renders the contextual Clip-editor inspector with per-frame info and a Repair slot', async () => {
+  it('zooms the frame by whole steps, from a fitted 1× up to the ceiling', async () => {
     const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    // The label is replaced with the stage on every render, so always re-read it.
+    const label = (): HTMLElement => wb.root.querySelector<HTMLElement>('[data-draft-zoom-label]')!;
+    // A fitted view is the default and says so; it is not a zoom level of its own.
+    expect(label().textContent).toBe('1×');
+    expect(label().classList.contains('is-fitted')).toBe(true);
+
+    const zoomIn = wb.root.querySelector<HTMLElement>('[data-draft-zoom-step="1"]')!;
+    zoomIn.click();
+    expect(label().textContent).toBe('2×');
+    expect(label().classList.contains('is-fitted')).toBe(false);
+
+    // Repair needs whole image pixels, so the scale never becomes fractional and
+    // never runs away past the ceiling.
+    for (let i = 0; i < 10; i += 1) {
+      wb.root.querySelector<HTMLElement>('[data-draft-zoom-step="1"]')!.click();
+    }
+    expect(label().textContent).toBe('32×');
+    expect(wb.draftZoom).toBe(32);
+  });
+
+  it('hands the scale back to the fit, and never goes below 1×', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const label = (): HTMLElement => wb.root.querySelector<HTMLElement>('[data-draft-zoom-label]')!;
+    wb.root.querySelector<HTMLElement>('[data-draft-zoom-step="-1"]')!.click();
+    expect(label().textContent).toBe('1×');
+    expect(wb.draftZoom).toBe(1);
+
+    wb.root.querySelector<HTMLElement>('[data-draft-zoom-step="1"]')!.click();
+    expect(label().textContent).toBe('2×');
+    wb.root.querySelector<HTMLElement>('[data-draft-zoom-fit]')!.click();
+    expect(label().textContent).toBe('1×');
+    expect(label().classList.contains('is-fitted')).toBe(true);
+    // Fitting is the absence of a choice, not a zoom of 1.
+    expect(wb.draftZoom).toBeNull();
+  });
+
+  it('fits a small frame up to a whole-number rate that fills the stage', () => {
+    // jsdom never lays anything out, so the stage's room is stated by hand: the fit
+    // is the only thing that reads it.
+    const stage = document.createElement('div');
+    Object.defineProperty(stage, 'clientWidth', { value: 750 });
+    Object.defineProperty(stage, 'clientHeight', { value: 630 });
+    const board = document.createElement('div');
+    const img = document.createElement('img');
+    Object.defineProperty(img, 'naturalWidth', { value: 32 });
+    Object.defineProperty(img, 'naturalHeight', { value: 32 });
+
+    const ctx = {
+      state: { draftZoom: null },
+      regions: { stage },
+    } as unknown as Parameters<typeof draftScale>[0];
+    // 630 − 150 is the tighter side: (480 / 32) is 15, and the rate stays whole.
+    expect(draftScale(ctx, board, img)).toBe(15);
+  });
+
+  it('zooms on Ctrl + wheel only, so plain wheel still scrolls', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const board = wb.root.querySelector<HTMLElement>('[data-draft-board]')!;
+    const label = (): HTMLElement => wb.root.querySelector<HTMLElement>('[data-draft-zoom-label]')!;
+    const wheel = (ctrlKey: boolean, deltaY: number): WheelEvent => {
+      const event = new WheelEvent('wheel', { ctrlKey, deltaY, clientX: 0, clientY: 0, cancelable: true });
+      board.dispatchEvent(event);
+      return event;
+    };
+
+    expect(wheel(false, -100).defaultPrevented).toBe(false);
+    expect(label().textContent).toBe('1×');
+
+    expect(wheel(true, -100).defaultPrevented).toBe(true);
+    expect(label().textContent).toBe('2×');
+    expect(wb.draftZoom).toBe(2);
+  });
+
+  it('gives the brush a footprint overlay the size of the frame', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const overlay = wb.root.querySelector<HTMLCanvasElement>('[data-draft-overlay]')!;
+    expect(overlay).not.toBeNull();
+    // Over the frame but out of the way of the painting pointer.
+    expect(overlay.parentElement!.hasAttribute('data-draft-sheet')).toBe(true);
+    expect(overlay.getAttribute('aria-hidden')).toBe('true');
+    // The pixel readout starts empty rather than showing a stale position.
+    expect(wb.root.querySelector('[data-draft-cursor]')!.textContent).toBe('—');
+  });
+
+  it('clamps the brush size to the pixels the server will stamp', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+
+    const size = wb.root.querySelector<HTMLInputElement>('[data-repair-size]')!;
+    const set = (value: string): void => {
+      size.value = value;
+      size.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    // Typing is free, but the size handed to the server is always stampable.
+    set('0');
+    expect(wb.brushSize).toBe(1);
+    set('999');
+    expect(wb.brushSize).toBe(64);
+    set('');
+    expect(wb.brushSize).toBe(1);
+    set('3');
+    expect(wb.brushSize).toBe(3);
+  });
+
+  it('renders the contextual Clip-editor inspector with per-frame info and a Repair slot', async () => {    const wb = mountWorkbench(container, { api: fakeApi() });
     await wb.ready;
     await wb.loadDraft('hero', 'wip');
 
@@ -848,6 +1129,37 @@ describe('the Alignment stage', () => {
     expect(
       wb.root.querySelector('[data-alignment-warning="alignment-framing-changed"]'),
     ).not.toBeNull();
+  });
+
+  it('places a Draft by dragging its ghost on the Canvas', async () => {
+    const written: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        setPlacementOffset: async (characterId, draftId, offset) => {
+          written.push({ characterId, draftId, offset });
+          return DRAFT;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadDraft('hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const ghost = wb.root.querySelector<HTMLElement>('[data-align-ghost][data-draft="wip"]')!;
+    expect(ghost).not.toBeNull();
+    // The board reports its display scale, so the drag is read back as a
+    // whole-Canvas offset however large the fitted board is.
+    const board = wb.root.querySelector<HTMLElement>('[data-alignment-canvas]')!;
+    const scale = Number(board.dataset.alignScale);
+    const at = (type: string, x: number, y: number): PointerEvent =>
+      new PointerEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true });
+    ghost.dispatchEvent(at('pointerdown', 100, 100));
+    ghost.dispatchEvent(at('pointermove', 100 + 4 * scale, 100 - 2 * scale));
+    ghost.dispatchEvent(at('pointerup', 100 + 4 * scale, 100 - 2 * scale));
+    await wb.settled();
+
+    expect(written).toEqual([{ characterId: 'hero', draftId: 'wip', offset: { x: 4, y: -2 } }]);
   });
 });
 
@@ -1116,6 +1428,138 @@ describe('the recording workspace', () => {
     expect(removed).toEqual(['jump']);
   });
 
+  it('asks which Character a new Segment is for, and points Extract at it', async () => {
+    const added: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        scan: async () => ({
+          ...SCAN,
+          characters: [
+            ...SCAN.characters,
+            { id: 'me', dir: 'characters/me', assets: [], drafts: [] },
+          ],
+        }),
+        addSegment: async (_id, segment) => {
+          added.push(segment);
+          return { ...CUTS, cuts: [...CUTS.cuts, { ...segment, id: segment.id }] };
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    await wb.ready;
+
+    // There is no standing "extract into" field: the Character is asked for when
+    // the cut is kept, from the same strip action that keeps it.
+    expect(wb.root.querySelector('[data-extract-character]')).toBeNull();
+    wb.root.querySelector<HTMLElement>('[data-frame="2"]')!.click();
+    measureTrack();
+    const track = wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-pick]')!;
+    track.dispatchEvent(pointer('pointerdown', 25));
+    window.dispatchEvent(pointer('pointerup', 25));
+    wb.root.querySelector<HTMLElement>('[data-pick-save]')!.click();
+    answerDialog(true, 'jump');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The choice lists the Characters that exist, and a way to make a new one —
+    // the latter set apart, so it cannot be taken for one more Character.
+    const choices = [...document.querySelectorAll<HTMLInputElement>('[data-dialog-choice]')].map(
+      (radio) => radio.value,
+    );
+    expect(choices).toEqual(['hero', 'me', '\u0000 new']);
+    const rows = [...document.querySelectorAll<HTMLElement>('.dialog-choice')];
+    expect(rows.slice(0, 2).every((row) => !row.classList.contains('is-create'))).toBe(true);
+    expect(rows[rows.length - 1]!.classList.contains('is-create')).toBe(true);
+
+    // Picking one that is not the default shows up as the Extract target.
+    document.querySelector<HTMLInputElement>('[data-dialog-choice="me"]')!.checked = true;
+    answerDialog(true);
+    await wb.settled();
+
+    expect(added).toHaveLength(1);
+    const extract = wb.root.querySelector<HTMLElement>('[data-segment-extract="jump"]')!;
+    expect(extract.textContent).toBe('Extract');
+  });
+
+  it('creates the Character while saving when asked for a new one', async () => {
+    const created: Array<{ id: string; canvas: unknown }> = [];
+    const calls: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        addSegment: async (_id, segment) => {
+          calls.push('cut');
+          return { ...CUTS, cuts: [...CUTS.cuts, { ...segment, id: segment.id }] };
+        },
+        deriveAnchor: async () => {
+          calls.push('derive');
+          return {
+            frame: 0,
+            bounds: { x: 0, y: 0, width: 4, height: 6 },
+            anchor: { x: 2, y: 6 },
+            canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
+          } as DerivedAnchor;
+        },
+        createCharacter: async (id, canvas) => {
+          created.push({ id, canvas });
+          return { id, dir: `characters/${id}` } as unknown as CreatedCharacter;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    measureTrack();
+
+    wb.root.querySelector<HTMLElement>('[data-frame="2"]')!.click();
+    const track = wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-pick]')!;
+    track.dispatchEvent(pointer('pointerdown', 25));
+    window.dispatchEvent(pointer('pointerup', 25));
+    wb.root.querySelector<HTMLElement>('[data-pick-save]')!.click();
+    answerDialog(true, 'jump');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The new-Character row is the last one offered, whatever its value looks like.
+    const radios = [...document.querySelectorAll<HTMLInputElement>('[data-dialog-choice]')];
+    radios[radios.length - 1]!.checked = true;
+    answerDialog(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    answerDialog(true, 'kitty');
+    await wb.settled();
+
+    // The cut is stored before the framing is derived: the Anchor reads a real cut.
+    expect(calls).toEqual(['cut', 'derive']);
+    expect(created).toEqual([
+      { id: 'kitty', canvas: { width: 4, height: 6, anchorX: 2, anchorY: 6 } },
+    ]);
+  });
+
+  it('writes nothing when the save dialog is dismissed at the Character step', async () => {
+    const added: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        addSegment: async (_id, segment) => {
+          added.push(segment);
+          return CUTS;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    measureTrack();
+
+    wb.root.querySelector<HTMLElement>('[data-frame="2"]')!.click();
+    const track = wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-pick]')!;
+    track.dispatchEvent(pointer('pointerdown', 25));
+    window.dispatchEvent(pointer('pointerup', 25));
+    wb.root.querySelector<HTMLElement>('[data-pick-save]')!.click();
+    answerDialog(true, 'jump');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    answerDialog(false);
+    await wb.settled();
+
+    expect(added).toEqual([]);
+    // The marked range survives, so the cut can be retried without re-dragging.
+    expect(wb.root.querySelector('[data-pick-save]')).not.toBeNull();
+  });
+
   it('keeps a segment when the delete confirmation is dismissed', async () => {
     const removed: string[] = [];
     const wb = mountWorkbench(container, {
@@ -1156,6 +1600,39 @@ describe('the recording workspace', () => {
     answerDialog(true, 'stride');
     await wb.settled();
     expect(renamed).toEqual(['walk->stride']);
+  });
+
+  it('separates the cut itself from the verb that makes something else', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    await selectSegment(wb, 'walk');
+    const detail = wb.root.querySelector<HTMLElement>('[data-segment-detail="walk"]')!;
+
+    // The name and its range are two lines, in that order: the range is data about
+    // the cut, not part of its name.
+    const name = detail.querySelector<HTMLElement>('.segment-name')!;
+    const frames = detail.querySelector<HTMLElement>('.segment-frames')!;
+    expect(name.textContent).toBe('walk');
+    expect(frames.textContent).toBe('frames 1–3');
+    expect(name.compareDocumentPosition(frames)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    // Rename is a mark on the name, so it sits in the head beside it; Delete is
+    // about the whole block, so it goes last in that head — the far corner.
+    const head = detail.querySelector<HTMLElement>('.segment-head')!;
+    const rename = head.querySelector<HTMLElement>('[data-segment-rename="walk"]')!;
+    const remove = head.querySelector<HTMLElement>('[data-segment-delete="walk"]')!;
+    expect(head.children[0]).toBe(name);
+    expect(head.lastElementChild).toBe(remove);
+    expect(remove.previousElementSibling).toBe(rename);
+    // Icons carry no visible word, so the name has to come from aria-label.
+    expect(rename.getAttribute('aria-label')).toContain('Rename segment');
+
+    // Extract is the only verb that leaves the Segment, so it is its own full-width
+    // row at the end rather than a third icon.
+    const extract = detail.querySelector<HTMLElement>('[data-segment-extract="walk"]')!;
+    expect(detail.lastElementChild).toBe(extract);
+    expect(extract.classList.contains('segment-extract')).toBe(true);
   });
 
   it('creates a blank Character without needing a Recording', async () => {
@@ -1268,7 +1745,10 @@ describe('the recording workspace', () => {
     await wb.loadRecording('idle');
 
     await selectSegment(wb, 'walk');
-    wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!.click();
+    const extract = wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!;
+    // One label whatever the state: the ask, not the wording, carries the choice.
+    expect(extract.textContent).toBe('Extract');
+    extract.click();
     // No target was chosen, so Extract asks which Character to use.
     answerDialog();
     await wb.settled();
@@ -1302,8 +1782,9 @@ describe('the recording workspace', () => {
 
     await selectSegment(wb, 'walk');
     const button = wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!;
-    // No Character exists at all, so the only thing to do is name one.
-    expect(button.textContent).toBe('Extract → New Character…');
+    // The label never changes; with no Character at all the ask is the first thing
+    // that happens, and it can only offer a new one.
+    expect(button.textContent).toBe('Extract');
     button.click();
     answerDialog(true, 'kitty');
     await wb.settled();

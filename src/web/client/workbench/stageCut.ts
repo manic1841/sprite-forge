@@ -47,6 +47,7 @@ export function cutStageView(ctx: WorkbenchContext): HTMLElement {
   img.dataset.frameIndex = String(ctx.state.frame);
   img.src = ctx.api.recordingFrameUrl(recordingId, ctx.state.frame);
   img.alt = `${recordingId} frame ${ctx.state.frame}`;
+  fitRecordingFrame(ctx, img);
 
   const next = make('button', 'btn ghost', '▶') as HTMLButtonElement;
   next.dataset.frameStep = 'next';
@@ -62,6 +63,45 @@ export function cutStageView(ctx: WorkbenchContext): HTMLElement {
   preview.append(row, counter);
   view.appendChild(preview);
   return view;
+}
+
+/** How far a small frame is blown up on the preview, in screen px per image px. */
+const PREVIEW_SCALE_MAX = 16;
+
+/**
+ * Grows a small frame to the space there is, up to {@link PREVIEW_SCALE_MAX}.
+ *
+ * Recording frames are often only a few dozen pixels across, and at their natural
+ * size they read as a stamp in the middle of the stage. The rate is a fit with a
+ * ceiling and whole numbers, so pixel art stays square.
+ */
+function fitRecordingFrame(ctx: WorkbenchContext, img: HTMLImageElement): void {
+  const size = (): boolean => {
+    const width = ctx.regions.stage.clientWidth - 96;
+    const height = ctx.regions.stage.clientHeight - 42;
+    if (!img.naturalWidth || width <= 0 || height <= 0) {
+      return false;
+    }
+    const fit = Math.min(width / img.naturalWidth, height / img.naturalHeight, PREVIEW_SCALE_MAX);
+    const scale = fit >= 1 ? Math.floor(fit) : Math.max(0.25, fit);
+    img.style.width = `${img.naturalWidth * scale}px`;
+    img.style.height = `${img.naturalHeight * scale}px`;
+    return true;
+  };
+  if (!size()) {
+    // Not decoded yet, so there is no natural size to scale from.
+    img.addEventListener('load', () => size(), { once: true });
+  }
+  // The preview follows the stage, and a resize changes it. The listener drops
+  // itself once the frame is gone.
+  const refit = (): void => {
+    if (!img.isConnected) {
+      window.removeEventListener('resize', refit);
+      return;
+    }
+    size();
+  };
+  window.addEventListener('resize', refit);
 }
 
 function stepFrame(ctx: WorkbenchContext, delta: number): void {
@@ -83,44 +123,17 @@ function stepFrame(ctx: WorkbenchContext, delta: number): void {
  *
  * The rail is the Segment *picker* (its rows select) and the filmstrip shows the
  * ranges as bands; this panel edits whichever one is selected. The stage stays
- * pixels only, and the `extract into` target sits once at the top because it is a
- * property of the Recording, not of any one cut — so it survives a change of
- * selection.
+ * pixels only, and the Character a cut is for is settled when it is saved — a
+ * property of the Recording rather than of any one cut, so it survives a change
+ * of selection without a field standing on the panel.
  */
 export function segmentEditor(ctx: WorkbenchContext, recordingId: string): HTMLElement {
   const panel = make('section', 'segment-editor');
   panel.dataset.segmentEditor = '';
 
-  // The target is a Character. With nothing chosen it stays unchosen and Extract
-  // asks, so no Character is picked on the user's behalf.
-  const characters = ctx.state.scan?.characters ?? [];
+  // The target Character is decided when the Segment is saved, so it is not a
+  // field here. Only Extract knows it, and it asks when the Segment predates one.
   const targetId = ctx.state.extractCharacterId;
-
-  const extractRow = make('label', 'field');
-  extractRow.append(make('span', 'k', 'extract into'));
-  const characterSelect = document.createElement('select');
-  characterSelect.dataset.extractCharacter = '';
-  {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = '— choose on extract —';
-    option.selected = targetId === null;
-    characterSelect.appendChild(option);
-  }
-  for (const character of characters) {
-    const option = document.createElement('option');
-    option.value = character.id;
-    option.textContent = character.id;
-    option.selected = character.id === targetId;
-    characterSelect.appendChild(option);
-  }
-  characterSelect.addEventListener('change', () => {
-    ctx.state.extractCharacterId = characterSelect.value || null;
-    // Re-render so the Extract buttons relabel to match the choice.
-    ctx.renderStage();
-  });
-  extractRow.appendChild(characterSelect);
-  panel.appendChild(extractRow);
 
   const selected = (ctx.state.cutList?.cuts ?? []).find(
     (segment) => segment.id === ctx.state.selectedCut,
@@ -136,41 +149,29 @@ export function segmentEditor(ctx: WorkbenchContext, recordingId: string): HTMLE
     return panel;
   }
 
+  // The head names the cut; renaming is a mark on that name, so it sits next to it.
+  // Deleting is about the whole block, so it goes to the far corner where it is out
+  // of the reading line but still inside the thing it removes.
   const detail = make('div', 'segment-detail');
   detail.dataset.segmentDetail = selected.id;
-  detail.appendChild(
-    make(
-      'p',
-      'muted',
-      `"${selected.id}" frames ${selected.startFrame}–${selected.endFrame - 1}` +
-        `${selected.speed ? ` at ${selected.speed}×` : ''}`,
-    ),
-  );
 
-  // Without a target the button *is* the way to get one: extracting asks which
-  // Character (or a new id), creates it framed from this Segment, then extracts.
-  const extract = make(
-    'button',
-    'btn small',
-    targetId !== null
-      ? 'Extract'
-      : characters.length > 0
-        ? 'Extract → Choose Character…'
-        : 'Extract → New Character…',
-  ) as HTMLButtonElement;
-  extract.dataset.segmentExtract = selected.id;
-  extract.addEventListener('click', () => {
-    void ctx.run('Extract segment', () => extractSegment(ctx, recordingId, selected.id));
-  });
+  const head = make('div', 'segment-head');
+  head.append(make('span', 'segment-name', selected.id));
 
-  const rename = make('button', 'btn small ghost', 'Rename') as HTMLButtonElement;
+  const rename = make('button', 'segment-icon', '✎') as HTMLButtonElement;
+  rename.type = 'button';
   rename.dataset.segmentRename = selected.id;
+  rename.setAttribute('aria-label', `Rename segment "${selected.id}"`);
+  rename.title = 'Rename';
   rename.addEventListener('click', () => {
     void ctx.run('Rename segment', () => renameSegment(ctx, recordingId, selected.id));
   });
 
-  const remove = make('button', 'btn small ghost', 'Delete') as HTMLButtonElement;
+  const remove = make('button', 'segment-icon is-remove', '✕') as HTMLButtonElement;
+  remove.type = 'button';
   remove.dataset.segmentDelete = selected.id;
+  remove.setAttribute('aria-label', `Delete segment "${selected.id}"`);
+  remove.title = 'Delete';
   remove.addEventListener('click', () => {
     void ctx.run('Delete segment', async () => {
       // Deleting a Segment is not undoable, so it asks first.
@@ -181,9 +182,29 @@ export function segmentEditor(ctx: WorkbenchContext, recordingId: string): HTMLE
     });
   });
 
-  const actions = make('div', 'asset-actions');
-  actions.append(extract, rename, remove);
-  detail.appendChild(actions);
+  head.append(rename, remove);
+  detail.appendChild(head);
+
+  // The range is what the cut *is*, so it reads as the block's own line rather than
+  // as part of its name.
+  detail.appendChild(
+    make(
+      'p',
+      'segment-frames',
+      `frames ${selected.startFrame}–${selected.endFrame - 1}` +
+        `${selected.speed ? ` at ${selected.speed}×` : ''}`,
+    ),
+  );
+
+  // Extract is the one verb that makes something outside this Segment, so it is the
+  // block's only solid button, full width, on its own line.
+  const extract = make('button', 'btn small segment-extract', 'Extract') as HTMLButtonElement;
+  extract.dataset.segmentExtract = selected.id;
+  extract.addEventListener('click', () => {
+    void ctx.run('Extract segment', () => extractSegment(ctx, recordingId, selected.id));
+  });
+
+  detail.appendChild(extract);
   panel.appendChild(detail);
   return panel;
 }
@@ -198,6 +219,9 @@ export function segmentEditor(ctx: WorkbenchContext, recordingId: string): HTMLE
 export function selectSegment(ctx: WorkbenchContext, segment: Segment): void {
   stopPlayback(ctx.state);
   ctx.state.selectedCut = segment.id;
+  // Editing a Segment replaces marking a range: the two never stand at once, so
+  // Play has one unambiguous target.
+  ctx.state.selection = null;
   ctx.state.frame = segment.startFrame;
   paintSegmentMarks(ctx);
   ctx.renderStage();
@@ -216,9 +240,11 @@ export function paintSegmentMarks(ctx: WorkbenchContext): void {
 /**
  * Save the range marked on the filmstrip as a Segment.
  *
- * The range is already confirmed — it was played — so only a name is missing;
- * with one, the Segment is written and left selected for Extract. The marks are
- * cleared either way, since they have become something stored.
+ * The range is already confirmed — it was played — so two things are missing: a
+ * name, and the Character the cut belongs to. Both are asked for here, in one
+ * pass, because a Segment exists to become footage of a Character and asking at
+ * save time is what keeps the question off the panel. The marks are cleared once
+ * it is stored.
  */
 export async function saveSelectionAsSegment(ctx: WorkbenchContext): Promise<void> {
   const { state, api } = ctx;
@@ -239,6 +265,14 @@ export async function saveSelectionAsSegment(ctx: WorkbenchContext): Promise<voi
     return;
   }
 
+  // The owner is picked among the Characters that exist, or named as a new one. A
+  // new Character is framed from this cut, so its id is asked before the cut is
+  // written but created after — the framing reads the stored range.
+  const target = await askSaveTarget(ctx, id);
+  if (target === null) {
+    return;
+  }
+
   state.cutList = await api.addSegment(recordingId, {
     id,
     startFrame: selection.startFrame,
@@ -247,11 +281,86 @@ export async function saveSelectionAsSegment(ctx: WorkbenchContext): Promise<voi
   state.selection = null;
   state.selectedCut = id;
   state.frame = selection.startFrame;
+
+  if (target.newId === null) {
+    state.extractCharacterId = target.characterId;
+  } else {
+    await createCharacterFramedFrom(ctx, recordingId, id, target.newId);
+    await ctx.rescan();
+  }
+
   ctx.renderLibrary();
   ctx.renderStage();
   ctx.renderFilmstrip();
   ctx.renderContext();
   ctx.renderInspector();
+}
+
+/** The "new Character" radio's value, in the save and extract asks. */
+const NEW_CHARACTER = '\u0000 new';
+
+/** Who a Segment about to be saved is for: an existing Character, or an id to create. */
+interface SaveTarget {
+  characterId: string | null;
+  newId: string | null;
+}
+
+/**
+ * Ask which Character a Segment belongs to.
+ *
+ * The first existing Character is preselected so the dialog answers with one
+ * Enter, but nothing is decided on the user's behalf — and with no Character in
+ * the store, the only branch offered is the new one.
+ */
+async function askSaveTarget(ctx: WorkbenchContext, cutId: string): Promise<SaveTarget | null> {
+  const characters = ctx.state.scan?.characters ?? [];
+  if (characters.length > 0) {
+    const picked = await chooseAction(
+      `Save "${cutId}" for which Character?`,
+      [
+        ...characters.map((character) => ({
+          value: character.id,
+          label: character.id,
+          note: `${character.drafts.length} draft(s) · ${character.assets.length} asset(s)`,
+        })),
+        {
+          value: NEW_CHARACTER,
+          label: 'New Character…',
+          note: 'named next, framed from this cut',
+          kind: 'create',
+        },
+      ],
+      'Save Segment',
+    );
+    if (picked === null) {
+      return null;
+    }
+    if (picked !== NEW_CHARACTER) {
+      return { characterId: picked, newId: null };
+    }
+  }
+
+  const newId = (await promptText('New Character id:', '', 'Create'))?.trim();
+  return newId ? { characterId: null, newId } : null;
+}
+
+/** Create a Character whose Canvas and Anchor are framed from a stored cut. */
+async function createCharacterFramedFrom(
+  ctx: WorkbenchContext,
+  recordingId: string,
+  cutId: string,
+  characterId: string,
+): Promise<string> {
+  const derived = await ctx.api.deriveAnchor(recordingId, cutId);
+  await ctx.api.createCharacter(characterId, {
+    width: derived.canvas.width,
+    height: derived.canvas.height,
+    anchorX: derived.canvas.anchor.x,
+    anchorY: derived.canvas.anchor.y,
+  });
+  ctx.state.extractCharacterId = characterId;
+  ctx.state.activeCharacterId = characterId;
+  return characterId;
 }
 
 async function renameSegment(
@@ -307,12 +416,11 @@ async function extractSegment(
 }
 
 /**
- * The Character to extract into, creating one when asked for.
+ * The Character to extract into, for a Segment saved before one was chosen.
  *
- * The Segment's own frames frame the new Character, so a first-time user can go
- * straight from a cut to a Draft without visiting another screen. Nothing is
- * inferred: with no target chosen, the Character is asked for — a pick among the
- * ones that exist, or a new id — and the pick then sticks for the Recording.
+ * The ask is normally answered at save time, so this is the fallback that keeps an
+ * older Segment usable: a pick among the Characters that exist, or a new id framed
+ * from this cut. Either answer then sticks for the Recording.
  */
 async function resolveExtractTarget(
   ctx: WorkbenchContext,
@@ -325,7 +433,6 @@ async function resolveExtractTarget(
 
   const characters = ctx.state.scan?.characters ?? [];
   if (characters.length > 0) {
-    const NEW = ' new';
     const picked = await chooseAction(
       'Extract this Segment into which Character?',
       [
@@ -334,14 +441,19 @@ async function resolveExtractTarget(
           label: character.id,
           note: `${character.drafts.length} draft(s) · ${character.assets.length} asset(s)`,
         })),
-        { value: NEW, label: 'New Character…', note: 'named next, framed from this Segment' },
+        {
+          value: NEW_CHARACTER,
+          label: 'New Character…',
+          note: 'named next, framed from this cut',
+          kind: 'create',
+        },
       ],
       'Extract',
     );
     if (picked === null) {
       return null;
     }
-    if (picked !== NEW) {
+    if (picked !== NEW_CHARACTER) {
       ctx.state.extractCharacterId = picked;
       return picked;
     }
@@ -351,24 +463,20 @@ async function resolveExtractTarget(
   if (!id) {
     return null;
   }
-  const derived = await ctx.api.deriveAnchor(recordingId, cutId);
-  await ctx.api.createCharacter(id, {
-    width: derived.canvas.width,
-    height: derived.canvas.height,
-    anchorX: derived.canvas.anchor.x,
-    anchorY: derived.canvas.anchor.y,
-  });
-  ctx.state.extractCharacterId = id;
-  ctx.state.activeCharacterId = id;
-  return id;
+  return await createCharacterFramedFrom(ctx, recordingId, cutId, id);
 }
 
 /**
- * Extract, offering the explicit Canvas expand the store demands when the Segment
- * is bigger than the Character's Canvas.
+ * Extract, repairing the framing when the Segment does not fit the Canvas.
  *
- * Extraction is a hard error on overflow rather than a silent grow (ADR-0006), so
- * the refusal is caught and turned into the offer instead of an action-error text.
+ * Extraction is a hard error on overflow rather than a silent grow (ADR-0006).
+ * The way out depends on whether the Character has been drawn on yet:
+ *
+ *   - **blank** — its Canvas is only the provisional placeholder, so it is replaced
+ *     outright by the framing this Segment implies (`frameCanvas`), which may be
+ *     *smaller* than the placeholder. Expand cannot do that: it refuses to shrink.
+ *   - **drawn on** — only growing is safe, so the expand is offered at the larger of
+ *     the current and derived size on each axis, and needs a confirmation.
  */
 async function extractClipDraftInto(
   ctx: WorkbenchContext,
@@ -383,17 +491,33 @@ async function extractClipDraftInto(
     if (!/canvas/i.test(message)) {
       throw error;
     }
+
+    // A blank Character is only held back by the placeholder: framing it from this
+    // Segment settles the Canvas the Segment was measured against. A drawn-on
+    // Character may instead refuse because framing would shrink, which is the case
+    // the expand below covers — so a failure here falls through rather than up.
+    try {
+      await ctx.api.frameCanvas(characterId, { recordingId, cutId });
+      return await ctx.api.extractClipDraft(characterId, { recordingId, cutId });
+    } catch {
+      // Fall through to the expand offer.
+    }
+
+    // Drawn on: grow only, and never below what the Canvas already is.
     const derived = await ctx.api.deriveAnchor(recordingId, cutId);
-    const canvas = ctx.state.alignment?.canvas;
+    const canvas = ctx.state.alignment?.canvas ??
+      (await ctx.api.readCharacterAlignment(characterId)).canvas;
+    const width = Math.max(canvas.width, derived.canvas.width);
+    const height = Math.max(canvas.height, derived.canvas.height);
     const offered = await confirmAction(
-      `${message}\n\nExpand "${characterId}" to ${derived.canvas.width}×${derived.canvas.height}` +
-        `${canvas ? ` (from ${canvas.width}×${canvas.height})` : ''} and extract?`,
+      `${message}\n\nExpand "${characterId}" to ${width}×${height}` +
+        ` (from ${canvas.width}×${canvas.height}) and extract?`,
       'Expand and extract',
     );
     if (!offered) {
       return null;
     }
-    await ctx.api.expandCanvas(characterId, derived.canvas.width, derived.canvas.height);
+    await ctx.api.expandCanvas(characterId, width, height);
     return await ctx.api.extractClipDraft(characterId, { recordingId, cutId });
   }
 }

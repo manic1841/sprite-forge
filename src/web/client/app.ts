@@ -70,6 +70,10 @@ export interface WorkbenchHandle {
   readonly activeDraft: { characterId: string; draftId: string } | null;
   /** The active Draft frame index (the Clip-editor unit); `0` when none. */
   readonly activeDraftFrame: number;
+  /** Screen pixels per image pixel on the frame, or `null` while it is fitted. */
+  readonly draftZoom: number | null;
+  /** The brush size in the frame's own pixels. */
+  readonly brushSize: number;
   /** The active Draft's Repair state (operations + warnings), or `null`. */
   readonly repair: WorkbenchState['repair'];
   /** The active Character's Canvas and per-Clip offsets (Alignment stage), or `null`. */
@@ -184,21 +188,29 @@ export function mountWorkbench(
   /**
    * Rebuild the mode bar from the faces the target has.
    *
-   * With one face there is nothing to switch between, but the button stays: it
-   * names where you are, which is worth more than an empty bar.
+   * A face that is the only one is not a choice, it is where you are: it reads as
+   * a plain label rather than as a button that does nothing when pressed.
    */
   function renderModes(): void {
-    for (const button of modeButtons.splice(0)) {
-      button.remove();
+    // The bar is rebuilt wholesale, so a label left from a single-face target goes
+    // the same way the buttons do.
+    faces.innerHTML = '';
+    modeButtons.length = 0;
+
+    const available = facesFor(state.target);
+    if (available.length === 1) {
+      const label = make('span', 'face-label', MODE_LABEL[available[0]!]);
+      label.dataset.mode = available[0]!;
+      faces.appendChild(label);
+      return;
     }
-    for (const mode of facesFor(state.target)) {
+    for (const mode of available) {
       const button = make('button', 'btn') as HTMLButtonElement;
       button.dataset.mode = mode;
       button.textContent = MODE_LABEL[mode];
+      button.classList.toggle('on', mode === state.mode);
       // These are toggles of one stage, not links: the pressed state is what tells
       // a screen reader which face is up.
-      button.setAttribute('aria-pressed', 'false');
-      button.classList.toggle('on', mode === state.mode);
       button.setAttribute('aria-pressed', String(mode === state.mode));
       button.addEventListener('click', () => setMode(mode));
       faces.appendChild(button);
@@ -421,6 +433,8 @@ export function mountWorkbench(
     state.target = { kind: 'draft', characterId, draftId };
     state.activeCharacterId = characterId;
     state.draftFrame = 0;
+    // A new Draft starts fitted, whatever the last one was zoomed to.
+    state.draftZoom = null;
     state.repairRevision = 0;
     state.draftDescriptor = await api.readClipDraft(characterId, draftId);
     state.repair = await api.readRepair(characterId, draftId);
@@ -593,6 +607,12 @@ export function mountWorkbench(
     },
     get activeDraftFrame() {
       return state.draftFrame;
+    },
+    get draftZoom() {
+      return state.draftZoom;
+    },
+    get brushSize() {
+      return state.brushSize;
     },
     get repair() {
       return state.repair;

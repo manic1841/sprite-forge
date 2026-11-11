@@ -29,6 +29,110 @@ function pointerPixel(event: PointerEvent, img: HTMLImageElement): [number, numb
   return [x, y];
 }
 
+/**
+ * The zoom set on the Clip-editor frame, in screen pixels per image pixel.
+ *
+ * `null` fits the stage, floored to a whole number: a fractional scale would put
+ * image pixels at different screen sizes, and the footprint under the pointer would
+ * stop matching the pixels it writes.
+ *
+ * The room is measured on the stage rather than on the board, because the board is
+ * sized *by* the sheet and so cannot say how much space it has before the frame is
+ * placed (a small frame would fit itself to its own natural size and stay a stamp).
+ */
+export function draftScale(ctx: WorkbenchContext, board: HTMLElement, img: HTMLImageElement): number {
+  // A zoom the operator set is honoured even before the frame decodes: the fit is
+  // the only thing that needs a size to divide.
+  if (ctx.state.draftZoom !== null) {
+    return ctx.state.draftZoom;
+  }
+  const width = img.naturalWidth || 0;
+  const height = img.naturalHeight || 0;
+  if (width === 0 || height === 0) {
+    return 1;
+  }
+  const stage = ctx.regions.stage;
+  // The board is the frame's own box, but it is detached while the stage is being
+  // built, so the stage it will sit in stands in for it until then.
+  const room = board.clientWidth || Math.max(0, stage.clientWidth - 110);
+  const heightRoom = board.clientHeight || Math.max(0, stage.clientHeight - 150);
+  if (room === 0 || heightRoom === 0) {
+    return 1;
+  }
+  const fit = Math.min(room / width, heightRoom / height);
+  return Math.max(1, Math.min(DRAFT_ZOOM_MAX, Math.floor(fit)));
+}
+
+/**
+ * One step of zoom, and the ceiling in screen pixels per image pixel.
+ *
+ * The ceiling is high on purpose: a pixel-art frame is often only a few dozen
+ * pixels across, so a modest cap would leave it a thumbnail at the fitting zoom and
+ * with nowhere left to zoom.
+ */
+export const DRAFT_ZOOM_STEP = 2;
+export const DRAFT_ZOOM_MAX = 32;
+
+/**
+ * The brush footprint and the pixel readout.
+ *
+ * Repair is pixel work, but the frame is usually shown smaller than its own pixels,
+ * so without this an operator is aiming at a grid they cannot see. The overlay is a
+ * canvas at the frame's **own** resolution stretched over it, which makes one canvas
+ * pixel exactly one image pixel: the square under the cursor is the square that will
+ * be written, at whatever size the brush is set to.
+ */
+export function attachFootprint(
+  ctx: WorkbenchContext,
+  img: HTMLImageElement,
+  overlay: HTMLCanvasElement,
+): void {
+  const paint = (event: PointerEvent): void => {
+    const width = img.naturalWidth || 0;
+    const height = img.naturalHeight || 0;
+    if (width === 0 || height === 0) {
+      return;
+    }
+    const pencil = ctx.state.tool === 'eyedropper';
+    const size = pencil ? 1 : ctx.state.brushSize;
+    const [x, y] = pointerPixel(event, img);
+
+    overlay.width = width;
+    overlay.height = height;
+    const pen = overlay.getContext('2d');
+    if (!pen) {
+      return;
+    }
+    pen.clearRect(0, 0, width, height);
+    pen.imageSmoothingEnabled = false;
+
+    // Same centring as `stamp()` on the server, so the box is where the ink goes.
+    const half = Math.floor((size - 1) / 2);
+    pen.fillStyle = pencil ? 'rgba(255, 255, 255, 0.55)' : `${ctx.state.brushColor}66`;
+    pen.strokeStyle = pencil ? '#ffffff' : ctx.state.brushColor;
+    pen.lineWidth = 1;
+    pen.fillRect(x - half, y - half, size, size);
+    pen.strokeRect(x - half + 0.5, y - half + 0.5, size - 1, size - 1);
+
+    const readout = ctx.regions.stage.querySelector<HTMLElement>('[data-draft-cursor]');
+    if (readout) {
+      readout.textContent = `${x}, ${y}`;
+    }
+  };
+
+  const clear = (): void => {
+    const pen = overlay.getContext('2d');
+    pen?.clearRect(0, 0, overlay.width, overlay.height);
+    const readout = ctx.regions.stage.querySelector<HTMLElement>('[data-draft-cursor]');
+    if (readout) {
+      readout.textContent = '—';
+    }
+  };
+
+  img.addEventListener('pointermove', paint);
+  img.addEventListener('pointerleave', clear);
+}
+
 /** Attach painting / eyedropper gestures to a frame image. */
 export function attachPainting(ctx: WorkbenchContext, img: HTMLImageElement): void {
   img.addEventListener('pointerdown', (event) => {
@@ -192,9 +296,11 @@ export function repairBar(ctx: WorkbenchContext): HTMLElement {
   );
   settings.appendChild(
     labeled(
-      'Size',
+      // The unit is the frame's own pixels, not screen ones, which is why the view
+      // has to be able to show them at 1× or more.
+      'Size (px)',
       sizeInput(state.brushSize, (value) => {
-        state.brushSize = Math.max(1, Math.round(value));
+        state.brushSize = value;
       }),
     ),
   );

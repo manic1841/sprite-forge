@@ -62,6 +62,12 @@
 
 /* ------------------------------------------------------------------ frame */
 
+/* The shell's own tokens. `--wb-danger` is the one hue the shared UI set does not
+   carry: only the irrecoverable verb (deleting a cut) uses it, and only on hover. */
+.wb-shell {
+  --wb-danger: color-mix(in oklab, #e0574e 78%, var(--u-ink));
+}
+
 .wb-shell .workbench {
   display: flex;
   flex-direction: column;
@@ -95,6 +101,40 @@
 .wb-shell .inspector {
   width: 296px;
   border-left: 1px solid var(--u-line-2);
+  /* top zone: what you reach for; bottom zone: what you read. Only the facts
+     scroll, so the controls never leave the panel. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.wb-shell .inspector-actions,
+.wb-shell .inspector-info {
+  padding: 14px 14px 4px;
+}
+
+.wb-shell .inspector-actions {
+  flex: none;
+  max-height: 58%;
+  overflow: auto;
+  border-bottom: 1px solid var(--u-line);
+  background: color-mix(in oklab, var(--u-surface) 90%, var(--u-bg));
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+.wb-shell .inspector-actions[hidden] {
+  display: none;
+}
+
+.wb-shell .inspector-info {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 22px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
 }
 
 /* On a desktop the rail is an index to be scanned, not a scroll pane: the levels
@@ -142,6 +182,14 @@
   align-items: center;
   gap: 4px;
   margin-left: auto;
+}
+
+/* A face that is the only one says where you are without pretending to be a
+   switch, so it is set as type rather than as a button. */
+.wb-shell .face-label {
+  font: 500 12.5px/1 var(--ui-font);
+  color: var(--u-muted);
+  letter-spacing: 0.02em;
 }
 
 .wb-shell .pill {
@@ -559,6 +607,9 @@ carried by colour and spacing, not by shouting. */
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  /* a zoomed frame is content the stage must not widen to: `auto` min-width would
+     let it push the whole pane out */
+  min-width: 0;
 }
 
 .wb-shell .stage-view>.align-clips {
@@ -581,6 +632,10 @@ carried by colour and spacing, not by shouting. */
   margin-bottom: 16px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--u-line);
+}
+
+.wb-shell .inspector-actions .inspector-section:last-child {
+  border-bottom: 0;
 }
 
 .wb-shell .inspector-section:last-child {
@@ -650,22 +705,12 @@ carried by colour and spacing, not by shouting. */
   background: transparent;
 }
 
-/* The range picker: a thin track under the frames. Cutting is a gesture on the
-   strip, so it needs a surface of its own — not another row of inputs. */
-.wb-shell .pick {
-  position: relative;
-  height: 12px;
-  margin-top: 4px;
-  border: 1px dashed var(--u-line-2);
-  border-radius: 3px;
-  background: var(--u-fill);
-  cursor: crosshair;
-  touch-action: none;
-}
-
+/* The range gesture: the state its band shows. The surface itself is the shared
+   track (`.timeline`), so only the band is styled here. */
 .wb-shell .pick-band {
   position: absolute;
   inset-block: 0;
+  z-index: 1;
   border-radius: 2px;
   background: color-mix(in oklab, var(--u-accent) 55%, transparent);
   pointer-events: none;
@@ -679,10 +724,24 @@ carried by colour and spacing, not by shouting. */
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  /* the marked range's verbs keep their width; the counter is what truncates */
+  flex: none;
+  padding-right: 8px;
+  border-right: 1px solid var(--u-line);
 }
 
 .wb-shell .filmstrip-selection .muted {
+  font: 400 11px/1.6 var(--ui-mono);
+  color: var(--u-accent);
+  white-space: nowrap;
+}
+
+.wb-shell .filmstrip-selection .btn {
+  padding: 1px 8px;
+  font: 400 11px/1.6 var(--ui-mono);
+}
+
+.wb-shell .filmstrip-header .ttl {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -698,13 +757,7 @@ carried by colour and spacing, not by shouting. */
   color: var(--u-muted);
 }
 
-/* the how-to sits under the strip it describes */
-.wb-shell .filmstrip-hint {
-  margin: 6px 0 0;
-  font: 400 11px/1.5 var(--ui-mono);
-  color: var(--u-muted);
-}
-
+/* the how-to sat under the strip; the empty track carries the gesture instead */
 .wb-shell .filmstrip-controls {
   display: flex;
   align-items: center;
@@ -730,44 +783,60 @@ carried by colour and spacing, not by shouting. */
   border-color: var(--u-line-2);
 }
 
-.wb-shell .film {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(18px, 1fr));
-  gap: 2px;
-  /* four whole rows (4 × 18px cells + 3 × 2px gaps) and the 4px of padding: the
-     fifth row scrolls in, never a half-cut band */
-  max-height: 82px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 2px 0;
+/* The strip's three views of the frame axis — cells, bands, ruler — scroll as one
+   block, so they can never drift out of alignment. The block is as wide as the zoom
+   asks for and never narrower than the strip, which is what makes 1× a fit. */
+.wb-shell .strip-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
   scrollbar-width: thin;
   scrollbar-color: var(--u-line-2) transparent;
 }
 
-.wb-shell .film::-webkit-scrollbar {
-  width: 6px;
+.wb-shell .strip-scroll::-webkit-scrollbar {
   height: 6px;
 }
 
-.wb-shell .film::-webkit-scrollbar-track {
+.wb-shell .strip-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.wb-shell .film::-webkit-scrollbar-thumb {
+.wb-shell .strip-scroll::-webkit-scrollbar-thumb {
   border-radius: 3px;
   background: var(--u-line-2);
 }
 
-.wb-shell .cell {
-  min-width: 0;
+.wb-shell .strip-content {
+  display: inline-block;
+  min-width: 100%;
+  vertical-align: top;
+}
+
+.wb-shell .film {
+  display: grid;
+  /* the columns are set inline: one per frame, floored at the zoomed cell width */
+  gap: 2px;
+  padding: 0;
+  /* the row is sized here, so the digits never clip */
   height: 18px;
+}
+
+.wb-shell .cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--u-line);
   border-radius: 3px;
   background: var(--u-fill-2);
-  color: var(--u-muted);
-  font: 400 9px/1 var(--ui-mono);
+  color: color-mix(in oklab, var(--u-ink) 80%, var(--u-bg));
+  /* the digits follow the cell, so they stay readable at every zoom */
+  font: 400 clamp(9px, calc(var(--cell-w) * 0.42), 11px) / 1 var(--ui-mono);
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
@@ -785,29 +854,56 @@ carried by colour and spacing, not by shouting. */
 .wb-shell .timeline {
   position: relative;
   height: 24px;
-  margin-top: 8px;
+  margin-top: 4px;
   border: 1px solid var(--u-line);
   border-radius: 6px;
   background: var(--u-fill);
   overflow: hidden;
 }
 
+/* One rail does both jobs: the cut bands are its contents, and pressing the empty
+   track marks a new range. `.pick` only contributes the gesture surface. */
+.wb-shell .timeline.pick {
+  border-style: solid;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* Every band is drawn, because the rail is also the record of what is already
+   cut. Only the selected one may be trimmed, so its edges are the only edges that
+   look grabbable: an unselected band keeps a hairline, the selected one gets an
+   accent outline and the 8px handles. */
 .wb-shell .cut {
   position: absolute;
   inset: 0 auto 0 auto;
-  background: var(--u-tint-2);
-  border-left: 2px solid var(--u-accent);
-  border-right: 2px solid var(--u-accent);
+  border: 1px solid var(--u-line-2);
+  background: var(--u-fill-2);
   cursor: pointer;
+}
+
+/* Ranges may overlap, and bands paint in DOM order, so a later cut would cover an
+   earlier one whole. The band under the pointer comes forward, and the selected
+   one — the band being edited, handles and all — comes forward of everything. */
+.wb-shell .cut:hover {
+  z-index: 3;
+  border-color: color-mix(in oklab, var(--u-accent) 60%, transparent);
 }
 
 /* the selected band is the one the inspector is editing */
 .wb-shell .cut.sel {
+  z-index: 4;
+  border-color: var(--u-accent);
   background: color-mix(in oklab, var(--u-accent) 26%, var(--u-bg));
 }
 
+.wb-shell .cut.sel:hover {
+  border-color: var(--u-accent);
+}
+
+/* an empty rail still says what it is: the track holds only bands, so `:empty`
+   is exactly "nothing cut yet" */
 .wb-shell .timeline:empty::after {
-  content: "no cut band";
+  content: "drag to cut";
   position: absolute;
   inset: 0;
   display: grid;
@@ -818,13 +914,22 @@ carried by colour and spacing, not by shouting. */
   color: var(--u-muted);
 }
 
+/* handles sit on the selected band's own edges, flush with it */
 .wb-shell .cut-handle {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: -1px;
+  bottom: -1px;
   width: 8px;
   cursor: ew-resize;
   background: var(--u-accent);
+}
+
+.wb-shell .cut-handle[data-cut-handle='start'] {
+  border-radius: 1px 0 0 1px;
+}
+
+.wb-shell .cut-handle[data-cut-handle='end'] {
+  border-radius: 0 1px 1px 0;
 }
 
 /* the repair tools are a segmented control, so they read quieter than the tabs */
@@ -1175,6 +1280,80 @@ carried by colour and spacing, not by shouting. */
   border-top: 1px solid var(--u-line);
 }
 
+/* The head is the cut's name and its two marks. The name yields, the marks keep
+   their size: a long id must not push Rename and Delete around. */
+.wb-shell .segment-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-shell .segment-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 12.5px/1.4 var(--ui-font);
+  color: var(--u-ink);
+}
+
+/* A mark on the block, not one of its verbs: no fill, no border, quiet until
+   touched. Delete is pushed to the corner, where it stays out of the reading line
+   while remaining inside what it removes. */
+.wb-shell .segment-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--u-muted);
+  font: 400 12px/1 var(--ui-mono);
+  cursor: pointer;
+}
+
+.wb-shell .segment-icon:hover {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+.wb-shell .segment-icon.is-remove {
+  margin-left: auto;
+}
+
+.wb-shell .segment-icon.is-remove:hover {
+  background: color-mix(in oklab, var(--wb-danger) 16%, transparent);
+  color: var(--wb-danger);
+}
+
+/* the range is what the cut is, so it reads as data, not as part of the name */
+.wb-shell .segment-frames {
+  margin: 0;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+/* The one verb that makes something outside this Segment: full width, on its own
+   line, using the shell's single "primary" treatment (the same one Commit wears). */
+.wb-shell .btn.segment-extract {
+  justify-content: center;
+  width: 100%;
+  height: 28px;
+  margin-top: 2px;
+  border: 1px solid var(--u-accent);
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+  font-weight: 600;
+}
+
+.wb-shell .btn.segment-extract:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--u-accent) 22%, var(--u-bg));
+}
+
 .wb-shell .segment-detail p {
   margin: 0;
 }
@@ -1260,17 +1439,23 @@ carried by colour and spacing, not by shouting. */
   flex-direction: column;
   align-items: center;
   gap: 14px;
+  /* `align-items: center` leaves the column content-sized, which would let a zoomed
+     frame widen the whole stage instead of scrolling inside it */
+  width: 100%;
+  min-width: 0;
 }
 
 .wb-shell .draft-stage {
   display: flex;
   flex: 1 1 0;
   width: 100%;
-  /* Takes the viewer's spare height, so the percentage-sized frame below has a
-     definite box to resolve against. `min-height` keeps a sliver of picture even
-     when a long draft strip competes for the same space. */
+  /* Takes the viewer's spare height, so the frame's box resolves against it. The
+     board inside is the only thing that gives way, so this row must not floor on
+     the frame's size. */
   min-height: 56px;
-  align-items: center;
+  /* the board must take the row's height, not the frame's, or it grows the row
+     and never scrolls */
+  align-items: stretch;
   justify-content: center;
   gap: 16px;
 }
@@ -1283,6 +1468,10 @@ carried by colour and spacing, not by shouting. */
   padding: 0;
   border-radius: 50%;
   font-size: 12px;
+}
+
+.wb-shell .draft-stage .btn {
+  align-self: center;
 }
 
 .wb-shell .recording-viewer>.pill,
@@ -1304,6 +1493,96 @@ carried by colour and spacing, not by shouting. */
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--u-line-2) transparent;
+}
+
+/* The board scrolls; the sheet inside it is the frame at its own pixels times the
+   zoom. `margin: auto` centres it while it fits and collapses away once it does
+   not, so the far edge stays reachable. */
+.wb-shell .draft-board {
+  display: flex;
+  flex: 1 1 0;
+  /* the board is what gives way when the stage is short, and scrolls instead */
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  /* `safe` centring: centred while the frame fits, and pushed to the top-left
+     corner once it does not, so the start stays reachable */
+  align-items: safe center;
+  justify-content: safe center;
+  border-radius: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+.wb-shell .draft-sheet {
+  position: relative;
+  flex: none;
+  line-height: 0;
+}
+
+/* Same box as the frame: one overlay pixel is one image pixel. */
+.wb-shell .draft-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* the pixel grid, once the pixels are big enough to aim at */
+.wb-shell .draft-sheet.is-grid::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(to right, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px var(--px)),
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px var(--px));
+}
+
+.wb-shell .draft-sheet .draft-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+
+.wb-shell .draft-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-shell .draft-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.wb-shell .draft-zoom .btn {
+  min-width: 22px;
+  padding: 0 5px;
+}
+
+.wb-shell .draft-zoom-label {
+  min-width: 30px;
+  text-align: center;
+  font: 400 11px/1.6 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+/* a fitted view is a default, not a zoom level: it reads quieter than a set one */
+.wb-shell .draft-zoom-label.is-fitted {
+  color: var(--u-soft);
+}
+
+.wb-shell .draft-cursor {
+  font-variant-numeric: tabular-nums;
+  color: var(--u-muted);
 }
 
 /* the frame is sized by the space left, so the cap is the height there is, not a
@@ -1390,8 +1669,8 @@ carried by colour and spacing, not by shouting. */
 }
 
 .wb-shell .align-board {
-  /* the app draws the board at 4x a 32px canvas; the page shows it at 8x */
-  zoom: 2;
+  /* the board is sized in px by the view (fitted to the stage), so it is not
+     zoomed here: one CSS px is one pointer px and drag maths stays exact */
   position: relative;
   margin-inline: auto;
   border: 1px solid var(--u-line-2);
@@ -1422,6 +1701,12 @@ carried by colour and spacing, not by shouting. */
   display: block;
 }
 
+/* the board is fitted to the stage, so centring never clips its edges */
+.wb-shell .stage-view[data-stage-view="alignment"] {
+  align-items: center;
+  justify-content: center;
+}
+
 .wb-shell .align-offsets,
 .wb-shell .align-expand {
   display: flex;
@@ -1444,6 +1729,83 @@ carried by colour and spacing, not by shouting. */
   padding-left: 16px;
   font: 400 11.5px/1.6 var(--ui-mono);
   color: var(--u-muted);
+}
+
+/* placed work is a thumb rail: the first frame stands for the whole asset */
+.wb-shell .align-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-shell .align-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--u-line-2);
+  border-radius: 6px;
+  background: var(--u-fill);
+  cursor: pointer;
+}
+
+.wb-shell .align-thumb:hover {
+  border-color: var(--u-line-2);
+  background: var(--u-fill-2);
+}
+
+.wb-shell .align-thumb img {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: none;
+  /* the sheet is a wide strip of frames; anchor to the left so thumb 1 is shown */
+  object-fit: cover;
+  object-position: left center;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.wb-shell .align-thumb-id {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  max-width: 100%;
+  padding: 0 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: color-mix(in oklab, var(--u-bg) 78%, transparent);
+  color: var(--u-muted);
+  font: 400 9.5px/1.5 var(--ui-mono);
+}
+
+.wb-shell .align-thumb-open {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* a Draft's ghost is the drag handle for its offset */
+.wb-shell .align-ghost.draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.wb-shell .align-ghost.draggable:hover {
+  outline: 1px dashed color-mix(in oklab, var(--u-accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.wb-shell .align-ghost.dragging {
+  cursor: grabbing;
+  z-index: 3;
+  opacity: 1;
 }
 
 /* -------------------------------------------------------------- error states */
@@ -1650,6 +2012,45 @@ carried by colour and spacing, not by shouting. */
   height: auto;
   margin: 0;
   accent-color: var(--u-accent);
+}
+
+/* A create row is not one more entry: it is held out of the scrolling list, under
+   a rule, and carries a `+` where the others carry a radio dot — so "New Character"
+   cannot be read as an existing Character. The radio is kept for the keyboard and
+   the checked state, just not drawn. */
+.dialog-creates {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--u-line-2);
+}
+
+.dialog-choice.is-create {
+  position: relative;
+}
+
+.dialog-choice.is-create input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dialog-choice.is-create::before {
+  content: '+';
+  flex: none;
+  width: 13px;
+  text-align: center;
+  font: 500 13px/1.2 var(--ui-mono);
+  color: var(--u-accent-text);
+}
+
+.dialog-choice.is-create:focus-within {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.dialog-choice.is-create .dialog-choice-label {
+  font-weight: 500;
+  color: var(--u-accent-text);
 }
 
 .dialog-choice-text {

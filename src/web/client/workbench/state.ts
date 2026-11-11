@@ -91,6 +91,14 @@ export interface WorkbenchState {
   /** Whether the filmstrip is currently playing the Recording back. */
   playing: boolean;
   /**
+   * How far the strip's time axis is zoomed in, as a multiple of one frame cell.
+   *
+   * `1` fits the whole Recording; anything above it scrolls. Held on state, not in
+   * the DOM, so a re-render (a scrub, a cut, a save) keeps the magnification the
+   * reader chose. Ctrl + wheel over the strip is the only control.
+   */
+  trackZoom: number;
+  /**
    * A frame range picked on the filmstrip, before it is written as a Segment.
    *
    * The strip is where a cut is *made*: dragging marks the range, Play confirms
@@ -116,6 +124,15 @@ export interface WorkbenchState {
   /** The loaded Draft. */
   draftDescriptor: ClipDraft | null;
   draftFrame: number;
+  /**
+   * Screen pixels per image pixel on the Clip-editor frame; `null` fits the stage.
+   *
+   * Repair works in image pixels, so the view must be able to show them: at 1× one
+   * image pixel is one screen pixel, and above that the grid is visible and a brush
+   * of any size lands where its footprint says. Whole numbers only, or the footprint
+   * would straddle the pixels it claims to cover.
+   */
+  draftZoom: number | null;
   repair: RepairState | null;
   repairRevision: number;
   tool: UiTool;
@@ -157,6 +174,14 @@ export interface WorkbenchState {
   importIdTouched: boolean;
   importNotice: string | null;
   /**
+   * Which Recording's Segments the rail has open, if any.
+   *
+   * Opening a Recording in the stage does not unfold its branch: the rail only
+   * expands what was asked for on the rail, so a page arrives with the cut list
+   * folded away and a focused Recording does not quietly take a third of the rail.
+   */
+  railOpenRecording: string | null;
+  /**
    * Which of the rail's create forms is open, if any.
    *
    * The rail lists what exists; the two forms that *add* to it only open when
@@ -176,11 +201,13 @@ export function createState(): WorkbenchState {
     frame: 0,
     recordingDelaysMs: [],
     playing: false,
+    trackZoom: 1,
     selection: null,
     selectedCut: null,
     extractCharacterId: null,
     draftDescriptor: null,
     draftFrame: 0,
+    draftZoom: null,
     repair: null,
     repairRevision: 0,
     tool: 'paint',
@@ -212,6 +239,7 @@ export function createState(): WorkbenchState {
     pendingImportId: '',
     importIdTouched: false,
     importNotice: null,
+    railOpenRecording: null,
     railForm: 'none',
   };
 }

@@ -14,51 +14,56 @@ import { activeAsset, activeDraft, activeExport } from './state.js';
 import { recordingPicker, segmentEditor } from './stageCut.js';
 import type { ClipDraft, PlacementOffset } from '../types.js';
 
-/** Render the inspector for the current target and mode. */
+/**
+ * Render the inspector for the current target and mode.
+ *
+ * The panel is split top to bottom: what you reach for sits at the top, what you
+ * read sits at the bottom. The information block is the one that scrolls, so a
+ * long fact sheet never pushes the controls out of the panel.
+ */
 export function renderInspector(ctx: WorkbenchContext): void {
   const { inspector } = ctx.regions;
   const { state } = ctx;
   inspector.innerHTML = '';
   inspector.dataset.inspectorFor = state.mode;
-  inspector.appendChild(make('h3', 'ttl', 'Inspector'));
+
+  const actions = make('div', 'inspector-actions');
+  actions.dataset.inspectorZone = 'actions';
+  const info = make('div', 'inspector-info');
+  info.dataset.inspectorZone = 'info';
+  inspector.append(actions, info);
 
   if (state.loadError !== null) {
     const notice = make('p', 'muted load-error-note', state.loadError);
     notice.dataset.loadErrorNote = '';
-    inspector.appendChild(notice);
+    info.appendChild(notice);
   }
 
   if (state.mode === 'cut') {
-    recordingInspector(ctx);
-    return;
-  }
-  if (state.mode === 'align') {
+    recordingInspector(ctx, actions, info);
+  } else if (state.mode === 'align') {
     // Opening a Character lands here, so the Character's own section comes with
     // it: its Canvas is not the only thing a new Character still needs, and the
     // footage that frames it has to be reachable from the face you arrive on.
     if (state.target.kind === 'character') {
-      characterInspector(ctx, state.target.characterId);
+      characterInspector(ctx, state.target.characterId, actions, info);
     }
-    alignInspector(ctx);
-    return;
+    alignInspector(ctx, actions, info);
+  } else if (state.mode === 'export') {
+    exportInspector(ctx, info);
+  } else if (state.target.kind === 'draft') {
+    draftInspector(ctx, actions, info);
+  } else if (state.target.kind === 'asset') {
+    assetInspector(ctx, actions, info);
+  } else if (state.target.kind === 'character') {
+    characterInspector(ctx, state.target.characterId, actions, info);
+  } else {
+    recordingInspector(ctx, actions, info);
   }
-  if (state.mode === 'export') {
-    exportInspector(ctx);
-    return;
-  }
-  if (state.target.kind === 'draft') {
-    draftInspector(ctx);
-    return;
-  }
-  if (state.target.kind === 'asset') {
-    assetInspector(ctx);
-    return;
-  }
-  if (state.target.kind === 'character') {
-    characterInspector(ctx, state.target.characterId);
-    return;
-  }
-  recordingInspector(ctx);
+
+  // A face with nothing to act on (Export) drops the empty top zone rather than
+  // leaving a blank band above the facts.
+  actions.hidden = actions.childElementCount === 0;
 }
 
 // --- Character ---------------------------------------------------------------
@@ -71,7 +76,12 @@ export function renderInspector(ctx: WorkbenchContext): void {
  * offered on the Alignment face too, because that is where opening a Character
  * lands.
  */
-function characterInspector(ctx: WorkbenchContext, characterId: string): void {
+function characterInspector(
+  ctx: WorkbenchContext,
+  characterId: string,
+  actions: HTMLElement,
+  info: HTMLElement,
+): void {
   const section = make('section', 'inspector-section');
   section.dataset.inspectorSection = 'character';
   section.appendChild(subheading('Character'));
@@ -85,14 +95,18 @@ function characterInspector(ctx: WorkbenchContext, characterId: string): void {
   section.appendChild(
     make('p', 'muted', 'Its Canvas and Anchor are edited on the Alignment face.'),
   );
-  section.appendChild(recordingPicker(ctx, characterId));
-  ctx.regions.inspector.appendChild(section);
+  info.appendChild(section);
+  actions.appendChild(recordingPicker(ctx, characterId));
 }
 
 // --- Recording ---------------------------------------------------------------
 
 /** What the loaded Recording is, and what can be done with its segments. */
-function recordingInspector(ctx: WorkbenchContext): void {
+function recordingInspector(
+  ctx: WorkbenchContext,
+  actions: HTMLElement,
+  info: HTMLElement,
+): void {
   const section = make('section', 'inspector-section');
   section.dataset.inspectorSection = 'recording';
   section.appendChild(subheading('Recording'));
@@ -103,7 +117,7 @@ function recordingInspector(ctx: WorkbenchContext): void {
     section.appendChild(
       make('p', 'muted', 'Select a Recording to cut it into segments, then extract one.'),
     );
-    ctx.regions.inspector.appendChild(section);
+    info.appendChild(section);
     return;
   }
 
@@ -114,15 +128,25 @@ function recordingInspector(ctx: WorkbenchContext): void {
   addRow(list, 'segments', String(cutList.cuts.length));
   addRow(list, 'hash', cutList.hash.replace(/^sha256:/, '').slice(0, 12));
   section.appendChild(list);
-  section.appendChild(make('h4', 'ttl mini', 'Segments'));
-  section.appendChild(segmentEditor(ctx, recordingId));
-  ctx.regions.inspector.appendChild(section);
+  info.appendChild(section);
+
+  // Marking a range and keeping it are the strip's own gesture and verbs, so the
+  // inspector is left with editing a stored Segment.
+  const cut = make('section', 'inspector-section');
+  cut.dataset.inspectorSection = 'cut';
+  cut.appendChild(subheading('Cut'));
+  cut.appendChild(segmentEditor(ctx, recordingId));
+  actions.appendChild(cut);
 }
 
 // --- Draft -------------------------------------------------------------------
 
 /** The active Draft's per-frame facts, its Repair slot, and Commit. */
-function draftInspector(ctx: WorkbenchContext): void {
+function draftInspector(
+  ctx: WorkbenchContext,
+  actions: HTMLElement,
+  info: HTMLElement,
+): void {
   const draft = ctx.state.draftDescriptor;
   const target = activeDraft(ctx.state);
 
@@ -149,7 +173,7 @@ function draftInspector(ctx: WorkbenchContext): void {
     addRow(list, 'loop', String(draft.loop));
     facts.appendChild(list);
   }
-  ctx.regions.inspector.appendChild(facts);
+  info.appendChild(facts);
 
   // The Repair *tools* live under the frame in the stage; what stays here is the
   // part you read rather than reach for: the warnings and the replay log.
@@ -157,10 +181,11 @@ function draftInspector(ctx: WorkbenchContext): void {
   repair.dataset.inspectorSection = 'repair';
   repair.appendChild(subheading('Repair log'));
   repair.appendChild(repairLog(ctx));
-  ctx.regions.inspector.appendChild(repair);
+  info.appendChild(repair);
 
-  ctx.regions.inspector.appendChild(commitSection(ctx));
-  ctx.regions.inspector.appendChild(discardSection(ctx));
+  // The two ways out of a Draft go at the top: commit it, or throw it away.
+  actions.appendChild(commitSection(ctx));
+  actions.appendChild(discardSection(ctx));
 }
 
 /** A Draft frame's delay: `delaysMs` is either uniform (1) or per-frame. */
@@ -295,7 +320,11 @@ async function commit(
  * A committed Asset is immutable (ADR-0002), so editing always starts with a
  * fork; that is why Fork is the first action here.
  */
-function assetInspector(ctx: WorkbenchContext): void {
+function assetInspector(
+  ctx: WorkbenchContext,
+  actions: HTMLElement,
+  info: HTMLElement,
+): void {
   const asset = ctx.state.asset;
   const target = activeAsset(ctx.state);
   const section = make('section', 'inspector-section');
@@ -304,7 +333,7 @@ function assetInspector(ctx: WorkbenchContext): void {
 
   if (!asset || !target) {
     section.appendChild(make('p', 'muted', 'Select an asset in the Library.'));
-    ctx.regions.inspector.appendChild(section);
+    info.appendChild(section);
     return;
   }
 
@@ -331,16 +360,6 @@ function assetInspector(ctx: WorkbenchContext): void {
   }
   section.appendChild(list);
 
-  const actions = make('div', 'asset-actions');
-  actions.appendChild(forkControls(ctx, target.characterId, target.assetKind, target.assetId));
-  const verify = make('button', 'btn small ghost', 'Verify reproducible') as HTMLButtonElement;
-  verify.dataset.assetVerify = '';
-  verify.addEventListener('click', () => {
-    void ctx.run('Verify', () => verifyAsset(ctx, target.characterId, target.assetKind, target.assetId));
-  });
-  actions.appendChild(verify);
-  section.appendChild(actions);
-
   const report = ctx.state.reproducible;
   if (report) {
     const node = make('p', report.reproducible ? 'muted' : 'warning');
@@ -354,7 +373,22 @@ function assetInspector(ctx: WorkbenchContext): void {
   }
 
   section.appendChild(deleteControls(ctx, target.characterId, target.assetKind, target.assetId));
-  ctx.regions.inspector.appendChild(section);
+  info.appendChild(section);
+
+  // Fork and Verify lead: an Asset is immutable, so Fork is the way back to an
+  // editable Draft.
+  const tools = make('section', 'inspector-section');
+  tools.dataset.inspectorSection = 'asset-actions';
+  const actionRow = make('div', 'asset-actions');
+  actionRow.appendChild(forkControls(ctx, target.characterId, target.assetKind, target.assetId));
+  const verify = make('button', 'btn small ghost', 'Verify reproducible') as HTMLButtonElement;
+  verify.dataset.assetVerify = '';
+  verify.addEventListener('click', () => {
+    void ctx.run('Verify', () => verifyAsset(ctx, target.characterId, target.assetKind, target.assetId));
+  });
+  actionRow.appendChild(verify);
+  tools.appendChild(actionRow);
+  actions.appendChild(tools);
 }
 
 /** Fork inputs: the id for the new Draft (pre-filled with a free one). */
@@ -454,7 +488,11 @@ function deleteControls(
  * offset edit targets the active Draft (a committed Clip is immutable — fork it
  * to change its offset); committed Clips' offsets are shown read-only.
  */
-function alignInspector(ctx: WorkbenchContext): void {
+function alignInspector(
+  ctx: WorkbenchContext,
+  actions: HTMLElement,
+  info: HTMLElement,
+): void {
   const { state } = ctx;
   const section = make('section', 'inspector-section');
   section.dataset.inspectorSection = 'alignment';
@@ -462,7 +500,7 @@ function alignInspector(ctx: WorkbenchContext): void {
 
   if (!state.alignment) {
     section.appendChild(make('p', 'muted', 'Select a Character or asset to align.'));
-    ctx.regions.inspector.appendChild(section);
+    info.appendChild(section);
     return;
   }
 
@@ -493,36 +531,6 @@ function alignInspector(ctx: WorkbenchContext): void {
     );
   }
 
-  for (const warning of state.alignmentWarnings) {
-    const node = make('p', 'warning');
-    node.dataset.alignmentWarning = warning.code;
-    node.textContent = warning.message;
-    section.appendChild(node);
-  }
-
-  if (state.alignment.clips.length > 0) {
-    section.appendChild(make('h4', 'ttl mini', 'Committed Clips'));
-    const list = make('ul', 'align-clips');
-    for (const clip of state.alignment.clips) {
-      const item = make('li', 'align-clip');
-      item.dataset.alignClipOffset = clip.id;
-      const off = clip.placementOffset ?? { x: 0, y: 0 };
-      item.dataset.offsetX = String(off.x);
-      item.dataset.offsetY = String(off.y);
-      item.textContent = `${clip.id} · (${off.x}, ${off.y})`;
-      // Clicking a committed Clip opens it, which is where its Fork lives — the
-      // way back to an editable Draft from the placement view.
-      const open = make('button', 'btn small ghost', 'Open') as HTMLButtonElement;
-      open.dataset.alignClipOpen = clip.id;
-      open.addEventListener('click', () => {
-        void ctx.loadAsset(state.activeCharacterId ?? '', 'clip', clip.id);
-      });
-      item.appendChild(open);
-      list.appendChild(item);
-    }
-    section.appendChild(list);
-  }
-
   const expandRow = make('div', 'align-expand');
   const width = numberInput(state.expandWidth, 'width', (value) => {
     state.expandWidth = value;
@@ -538,9 +546,69 @@ function alignInspector(ctx: WorkbenchContext): void {
   expand.addEventListener('click', () => void ctx.run('Expand canvas', () => applyExpand(ctx)));
   section.appendChild(expandRow);
   section.appendChild(expand);
+  actions.appendChild(section);
+  actions.appendChild(frameFromFootage(ctx));
 
-  section.appendChild(frameFromFootage(ctx));
-  ctx.regions.inspector.appendChild(section);
+  // Warnings and what is already placed are read-only here: they sit under the
+  // controls rather than between them. With neither there is nothing to add.
+  if (state.alignmentWarnings.length === 0 && state.alignment.clips.length === 0 && state.alignment.drafts.length === 0) {
+    return;
+  }
+  const readout = make('section', 'inspector-section');
+  readout.dataset.inspectorSection = 'alignment-info';
+  readout.appendChild(subheading('Placed'));
+
+  for (const warning of state.alignmentWarnings) {
+    const node = make('p', 'warning');
+    node.dataset.alignmentWarning = warning.code;
+    node.textContent = warning.message;
+    readout.appendChild(node);
+  }
+
+  // Placed work as thumbnails: a Draft is picked to drag its ghost on the Canvas,
+  // a committed Clip is opened (which is where its Fork lives) when clicked.
+  const thumbs = make('ul', 'align-thumbs');
+  const characterId = state.activeCharacterId ?? '';
+  for (const draft of state.alignment.drafts) {
+    const item = make('li', 'align-thumb');
+    item.dataset.alignThumbDraft = draft.id;
+    item.title = draft.id;
+    const img = document.createElement('img');
+    img.src = ctx.api.frameUrl(characterId, draft.id, 0);
+    img.alt = draft.id;
+    item.appendChild(img);
+    item.addEventListener('click', () => {
+      void ctx.loadDraft(characterId, draft.id).then(() => ctx.setMode('align'));
+    });
+    thumbs.appendChild(item);
+  }
+  for (const clip of state.alignment.clips) {
+    const off = clip.placementOffset ?? { x: 0, y: 0 };
+    const item = make('li', 'align-thumb');
+    item.dataset.alignClipOffset = clip.id;
+    item.dataset.offsetX = String(off.x);
+    item.dataset.offsetY = String(off.y);
+    item.title = `${clip.id} · (${off.x}, ${off.y})`;
+    const img = document.createElement('img');
+    // The sheet is one wide strip; the thumb shows its first frame by clipping.
+    img.src = ctx.api.sheetUrl(characterId, 'clip', clip.id);
+    img.alt = clip.id;
+    item.appendChild(img);
+    item.appendChild(make('span', 'align-thumb-id', clip.id));
+    // Clicking a committed Clip opens it, which is where its Fork lives — the way
+    // back to an editable Draft from the placement view.
+    const open = make('button', 'align-thumb-open') as HTMLButtonElement;
+    open.dataset.alignClipOpen = clip.id;
+    open.setAttribute('aria-label', `Open ${clip.id}`);
+    open.title = `Open ${clip.id}`;
+    open.addEventListener('click', () => {
+      void ctx.loadAsset(characterId, 'clip', clip.id);
+    });
+    item.appendChild(open);
+    thumbs.appendChild(item);
+  }
+  readout.appendChild(thumbs);
+  info.appendChild(readout);
 }
 
 /**
@@ -679,7 +747,7 @@ async function refreshAlignment(ctx: WorkbenchContext, characterId: string): Pro
 // --- Export ------------------------------------------------------------------
 
 /** The **live Manifest**: whatever the server read back and validated. */
-function exportInspector(ctx: WorkbenchContext): void {
+function exportInspector(ctx: WorkbenchContext, info: HTMLElement): void {
   const section = make('section', 'inspector-section');
   section.dataset.inspectorSection = 'export';
   section.appendChild(subheading('Manifest'));
@@ -687,7 +755,7 @@ function exportInspector(ctx: WorkbenchContext): void {
   const manifest = ctx.state.manifest?.manifest;
   if (!manifest) {
     section.appendChild(make('p', 'muted', 'The live manifest appears once an Export is loaded.'));
-    ctx.regions.inspector.appendChild(section);
+    info.appendChild(section);
     return;
   }
 
@@ -697,6 +765,6 @@ function exportInspector(ctx: WorkbenchContext): void {
   pre.dataset.manifestTarget = manifest.target;
   pre.textContent = JSON.stringify(manifest, null, 2);
   section.appendChild(pre);
-  ctx.regions.inspector.appendChild(section);
+  info.appendChild(section);
   void activeExport(ctx.state);
 }

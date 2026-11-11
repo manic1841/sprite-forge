@@ -88,7 +88,7 @@ export function colorInput(
   return input;
 }
 
-/** A positive integer input, tagged `data-repair-size`. */
+/** A positive integer input, tagged `data-repair-size`; the value is clamped on use. */
 export function sizeInput(
   value: number,
   onChange: (value: number) => void,
@@ -96,9 +96,16 @@ export function sizeInput(
   const input = document.createElement('input');
   input.type = 'number';
   input.min = '1';
+  input.max = '64';
   input.setAttribute('data-repair-size', '');
   input.value = String(value);
-  input.addEventListener('input', () => onChange(Number(input.value)));
+  // Typing is left alone, but an empty or out-of-range field still has to resolve to
+  // a stampable size: the server paints whatever number it is handed.
+  input.addEventListener('input', () => {
+    const typed = Math.round(Number(input.value));
+    const clamped = Math.min(Number(input.max), Math.max(1, Number.isFinite(typed) ? typed : 1));
+    onChange(clamped);
+  });
   return input;
 }
 

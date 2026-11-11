@@ -688,8 +688,15 @@ async function decodeSegment(
  * union box `union`, the first frame's foot base sits at `anchorLocal` within the
  * crop; placing the crop so that point lands on the Canvas Anchor gives `(dx, dy)`.
  * An odd first-frame width puts the centre on a pixel boundary, so we round to the
- * nearest pixel. Content that would spill off the Canvas is a hard error (an
- * explicit expand-canvas action is a later, Character-level operation).
+ * nearest pixel.
+ *
+ * Only the **first** frame's foot is the Anchor, but the crop spans every frame, so
+ * a later frame reaching below the feet (a cape, a weapon) hangs below it. The
+ * Anchor sits on the Canvas's bottom edge, so that overhang can never be absorbed by
+ * growing the Canvas: `dx`/`dy` are therefore clamped to keep the whole crop on the
+ * Canvas, and the foot lands on the Anchor whenever the geometry allows. Genuinely
+ * too-small content is still a hard error (an explicit expand-canvas action is a
+ * later, Character-level operation).
  */
 function automaticPlacement(
   first: Bounds,
@@ -698,8 +705,10 @@ function automaticPlacement(
 ): { dx: number; dy: number } {
   const anchorLocalX = first.x - union.x + first.width / 2;
   const anchorLocalY = first.y - union.y + first.height;
-  const dx = Math.round(canvas.anchor.x - anchorLocalX);
-  const dy = Math.round(canvas.anchor.y - anchorLocalY);
+  const roomX = Math.max(canvas.width - union.width, 0);
+  const roomY = Math.max(canvas.height - union.height, 0);
+  const dx = Math.min(Math.max(Math.round(canvas.anchor.x - anchorLocalX), 0), roomX);
+  const dy = Math.min(Math.max(Math.round(canvas.anchor.y - anchorLocalY), 0), roomY);
 
   if (dx < 0 || dy < 0 || dx + union.width > canvas.width || dy + union.height > canvas.height) {
     throw new StoreError(

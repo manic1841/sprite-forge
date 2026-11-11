@@ -36,6 +36,14 @@ let playTimer: ReturnType<typeof setTimeout> | null = null;
  */
 let playRange: { startFrame: number; endFrame: number } | null = null;
 
+/** The narrowest a frame cell is drawn, in px, before zoom starts scrolling. */
+const CELL_PX = 18;
+/** The space held between two cells; also part of the strip's width budget. */
+const GAP_PX = 2;
+/** How much one Ctrl + wheel notch multiplies the time axis. */
+const ZOOM_STEP = 1.3;
+const ZOOM_MAX = 8;
+
 /** Render the whole strip from the loaded cut list. */
 export function renderFilmstrip(ctx: WorkbenchContext): void {
   const { filmstrip } = ctx.regions;
@@ -54,17 +62,54 @@ export function renderFilmstrip(ctx: WorkbenchContext): void {
     ? `${frameCounter(state.frame, state.cutList.frameCount, state.cutList.cuts.length)}`
     : 'load a Recording to scrub its frames';
 
+  // The strip carries its own action area: the counter, the verbs a marked range
+  // offers, and Play — which is what checks the range before it is kept.
   const controls = make('span', 'filmstrip-controls');
+  controls.dataset.filmstripControls = '';
+  controls.append(sub);
   if (state.selection) {
-    controls.append(sub, selectionActions(ctx, state.selection), playButton(ctx));
-  } else {
-    controls.append(sub, pickButton(ctx), playButton(ctx));
+    controls.appendChild(selectionActions(ctx));
   }
+  controls.appendChild(playButton(ctx));
   header.append(title, controls);
+
+  // The frames and the track scroll as one block: they are two views of the same
+  // frame axis, so they must move together. The block is as wide as the zoom says,
+  // and at 1× exactly as wide as the strip.
+  const frameCount = state.cutList?.frameCount ?? 0;
+  const isFit = state.trackZoom === 1;
+  const scroller = make('div', 'strip-scroll');
+  scroller.dataset.stripScroll = '';
+  const content = make('div', 'strip-content');
+  content.dataset.stripContent = '';
+  scroller.appendChild(content);
+  attachZoom(ctx, scroller);
+  // Mounted before anything measures it: a detached box has no width.
+  filmstrip.append(header, scroller);
+
+  // Measured from the viewport, not from the strip: the gaps between cells are part
+  // of the width too, so a fit has to be divided out of what the gaps leave.
+  const viewport = scroller.clientWidth || filmstrip.clientWidth;
+  const gaps = Math.max(0, frameCount - 1) * GAP_PX;
+  const fitWidth = frameCount > 0 ? (viewport - gaps) / frameCount : CELL_PX;
+
+  // At 1× the columns share the strip out themselves (`1fr`, no floor), so the fit
+  // holds at any window width without watching for resizes. Past 1× the width is a
+  // real number, floored at CELL_PX to keep the digits legible, and it overflows.
+  if (isFit) {
+    content.style.setProperty('--cell-w', `${Math.max(CELL_PX, fitWidth)}px`);
+  } else {
+    const cellWidth = Math.max(CELL_PX, fitWidth * state.trackZoom);
+    content.style.setProperty('--cell-w', `${cellWidth}px`);
+    content.style.width = `${Math.max(frameCount * cellWidth + gaps, 1)}px`;
+  }
 
   const frames = make('div', 'film');
   frames.setAttribute('role', 'list');
-  for (let index = 0; index < (state.cutList?.frameCount ?? 0); index += 1) {
+  frames.style.gridTemplateColumns = isFit
+    ? `repeat(${frameCount}, minmax(0, 1fr))`
+    : `repeat(${frameCount}, minmax(var(--cell-w), 1fr))`;
+  for (let index = 0; index < frameCount; index += 1) {
     const cell = make('button', 'cell');
     cell.dataset.frame = String(index);
     cell.setAttribute('role', 'listitem');
@@ -78,7 +123,11 @@ export function renderFilmstrip(ctx: WorkbenchContext): void {
       // A frame carries its Segment with it, so the inspector follows the scrub.
       // Set before the scrub: the frame update is what re-renders the inspector.
       const covering = segmentAt(state, index);
-      state.selectedCut = covering ? covering.id : null;
+      // Landing in a Segment is an edit of it, and editing replaces marking.
+      state.selectedCut = covering ? covering.id : state.selectedCut;
+      if (covering) {
+        state.selection = null;
+      }
       selectFrame(ctx, index);
       paintPlayButton(ctx);
       paintSegmentMarks(ctx);
@@ -100,25 +149,56 @@ export function renderFilmstrip(ctx: WorkbenchContext): void {
     frames.appendChild(cell);
   }
 
-  const timeline = make('div', 'timeline');
-  timeline.dataset.timeline = '';
-  for (const cut of state.cutList?.cuts ?? []) {
-    timeline.appendChild(cutRange(ctx, cut));
-  }
+  content.append(frames, cutTrack(ctx));
+}
 
-  filmstrip.append(header, frames, pickTrack(ctx), timeline);
+/**
+ * Ctrl + wheel to zoom the time axis, anchored on the frame under the pointer.
+ *
+ * The anchor is the whole point: a plain zoom would grow the axis about its left
+ * edge and slide whatever you were aiming at off screen. Reading the fraction under
+ * the cursor first, then restoring it after the rebuild, keeps that frame still.
+ */
+function attachZoom(ctx: WorkbenchContext, scroller: HTMLElement): void {
+  scroller.addEventListener(
+    'wheel',
+    (event) => {
+      if (!event.ctrlKey && !event.metaKey) {
+        return;
+      }
+      const track = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-pick]');
+      if (!track) {
+        return;
+      }
+      event.preventDefault();
+      const from = ctx.state.trackZoom;
+      const to = clampZoom(from * (event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP));
+      if (to === from) {
+        return;
+      }
+      const rect = track.getBoundingClientRect();
+      // Where the pointer is across the axis now, in frames, and how far into the
+      // viewport it sits — both are restored once the wider axis exists.
+      const fraction = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+      const offsetInViewport = event.clientX - scroller.getBoundingClientRect().left;
 
-  // The hint belongs beside the strip it describes, not across the screen in the
-  // inspector.
-  if (state.cutList) {
-    filmstrip.appendChild(
-      make(
-        'p',
-        'filmstrip-hint',
-        'Drag across the track to mark a range, play it to check, then Segment. Dragging a band\'s edge re-cuts it.',
-      ),
-    );
-  }
+      ctx.state.trackZoom = to;
+      ctx.renderFilmstrip();
+      // The re-render replaces the scroller, so re-find it before restoring.
+      const live = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-pick]');
+      const liveScroller = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-strip-scroll]');
+      const width = live?.getBoundingClientRect().width ?? 0;
+      if (liveScroller) {
+        liveScroller.scrollLeft = Math.max(0, fraction * width - offsetInViewport);
+      }
+    },
+    { passive: false },
+  );
+}
+
+/** Keep the zoom between fitting the strip and {@link ZOOM_MAX}×. */
+function clampZoom(zoom: number): number {
+  return Math.min(ZOOM_MAX, Math.max(1, zoom));
 }
 
 /** `frame N / M · K segment(s)` */
@@ -170,14 +250,16 @@ function paintPlayButton(ctx: WorkbenchContext): void {
 }
 
 /**
- * The track you drag a range on.
+ * The one track: it is the cut list, and it is where a range is marked.
  *
- * Cutting happens here rather than through start/end inputs: the range is drawn
- * under the frames, Play confirms it, and only then is it written as a Segment.
- * A plain click marks a single frame, so a short cut needs no drag at all.
+ * There is a single rail rather than a pick rail stacked on a cut rail, because
+ * the two mean the same thing — a frame range — and showing both at once left the
+ * reader to work out which one a drag would touch. Pressing empty track marks a
+ * new range; a band is pressed to edit it instead, so the two never compete.
  */
-function pickTrack(ctx: WorkbenchContext): HTMLElement {
-  const track = make('div', 'pick');
+function cutTrack(ctx: WorkbenchContext): HTMLElement {
+  const track = make('div', 'timeline pick');
+  track.dataset.timeline = '';
   track.dataset.pick = '';
   const frameCount = ctx.state.cutList?.frameCount ?? 0;
   const selection = ctx.state.selection;
@@ -190,42 +272,86 @@ function pickTrack(ctx: WorkbenchContext): HTMLElement {
     track.appendChild(band);
   }
 
-  const frameAt = (clientX: number): number => {
-    const rect = track.getBoundingClientRect();
-    const raw = Math.floor(((clientX - rect.left) / rect.width) * frameCount);
-    return Math.max(0, Math.min(frameCount - 1, raw));
-  };
+  for (const cut of ctx.state.cutList?.cuts ?? []) {
+    track.appendChild(cutRange(ctx, cut));
+  }
 
   track.addEventListener('pointerdown', (event) => {
     if (frameCount === 0 || event.button !== 0) {
       return;
     }
+    // A band (and its handles) belongs to an existing Segment; empty track marks
+    // a new range.
+    if ((event.target as HTMLElement).closest('[data-cut]')) {
+      return;
+    }
     event.preventDefault();
-    stopPlayback(ctx.state);
-    const anchor = frameAt(event.clientX);
-    const paint = (cursor: number): void => {
-      const [start, end] = anchor <= cursor ? [anchor, cursor] : [cursor, anchor];
-      ctx.state.selection = { startFrame: start, endFrame: end + 1 };
-      paintSelection(ctx);
-    };
-    paint(anchor);
-
-    const move = (moveEvent: PointerEvent): void => paint(frameAt(moveEvent.clientX));
-    const up = (): void => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      // Land on the range's first frame and let the inspector show it as a cut
-      // to come: the selection is confirmed by playing it, then saved.
-      if (ctx.state.selection) {
-        selectFrame(ctx, ctx.state.selection.startFrame);
-        paintSelection(ctx);
-      }
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    startPick(ctx, track, event);
   });
 
   return track;
+}
+
+/** Drag out a range from the pressed frame, either direction. */
+function startPick(ctx: WorkbenchContext, track: HTMLElement, down: PointerEvent): void {
+  const frameCount = ctx.state.cutList?.frameCount ?? 0;
+  stopPlayback(ctx.state);
+  // Marking replaces editing: leaving a Segment selected next to a fresh range is
+  // what made Play pick the wrong thing. The strip is rebuilt so the dropped
+  // Segment's handles go with it; the gesture then runs against the new track.
+  const restore = ctx.state.selection;
+  ctx.state.selectedCut = null;
+  paintSegmentMarks(ctx);
+  ctx.renderFilmstrip();
+
+  const frameAt = (clientX: number): number => {
+    // Re-read the track: the rebuild above replaced the node the press landed on.
+    const live = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-pick]') ?? track;
+    const rect = live.getBoundingClientRect();
+    const raw = Math.floor(((clientX - rect.left) / rect.width) * frameCount);
+    return Math.max(0, Math.min(frameCount - 1, raw));
+  };
+
+  const anchor = frameAt(down.clientX);
+  const paint = (cursor: number): void => {
+    const [start, end] = anchor <= cursor ? [anchor, cursor] : [cursor, anchor];
+    ctx.state.selection = { startFrame: start, endFrame: end + 1 };
+    paintSelection(ctx);
+  };
+  paint(anchor);
+
+  const finish = (persist: boolean): void => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', cancel);
+    window.removeEventListener('keydown', key);
+    if (!persist) {
+      ctx.state.selection = restore;
+      ctx.renderFilmstrip();
+      ctx.renderInspector();
+      return;
+    }
+    // Land on the range's first frame and let the inspector show it as a cut to
+    // come: the selection is confirmed by playing it, then saved.
+    if (ctx.state.selection) {
+      selectFrame(ctx, ctx.state.selection.startFrame);
+      paintSelection(ctx);
+    }
+  };
+  const move = (moveEvent: PointerEvent): void => paint(frameAt(moveEvent.clientX));
+  const up = (): void => finish(true);
+  const cancel = (): void => finish(false);
+  const key = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      finish(false);
+    }
+  };
+
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', cancel);
+  window.addEventListener('keydown', key);
 }
 
 /** Repaint the pick band in place, without rebuilding the strip mid-drag. */
@@ -245,7 +371,19 @@ function paintSelection(ctx: WorkbenchContext): void {
   band.style.left = `${(selection.startFrame / frameCount) * 100}%`;
   band.style.width = `${((selection.endFrame - selection.startFrame) / frameCount) * 100}%`;
 
-  const label = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-pick-label]');
+  // The verbs are only in the header when a range existed at render time; a drag
+  // that starts from nothing brings them in itself rather than re-rendering
+  // mid-gesture.
+  const controls = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-filmstrip-controls]');
+  if (!controls) {
+    return;
+  }
+  let group = controls.querySelector<HTMLElement>('[data-pick-actions]');
+  if (!group) {
+    group = selectionActions(ctx);
+    controls.insertBefore(group, controls.querySelector('[data-recording-play]'));
+  }
+  const label = group.querySelector<HTMLElement>('[data-pick-label]');
   if (label) {
     label.textContent = rangeLabel(selection);
   }
@@ -265,18 +403,17 @@ function rangeLabel(selection: { startFrame: number; endFrame: number }): string
  * This is the short-lived counterpart of the inspector's Segment editor — it only
  * exists while a range is picked, because a Segment is the *output* of a range.
  */
-function selectionActions(
-  ctx: WorkbenchContext,
-  selection: { startFrame: number; endFrame: number },
-): HTMLElement {
+export function selectionActions(ctx: WorkbenchContext): HTMLElement {
   const group = make('span', 'filmstrip-selection');
+  group.dataset.pickActions = '';
   const label = make('span', 'muted');
   label.dataset.pickLabel = '';
-  label.textContent = rangeLabel(selection);
+  label.textContent = ctx.state.selection ? rangeLabel(ctx.state.selection) : '';
 
-  const save = make('button', 'btn small', 'Segment') as HTMLButtonElement;
+  const save = make('button', 'btn small', '✂') as HTMLButtonElement;
   save.type = 'button';
   save.dataset.pickSave = '';
+  save.setAttribute('aria-label', 'Save the marked frames as a Segment');
   save.title = 'Save the marked frames as a Segment';
   save.addEventListener('click', () => {
     stopPlayback(ctx.state);
@@ -297,29 +434,6 @@ function selectionActions(
 
   group.append(label, save, cancel);
   return group;
-}
-
-/**
- * Mark a range from the keyboard: a one-frame selection at the playhead.
- *
- * Dragging on the pick track is the normal way, but a cut still has to be
- * reachable without a drag — this seeds the range, which is then widened by
- * dragging its band.
- */
-function pickButton(ctx: WorkbenchContext): HTMLElement {
-  const button = make('button', 'btn small ghost filmstrip-play', 'Mark') as HTMLButtonElement;
-  button.type = 'button';
-  button.dataset.pickStart = '';
-  button.title = 'Mark the current frame as the start of a range';
-  button.disabled = (ctx.state.cutList?.frameCount ?? 0) === 0;
-  button.addEventListener('click', () => {
-    stopPlayback(ctx.state);
-    const frame = ctx.state.frame;
-    ctx.state.selection = { startFrame: frame, endFrame: frame + 1 };
-    ctx.renderFilmstrip();
-    ctx.renderInspector();
-  });
-  return button;
 }
 
 /** The Segment covering `frame`, if any. */
@@ -418,11 +532,12 @@ function inRange(ctx: WorkbenchContext, frame: number): boolean {
 }
 
 /**
- * One cut band with its two drag handles.
+ * One cut band, with its two drag handles when it is the one being edited.
  *
  * The band is also the Segment's pick: clicking it selects the cut for the
- * inspector and takes the playhead to its first frame, so a band is both what is
- * seen and what is edited.
+ * inspector and takes the playhead to its first frame. Handles only exist on the
+ * selected band, so a dense Recording is not a field of grab points — press the
+ * band first, then its edges.
  */
 function cutRange(ctx: WorkbenchContext, cut: Segment): HTMLElement {
   const frameCount = ctx.state.cutList?.frameCount ?? 1;
@@ -433,7 +548,8 @@ function cutRange(ctx: WorkbenchContext, cut: Segment): HTMLElement {
   range.style.left = `${(cut.startFrame / frameCount) * 100}%`;
   range.style.width = `${((cut.endFrame - cut.startFrame) / frameCount) * 100}%`;
   range.title = `${cut.id} [${cut.startFrame}, ${cut.endFrame})`;
-  range.classList.toggle('sel', cut.id === ctx.state.selectedCut);
+  const selected = cut.id === ctx.state.selectedCut;
+  range.classList.toggle('sel', selected);
   range.addEventListener('click', (event) => {
     // A drag on a handle also fires a click; the handle's own pointer-up already
     // persisted the range, and re-selecting would only move the playhead away.
@@ -443,6 +559,9 @@ function cutRange(ctx: WorkbenchContext, cut: Segment): HTMLElement {
     selectSegment(ctx, cut);
   });
 
+  if (!selected) {
+    return range;
+  }
   for (const edge of ['start', 'end'] as const) {
     const handle = make('span', 'cut-handle');
     handle.dataset.cutHandle = edge;
@@ -453,7 +572,13 @@ function cutRange(ctx: WorkbenchContext, cut: Segment): HTMLElement {
   return range;
 }
 
-/** Drag a cut edge: move the visuals live, persist the range on release. */
+/**
+ * Drag a cut edge: move the visuals live, persist the range on release.
+ *
+ * Releasing **is** the save — trimming is a direct manipulation of a stored range,
+ * so it needs no confirm step (only a new Segment does, because it needs a name).
+ * Escape or a cancelled pointer puts the edge back untouched.
+ */
 function attachDrag(
   ctx: WorkbenchContext,
   handle: HTMLElement,
@@ -473,19 +598,38 @@ function attachDrag(
       range.style.left = `${(next.startFrame / frameCount) * 100}%`;
       range.style.width = `${((next.endFrame - next.startFrame) / frameCount) * 100}%`;
     };
-    const move = (moveEvent: PointerEvent): void => {
-      paint(clampRange(edge, frameAt(moveEvent.clientX), cut, frameCount));
-    };
-    const up = (upEvent: PointerEvent): void => {
+    const settle = (clientX: number): { startFrame: number; endFrame: number } =>
+      clampRange(edge, frameAt(clientX), cut, frameCount);
+
+    const finish = (persist: boolean, clientX = 0): void => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      const next = clampRange(edge, frameAt(upEvent.clientX), cut, frameCount);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', key);
+      if (!persist) {
+        paint(cut);
+        return;
+      }
+      const next = settle(clientX);
       void ctx.run('Re-cut segment', () =>
         persistRange(ctx, cut.id, next.startFrame, next.endFrame),
       );
     };
+
+    const move = (moveEvent: PointerEvent): void => paint(settle(moveEvent.clientX));
+    const up = (upEvent: PointerEvent): void => finish(true, upEvent.clientX);
+    const cancel = (): void => finish(false);
+    const key = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+    };
+
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', key);
   });
 }
 
