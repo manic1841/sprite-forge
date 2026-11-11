@@ -1,0 +1,35 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* -------------------------------------------------------------- error states */
+
+.wb-shell .load-error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, #e05c5c 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, #e05c5c 13%, var(--u-bg));
+  color: #f0a0a0;
+  font: 400 12px/1.5 var(--ui-mono);
+}
+
+.wb-shell .load-error-title {
+  display: block;
+  margin-bottom: 4px;
+  font: 600 12px/1.4 var(--ui-font);
+  letter-spacing: 0;
+}
+
+.wb-shell .load-error-message {
+  margin: 0;
+  word-break: break-word;
+}
+
+.wb-shell .load-error-note {
+  margin: 0 0 8px;
+  color: #f0a0a0;
+}
+
+.wb-shell .action-error {
+  margin: 6px 0 0;
+  color: #f0a0a0;
+  font: 400 11.5px/1.5 var(--ui-mono);
+}

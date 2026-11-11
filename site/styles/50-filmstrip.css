@@ -1,0 +1,330 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* ------------------------------------------------------------------ filmstrip */
+
+.wb-shell .filmstrip {
+  flex: none;
+  padding: 9px 14px 12px;
+  border-top: 1px solid var(--u-line);
+  background: var(--u-surface);
+}
+
+/* The strip only exists on a face with a time axis. Collapsed it keeps its top
+   border, so the boundary is still drawn and the stage does not jump a hairline
+   when the face changes. */
+.wb-shell .filmstrip[hidden] {
+  display: block;
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--u-line);
+  background: transparent;
+}
+
+/* The range gesture: the state its band shows. The surface itself is the shared
+   track (`.timeline`), so only the band is styled here. */
+.wb-shell .pick-band {
+  position: absolute;
+  inset-block: 0;
+  z-index: 1;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--u-accent) 55%, transparent);
+  pointer-events: none;
+}
+
+.wb-shell .pick-band.sel {
+  box-shadow: inset 0 0 0 1px var(--u-accent);
+}
+
+.wb-shell .filmstrip-selection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* the marked range's verbs keep their width; the counter is what truncates */
+  flex: none;
+  padding-right: 8px;
+  border-right: 1px solid var(--u-line);
+}
+
+.wb-shell .filmstrip-selection .muted {
+  font: 400 11px/1.6 var(--ui-mono);
+  color: var(--u-accent);
+  white-space: nowrap;
+}
+
+.wb-shell .filmstrip-selection .btn {
+  padding: 1px 8px;
+  font: 400 11px/1.6 var(--ui-mono);
+}
+
+.wb-shell .filmstrip-header .ttl {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .filmstrip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+/* the how-to sat under the strip; the empty track carries the gesture instead */
+.wb-shell .filmstrip-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* the counter yields first: the play toggle keeps its width */
+.wb-shell .filmstrip-controls .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .filmstrip-play {
+  flex: none;
+  padding: 1px 8px;
+  font: 400 11px/1.6 var(--ui-mono);
+}
+
+.wb-shell .filmstrip-play[aria-pressed='true'] {
+  color: var(--u-ink);
+  border-color: var(--u-line-2);
+}
+
+/* The strip's three views of the frame axis — cells, bands, ruler — scroll as one
+   block, so they can never drift out of alignment. The block is as wide as the zoom
+   asks for and never narrower than the strip, which is what makes 1× a fit. */
+.wb-shell .strip-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+.wb-shell .strip-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.wb-shell .strip-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.wb-shell .strip-scroll::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--u-line-2);
+}
+
+.wb-shell .strip-content {
+  display: inline-block;
+  min-width: 100%;
+  vertical-align: top;
+}
+
+.wb-shell .film {
+  display: grid;
+  /* the columns are set inline: one per frame, floored at the zoomed cell width */
+  gap: 2px;
+  padding: 0;
+  /* the row is sized here, so the digits never clip */
+  height: 18px;
+}
+
+.wb-shell .cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--u-line);
+  border-radius: 3px;
+  background: var(--u-fill-2);
+  color: color-mix(in oklab, var(--u-ink) 80%, var(--u-bg));
+  /* the digits follow the cell, so they stay readable at every zoom */
+  font: 400 clamp(9px, calc(var(--cell-w) * 0.42), 11px) / 1 var(--ui-mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.wb-shell .cell.inrange {
+  border-color: color-mix(in oklab, var(--u-accent) 55%, transparent);
+  background: var(--u-tint);
+}
+
+.wb-shell .cell.sel {
+  border-color: var(--u-accent);
+  background: var(--u-accent);
+  color: var(--u-accent-ink);
+}
+
+.wb-shell .timeline {
+  position: relative;
+  height: 24px;
+  margin-top: 4px;
+  border: 1px solid var(--u-line);
+  border-radius: 6px;
+  background: var(--u-fill);
+  overflow: hidden;
+}
+
+/* One rail does both jobs: the cut bands are its contents, and pressing the empty
+   track marks a new range. `.pick` only contributes the gesture surface. */
+.wb-shell .timeline.pick {
+  border-style: solid;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* Every band is drawn, because the rail is also the record of what is already
+   cut. Only the selected one may be trimmed, so its edges are the only edges that
+   look grabbable: an unselected band keeps a hairline, the selected one gets an
+   accent outline and the 8px handles. */
+.wb-shell .cut {
+  position: absolute;
+  inset: 0 auto 0 auto;
+  border: 1px solid var(--u-line-2);
+  background: var(--u-fill-2);
+  cursor: pointer;
+}
+
+/* Ranges may overlap, and bands paint in DOM order, so a later cut would cover an
+   earlier one whole. The band under the pointer comes forward, and the selected
+   one — the band being edited, handles and all — comes forward of everything. */
+.wb-shell .cut:hover {
+  z-index: 3;
+  border-color: color-mix(in oklab, var(--u-accent) 60%, transparent);
+}
+
+/* the selected band is the one the inspector is editing */
+.wb-shell .cut.sel {
+  z-index: 4;
+  border-color: var(--u-accent);
+  background: color-mix(in oklab, var(--u-accent) 26%, var(--u-bg));
+}
+
+.wb-shell .cut.sel:hover {
+  border-color: var(--u-accent);
+}
+
+/* an empty rail still says what it is: the track holds only bands, so `:empty`
+   is exactly "nothing cut yet" */
+.wb-shell .timeline:empty::after {
+  content: "drag to cut";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 400 10px/1 var(--ui-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--u-muted);
+}
+
+/* handles sit on the selected band's own edges, flush with it */
+.wb-shell .cut-handle {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 8px;
+  cursor: ew-resize;
+  background: var(--u-accent);
+}
+
+.wb-shell .cut-handle[data-cut-handle='start'] {
+  border-radius: 1px 0 0 1px;
+}
+
+.wb-shell .cut-handle[data-cut-handle='end'] {
+  border-radius: 0 1px 1px 0;
+}
+
+/* the repair tools are a segmented control, so they read quieter than the tabs */
+.wb-shell .repair-tools {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--u-line-2);
+  border-radius: 8px;
+}
+
+/* The bar sits under the frame it paints on: tools on the left, brush settings
+   beside them, Undo pushed to the far end where a step-back belongs. */
+.wb-shell .repair-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.wb-shell .repair-bar .repair-tools {
+  margin-bottom: 0;
+}
+
+/* the inspector stacks its fields; across a bar they sit in a row */
+.wb-shell .repair-bar .repair-settings {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+/* the inspector stacks its fields full width; across a bar they stay compact */
+.wb-shell .repair-bar .field {
+  gap: 6px;
+}
+
+.wb-shell .repair-bar input[type="number"] {
+  width: 52px;
+}
+
+.wb-shell .repair-bar select {
+  width: auto;
+}
+
+.wb-shell .repair-bar [data-repair-undo] {
+  margin-left: auto;
+}
+
+.wb-shell .repair-tools .btn {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--u-muted);
+  font-size: 11.5px;
+}
+
+.wb-shell .repair-tools .btn:hover:not(:disabled) {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+.wb-shell .repair-tools .btn.on {
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+  box-shadow: inset 0 0 0 1px var(--u-accent);
+}
+
+.wb-shell input[type="color"] {
+  width: 46px;
+  height: 26px;
+  padding: 3px;
+  cursor: pointer;
+}
+
+.wb-shell .inspector .repair-settings {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}

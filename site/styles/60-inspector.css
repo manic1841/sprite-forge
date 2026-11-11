@@ -1,0 +1,251 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* -------------------------------------------------------------- facts + forms */
+
+.wb-shell .kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 0;
+  font: 400 12px/1.5 var(--ui-mono);
+}
+
+.wb-shell .kv .k {
+  color: var(--u-muted);
+  white-space: nowrap;
+}
+
+.wb-shell .kv .v {
+  color: var(--u-ink);
+  word-break: break-word;
+}
+
+.wb-shell .field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-shell .field-label {
+  font: 400 11.5px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+/* the inspector is the narrow column, so its fields stack rather than squeeze */
+.wb-shell .inspector .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.wb-shell .inspector .field input[type="color"],
+.wb-shell .inspector .field input[type="checkbox"] {
+  align-self: flex-start;
+}
+
+.wb-shell :is(input, select, textarea) {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--u-line-2);
+  border-radius: 6px;
+  background: var(--u-fill);
+  color: var(--u-ink);
+  font: 400 12.5px/1.4 var(--ui-mono);
+}
+
+.wb-shell :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 0;
+}
+
+.wb-shell input[type="color"] {
+  padding: 2px;
+  width: 34px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.wb-shell input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 1px solid var(--u-line-2);
+  border-radius: 4px;
+  background: var(--u-fill-2);
+  cursor: pointer;
+}
+
+.wb-shell input[type="checkbox"]:checked {
+  border-color: var(--u-accent);
+  background: var(--u-accent);
+}
+
+.wb-shell input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px 2px auto;
+  height: 5px;
+  border-left: 1.5px solid var(--u-accent-ink);
+  border-bottom: 1.5px solid var(--u-accent-ink);
+  transform: rotate(-45deg) translate(0.5px, -1px);
+  transform-origin: top left;
+}
+
+.wb-shell input[type="file"] {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.wb-shell input[type="file"]::file-selector-button {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--u-line-2);
+  border-radius: 999px;
+  background: var(--u-fill-3);
+  color: var(--u-ink);
+  font: 500 11.5px/1.3 var(--ui-font);
+  cursor: pointer;
+}
+
+.wb-shell input[type="file"]::file-selector-button:hover {
+  border-color: var(--u-accent);
+  color: var(--u-accent-text);
+}
+
+.wb-shell select {
+  appearance: none;
+  padding-right: 26px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--u-muted) 50%),
+    linear-gradient(135deg, var(--u-muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.wb-shell .choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+}
+
+.wb-shell .choices legend {
+  padding: 0;
+  font: 500 11.5px/1.4 var(--ui-font);
+  letter-spacing: 0;
+  color: var(--u-muted);
+}
+
+.wb-shell .choice {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font: 400 12px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+  cursor: pointer;
+}
+
+/* Characters are a Library level, so their form opens in the rail rather than as
+   a row under the picture. */
+.wb-shell .characters {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+.wb-shell .segments .field {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.wb-shell .segments .field .field-label,
+.wb-shell .segments .field .k {
+  flex: none;
+}
+
+.wb-shell .segments .field select {
+  flex: 1;
+}
+
+.wb-shell .segment-add,
+.wb-shell .asset-actions,
+.wb-shell .commit-row,
+.wb-shell .fork {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+/* the Character inspector carries the way into footage, and the sidebar is too
+   narrow for a select and a button side by side */
+.wb-shell .inspector .segment-add {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.wb-shell .inspector .segment-add select {
+  width: 100%;
+  min-width: 0;
+}
+
+.wb-shell .inspector .segment-add .btn {
+  align-self: flex-start;
+}
+
+.wb-shell .segments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.wb-shell .segment-list,
+.wb-shell .sequence-list,
+.wb-shell .validation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  font: 400 12px/1.5 var(--ui-mono);
+}
+
+.wb-shell .segment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--u-line);
+  border-radius: 6px;
+}
+
+.wb-shell .segment .asset-name {
+  flex: 1;
+}
+
+/* A Segment row in the rail: name and range on one line, like an index entry. */
+.wb-shell .asset[data-segment] {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-shell .asset[data-segment] .asset-sub {
+  flex: none;
+}

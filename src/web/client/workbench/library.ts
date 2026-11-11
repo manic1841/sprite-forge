@@ -15,16 +15,15 @@
  * desktop window free of scrolling however much the store holds.
  */
 
-import type { WorkbenchContext } from './context.js';
+import type { LibraryPort } from './ports.js';
 import { characterSection } from './characters.js';
 import { heading, make, railSection } from './dom.js';
 import { importForm } from './importForm.js';
-import { selectSegment } from './stageCut.js';
 import { activeCharacter, activeExport } from './state.js';
 import type { Segment } from '../types.js';
 
 /** Render the rail from the latest scan. */
-export function renderLibrary(ctx: WorkbenchContext): void {
+export function renderLibrary(ctx: LibraryPort): void {
   const { rail } = ctx.regions;
   const { state } = ctx;
 
@@ -101,7 +100,7 @@ export function renderLibrary(ctx: WorkbenchContext): void {
 }
 
 /** Open one of the rail's create forms, closing the other. */
-function openForm(ctx: WorkbenchContext, form: 'import' | 'character'): void {
+function openForm(ctx: LibraryPort, form: 'import' | 'character'): void {
   ctx.state.railForm = ctx.state.railForm === form ? 'none' : form;
   ctx.renderLibrary();
 }
@@ -129,7 +128,7 @@ function itemList<T>(
  * while it is open. A Segment row **selects** rather than loads: the Recording is
  * already on screen, and reloading it would reset the playhead and the mark.
  */
-function recordingSection(ctx: WorkbenchContext, open: string | null): HTMLElement {
+function recordingSection(ctx: LibraryPort, open: string | null): HTMLElement {
   const selected = ctx.state.target.kind === 'recording' ? ctx.state.target.recordingId : null;
   const list = make('div', 'list');
   list.dataset.librarySection = 'recordings';
@@ -141,7 +140,7 @@ function recordingSection(ctx: WorkbenchContext, open: string | null): HTMLEleme
 
 /** One Recording, and its Segments while it is the open one. */
 function recordingGroup(
-  ctx: WorkbenchContext,
+  ctx: LibraryPort,
   recordingId: string,
   open: boolean,
   selected: boolean,
@@ -180,7 +179,7 @@ function recordingGroup(
 
 /** The open Recording's Segments, as a nested branch. */
 function recordingContents(
-  ctx: WorkbenchContext,
+  ctx: LibraryPort,
   recordingId: string,
   cuts: readonly Segment[],
 ): HTMLElement {
@@ -205,7 +204,7 @@ function recordingContents(
       make('span', 'asset-name', segment.id),
       make('span', 'asset-sub', `[${segment.startFrame}, ${segment.endFrame})`),
     );
-    item.addEventListener('click', () => selectSegment(ctx, segment));
+    item.addEventListener('click', () => ctx.cut.selectSegment(segment));
     list.appendChild(item);
   }
   branch.appendChild(list);
@@ -215,7 +214,7 @@ function recordingContents(
 
 
 /** The whole-store check, as one quiet footer line until it has something to say. */
-function validationPanel(ctx: WorkbenchContext): HTMLElement {
+function validationPanel(ctx: LibraryPort): HTMLElement {
   const section = make('footer', 'rail-foot');
   section.dataset.validationPanel = '';
 

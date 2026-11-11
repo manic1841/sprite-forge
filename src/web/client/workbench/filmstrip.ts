@@ -2,39 +2,15 @@
  * The filmstrip: the loaded Recording as a frame-accurate scrubber.
  *
  * The frame index is the unit. Cut ranges are drawn as draggable bands over the
- * same track; a drag only repositions visuals until pointer-up, then persists the
- * clamped range and re-renders. The clamping itself is a pure function in
- * `../timeline.ts`.
- *
- * Playback previews the Segment at the playhead — the frames its drag handles
- * span — and steps the Recording's own `delaysMs`, so what is previewed is that
- * cut at the capture's real timing. It is a *pause*-style toggle: stopping leaves
- * the frame where it is.
+ * same track; what a drag *means* is the cut session's business — this module
+ * only builds the cells and bands and hands the gestures over. Playback paints
+ * the playhead in place; the strip itself is never rebuilt for a tick.
  */
 
-import { clampRange } from '../timeline.js';
-import type { WorkbenchContext } from './context.js';
+import type { FilmstripPort } from './ports.js';
 import { make } from './dom.js';
-import { saveSelectionAsSegment, paintSegmentMarks, selectSegment } from './stageCut.js';
-import type { WorkbenchState } from './state.js';
+import { renderSelectionActions, rangeLabel } from './cutSession.js';
 import type { Segment } from '../types.js';
-
-/** Fallback delay for a Recording whose source reports none. */
-const DEFAULT_DELAY_MS = 100;
-
-/** The pending playback tick, if playing. */
-let playTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * The half-open frame range playback is confined to for the current run.
- *
- * Play previews the Segment the playhead sits in — the range its drag handles
- * span — and stops at its end rather than running on into unrelated footage.
- * It is fixed when playback starts so a re-cut mid-play cannot move the finish
- * line. Without a covering Segment the whole Recording is the range, which keeps
- * Play useful on an uncut or freshly imported capture.
- */
-let playRange: { startFrame: number; endFrame: number } | null = null;
 
 /** The narrowest a frame cell is drawn, in px, before zoom starts scrolling. */
 const CELL_PX = 18;
@@ -45,7 +21,7 @@ const ZOOM_STEP = 1.3;
 const ZOOM_MAX = 8;
 
 /** Render the whole strip from the loaded cut list. */
-export function renderFilmstrip(ctx: WorkbenchContext): void {
+export function renderFilmstrip(ctx: FilmstripPort): void {
   const { filmstrip } = ctx.regions;
   const { state } = ctx;
   filmstrip.innerHTML = '';
@@ -68,7 +44,7 @@ export function renderFilmstrip(ctx: WorkbenchContext): void {
   controls.dataset.filmstripControls = '';
   controls.append(sub);
   if (state.selection) {
-    controls.appendChild(selectionActions(ctx));
+    controls.appendChild(renderSelectionActions(ctx.cutDeps));
   }
   controls.appendChild(playButton(ctx));
   header.append(title, controls);
@@ -116,21 +92,12 @@ export function renderFilmstrip(ctx: WorkbenchContext): void {
     cell.title = `frame ${index}`;
     cell.textContent = String(index);
     cell.classList.toggle('sel', index === state.frame);
-    cell.classList.toggle('inrange', inRange(ctx, index));
+    cell.classList.toggle('inrange', ctx.cut.inRange(index));
     cell.addEventListener('click', () => {
-      // Picking a frame is a scrub, so it takes over from playback.
-      stopPlayback(state);
       // A frame carries its Segment with it, so the inspector follows the scrub.
-      // Set before the scrub: the frame update is what re-renders the inspector.
-      const covering = segmentAt(state, index);
-      // Landing in a Segment is an edit of it, and editing replaces marking.
-      state.selectedCut = covering ? covering.id : state.selectedCut;
-      if (covering) {
-        state.selection = null;
-      }
-      selectFrame(ctx, index);
+      ctx.cut.scrubTo(index);
       paintPlayButton(ctx);
-      paintSegmentMarks(ctx);
+      ctx.cut.paintMarks();
     });
     // Arrow keys scrub from wherever the focus is, so a cut can be made without a
     // pointer (Escape hatch from the drag-only band edges).
@@ -143,7 +110,7 @@ export function renderFilmstrip(ctx: WorkbenchContext): void {
         0,
         Math.min((state.cutList?.frameCount ?? 1) - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)),
       );
-      selectFrame(ctx, target);
+      ctx.cut.scrubTo(target);
       ctx.regions.filmstrip.querySelector<HTMLElement>(`[data-frame="${target}"]`)?.focus();
     });
     frames.appendChild(cell);
@@ -159,7 +126,7 @@ export function renderFilmstrip(ctx: WorkbenchContext): void {
  * edge and slide whatever you were aiming at off screen. Reading the fraction under
  * the cursor first, then restoring it after the rebuild, keeps that frame still.
  */
-function attachZoom(ctx: WorkbenchContext, scroller: HTMLElement): void {
+function attachZoom(ctx: FilmstripPort, scroller: HTMLElement): void {
   scroller.addEventListener(
     'wheel',
     (event) => {
@@ -212,7 +179,7 @@ function frameCounter(frame: number, frameCount: number, segments: number): stri
  * Playback is offered only while a Recording is loaded and has frames; anywhere
  * else the button is a disabled reminder of what the strip is for.
  */
-function playButton(ctx: WorkbenchContext): HTMLElement {
+function playButton(ctx: FilmstripPort): HTMLElement {
   const playable = (ctx.state.cutList?.frameCount ?? 0) > 0;
   const button = make(
     'button',
@@ -228,19 +195,12 @@ function playButton(ctx: WorkbenchContext): HTMLElement {
       ? 'Play the Segment at the playhead'
       : 'Play the Recording from the selected frame';
   button.disabled = !playable;
-  button.addEventListener('click', () => {
-    if (ctx.state.playing) {
-      stopPlayback(ctx.state);
-    } else {
-      play(ctx);
-    }
-    paintPlayButton(ctx);
-  });
+  button.addEventListener('click', () => ctx.cut.togglePlayback());
   return button;
 }
 
 /** Sync the toggle with `state.playing` without re-rendering the strip. */
-function paintPlayButton(ctx: WorkbenchContext): void {
+export function paintPlayButton(ctx: FilmstripPort): void {
   const button = ctx.regions.filmstrip.querySelector<HTMLButtonElement>('[data-recording-play]');
   if (!button) {
     return;
@@ -257,7 +217,7 @@ function paintPlayButton(ctx: WorkbenchContext): void {
  * reader to work out which one a drag would touch. Pressing empty track marks a
  * new range; a band is pressed to edit it instead, so the two never compete.
  */
-function cutTrack(ctx: WorkbenchContext): HTMLElement {
+function cutTrack(ctx: FilmstripPort): HTMLElement {
   const track = make('div', 'timeline pick');
   track.dataset.timeline = '';
   track.dataset.pick = '';
@@ -286,249 +246,10 @@ function cutTrack(ctx: WorkbenchContext): HTMLElement {
       return;
     }
     event.preventDefault();
-    startPick(ctx, track, event);
+    ctx.cut.beginPick(track, event);
   });
 
   return track;
-}
-
-/** Drag out a range from the pressed frame, either direction. */
-function startPick(ctx: WorkbenchContext, track: HTMLElement, down: PointerEvent): void {
-  const frameCount = ctx.state.cutList?.frameCount ?? 0;
-  stopPlayback(ctx.state);
-  // Marking replaces editing: leaving a Segment selected next to a fresh range is
-  // what made Play pick the wrong thing. The strip is rebuilt so the dropped
-  // Segment's handles go with it; the gesture then runs against the new track.
-  const restore = ctx.state.selection;
-  ctx.state.selectedCut = null;
-  paintSegmentMarks(ctx);
-  ctx.renderFilmstrip();
-
-  const frameAt = (clientX: number): number => {
-    // Re-read the track: the rebuild above replaced the node the press landed on.
-    const live = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-pick]') ?? track;
-    const rect = live.getBoundingClientRect();
-    const raw = Math.floor(((clientX - rect.left) / rect.width) * frameCount);
-    return Math.max(0, Math.min(frameCount - 1, raw));
-  };
-
-  const anchor = frameAt(down.clientX);
-  const paint = (cursor: number): void => {
-    const [start, end] = anchor <= cursor ? [anchor, cursor] : [cursor, anchor];
-    ctx.state.selection = { startFrame: start, endFrame: end + 1 };
-    paintSelection(ctx);
-  };
-  paint(anchor);
-
-  const finish = (persist: boolean): void => {
-    window.removeEventListener('pointermove', move);
-    window.removeEventListener('pointerup', up);
-    window.removeEventListener('pointercancel', cancel);
-    window.removeEventListener('keydown', key);
-    if (!persist) {
-      ctx.state.selection = restore;
-      ctx.renderFilmstrip();
-      ctx.renderInspector();
-      return;
-    }
-    // Land on the range's first frame and let the inspector show it as a cut to
-    // come: the selection is confirmed by playing it, then saved.
-    if (ctx.state.selection) {
-      selectFrame(ctx, ctx.state.selection.startFrame);
-      paintSelection(ctx);
-    }
-  };
-  const move = (moveEvent: PointerEvent): void => paint(frameAt(moveEvent.clientX));
-  const up = (): void => finish(true);
-  const cancel = (): void => finish(false);
-  const key = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      finish(false);
-    }
-  };
-
-  window.addEventListener('pointermove', move);
-  window.addEventListener('pointerup', up);
-  window.addEventListener('pointercancel', cancel);
-  window.addEventListener('keydown', key);
-}
-
-/** Repaint the pick band in place, without rebuilding the strip mid-drag. */
-function paintSelection(ctx: WorkbenchContext): void {
-  const track = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-pick]');
-  const selection = ctx.state.selection;
-  if (!track || !selection) {
-    return;
-  }
-  const frameCount = ctx.state.cutList?.frameCount ?? 1;
-  let band = track.querySelector<HTMLElement>('[data-pick-band]');
-  if (!band) {
-    band = make('span', 'pick-band sel');
-    band.dataset.pickBand = '';
-    track.appendChild(band);
-  }
-  band.style.left = `${(selection.startFrame / frameCount) * 100}%`;
-  band.style.width = `${((selection.endFrame - selection.startFrame) / frameCount) * 100}%`;
-
-  // The verbs are only in the header when a range existed at render time; a drag
-  // that starts from nothing brings them in itself rather than re-rendering
-  // mid-gesture.
-  const controls = ctx.regions.filmstrip.querySelector<HTMLElement>('[data-filmstrip-controls]');
-  if (!controls) {
-    return;
-  }
-  let group = controls.querySelector<HTMLElement>('[data-pick-actions]');
-  if (!group) {
-    group = selectionActions(ctx);
-    controls.insertBefore(group, controls.querySelector('[data-recording-play]'));
-  }
-  const label = group.querySelector<HTMLElement>('[data-pick-label]');
-  if (label) {
-    label.textContent = rangeLabel(selection);
-  }
-}
-
-/** `frames 1–3` — what the selection covers, in inclusive human terms. */
-function rangeLabel(selection: { startFrame: number; endFrame: number }): string {
-  const last = selection.endFrame - 1;
-  return selection.startFrame === last
-    ? `frame ${last}`
-    : `frames ${selection.startFrame}–${last}`;
-}
-
-/**
- * The actions a marked range offers: confirm it with Play, then keep it.
- *
- * This is the short-lived counterpart of the inspector's Segment editor — it only
- * exists while a range is picked, because a Segment is the *output* of a range.
- */
-export function selectionActions(ctx: WorkbenchContext): HTMLElement {
-  const group = make('span', 'filmstrip-selection');
-  group.dataset.pickActions = '';
-  const label = make('span', 'muted');
-  label.dataset.pickLabel = '';
-  label.textContent = ctx.state.selection ? rangeLabel(ctx.state.selection) : '';
-
-  const save = make('button', 'btn small', '✂') as HTMLButtonElement;
-  save.type = 'button';
-  save.dataset.pickSave = '';
-  save.setAttribute('aria-label', 'Save the marked frames as a Segment');
-  save.title = 'Save the marked frames as a Segment';
-  save.addEventListener('click', () => {
-    stopPlayback(ctx.state);
-    void ctx.run('Add segment', () => saveSelectionAsSegment(ctx));
-  });
-
-  const cancel = make('button', 'btn small ghost', '✕') as HTMLButtonElement;
-  cancel.type = 'button';
-  cancel.dataset.pickCancel = '';
-  cancel.setAttribute('aria-label', 'Clear the marked frames');
-  cancel.title = 'Clear the marked frames';
-  cancel.addEventListener('click', () => {
-    stopPlayback(ctx.state);
-    ctx.state.selection = null;
-    ctx.renderFilmstrip();
-    ctx.renderInspector();
-  });
-
-  group.append(label, save, cancel);
-  return group;
-}
-
-/** The Segment covering `frame`, if any. */
-function segmentAt(state: WorkbenchState, frame: number): Segment | null {
-  return (
-    state.cutList?.cuts.find((cut) => frame >= cut.startFrame && frame < cut.endFrame) ?? null
-  );
-}
-
-/**
- * The half-open range playback should preview.
- *
- * A marked range comes first: it is a cut being previewed before it exists, which
- * is the whole point of marking one. Otherwise the playhead *is* the selection,
- * so the range is the Segment it sits in; outside every Segment (frame 0 of a
- * freshly cut capture is the common case) it is the next Segment after it, else
- * the last one — Play previews a cut, never the surrounding footage. Only an
- * uncut Recording has no Segment, and then it plays whole.
- */
-function playbackRange(state: WorkbenchState): { startFrame: number; endFrame: number } | null {
-  const frameCount = state.cutList?.frameCount ?? 0;
-  if (frameCount === 0) {
-    return null;
-  }
-  if (state.selection) {
-    return state.selection;
-  }
-  const cuts = state.cutList?.cuts ?? [];
-  const segment =
-    segmentAt(state, state.frame) ??
-    cuts.find((cut) => cut.endFrame > state.frame) ??
-    cuts[cuts.length - 1];
-  return segment
-    ? { startFrame: segment.startFrame, endFrame: segment.endFrame }
-    : { startFrame: 0, endFrame: frameCount };
-}
-
-/**
- * Play the range resolved for the playhead.
- *
- * A playhead outside that range rewinds to its first frame, so Play always
- * previews the same whole cut; at its end it replays from the start.
- */
-function play(ctx: WorkbenchContext): void {
-  const range = playbackRange(ctx.state);
-  if (!range) {
-    return;
-  }
-  stopPlayback(ctx.state);
-  playRange = range;
-
-  if (ctx.state.frame >= playRange.endFrame - 1 || ctx.state.frame < playRange.startFrame) {
-    selectFrame(ctx, playRange.startFrame);
-  }
-  ctx.state.playing = true;
-  scheduleTick(ctx);
-}
-
-/** Queue the next frame after *its own* delay, so timing is the capture's. */
-function scheduleTick(ctx: WorkbenchContext): void {
-  const delay = ctx.state.recordingDelaysMs[ctx.state.frame] ?? DEFAULT_DELAY_MS;
-  playTimer = setTimeout(() => tick(ctx), delay);
-}
-
-function tick(ctx: WorkbenchContext): void {
-  playTimer = null;
-  // Playback only means something while the Recording is still the open target.
-  if (ctx.state.target.kind !== 'recording' || !playRange) {
-    stopPlayback(ctx.state);
-    paintPlayButton(ctx);
-    return;
-  }
-  if (ctx.state.frame >= playRange.endFrame - 1) {
-    stopPlayback(ctx.state);
-    paintPlayButton(ctx);
-    return;
-  }
-  selectFrame(ctx, ctx.state.frame + 1);
-  scheduleTick(ctx);
-}
-
-/** Stop advancing and leave the frame where it is. Safe without a render. */
-export function stopPlayback(state: WorkbenchState): void {
-  if (playTimer !== null) {
-    clearTimeout(playTimer);
-    playTimer = null;
-  }
-  playRange = null;
-  state.playing = false;
-}
-
-function inRange(ctx: WorkbenchContext, frame: number): boolean {
-  return (ctx.state.cutList?.cuts ?? []).some(
-    (cut) => frame >= cut.startFrame && frame < cut.endFrame,
-  );
 }
 
 /**
@@ -539,7 +260,7 @@ function inRange(ctx: WorkbenchContext, frame: number): boolean {
  * selected band, so a dense Recording is not a field of grab points — press the
  * band first, then its edges.
  */
-function cutRange(ctx: WorkbenchContext, cut: Segment): HTMLElement {
+function cutRange(ctx: FilmstripPort, cut: Segment): HTMLElement {
   const frameCount = ctx.state.cutList?.frameCount ?? 1;
   const range = make('div', 'cut');
   range.dataset.cut = cut.id;
@@ -556,7 +277,7 @@ function cutRange(ctx: WorkbenchContext, cut: Segment): HTMLElement {
     if ((event.target as HTMLElement).dataset.cutHandle) {
       return;
     }
-    selectSegment(ctx, cut);
+    ctx.cut.selectSegment(cut);
   });
 
   if (!selected) {
@@ -566,96 +287,16 @@ function cutRange(ctx: WorkbenchContext, cut: Segment): HTMLElement {
     const handle = make('span', 'cut-handle');
     handle.dataset.cutHandle = edge;
     handle.style[edge === 'start' ? 'left' : 'right'] = '0';
-    attachDrag(ctx, handle, edge, cut, range);
+    handle.addEventListener('pointerdown', (event) => {
+      ctx.cut.startTrim(handle, edge, cut, range, event);
+    });
     range.appendChild(handle);
   }
   return range;
 }
 
-/**
- * Drag a cut edge: move the visuals live, persist the range on release.
- *
- * Releasing **is** the save — trimming is a direct manipulation of a stored range,
- * so it needs no confirm step (only a new Segment does, because it needs a name).
- * Escape or a cancelled pointer puts the edge back untouched.
- */
-function attachDrag(
-  ctx: WorkbenchContext,
-  handle: HTMLElement,
-  edge: 'start' | 'end',
-  cut: Segment,
-  range: HTMLElement,
-): void {
-  handle.addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    const track = handle.parentElement!.parentElement!;
-    const rect = track.getBoundingClientRect();
-    const frameCount = ctx.state.cutList?.frameCount ?? 1;
-    const frameAt = (clientX: number): number =>
-      Math.round(((clientX - rect.left) / rect.width) * frameCount);
-
-    const paint = (next: { startFrame: number; endFrame: number }): void => {
-      range.style.left = `${(next.startFrame / frameCount) * 100}%`;
-      range.style.width = `${((next.endFrame - next.startFrame) / frameCount) * 100}%`;
-    };
-    const settle = (clientX: number): { startFrame: number; endFrame: number } =>
-      clampRange(edge, frameAt(clientX), cut, frameCount);
-
-    const finish = (persist: boolean, clientX = 0): void => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', cancel);
-      window.removeEventListener('keydown', key);
-      if (!persist) {
-        paint(cut);
-        return;
-      }
-      const next = settle(clientX);
-      void ctx.run('Re-cut segment', () =>
-        persistRange(ctx, cut.id, next.startFrame, next.endFrame),
-      );
-    };
-
-    const move = (moveEvent: PointerEvent): void => paint(settle(moveEvent.clientX));
-    const up = (upEvent: PointerEvent): void => finish(true, upEvent.clientX);
-    const cancel = (): void => finish(false);
-    const key = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        finish(false);
-      }
-    };
-
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', cancel);
-    window.addEventListener('keydown', key);
-  });
-}
-
-async function persistRange(
-  ctx: WorkbenchContext,
-  cutId: string,
-  startFrame: number,
-  endFrame: number,
-): Promise<void> {
-  const { state, api } = ctx;
-  if (!state.recordingId) {
-    return;
-  }
-  state.cutList = await api.setSegmentRange(state.recordingId, cutId, startFrame, endFrame);
-  ctx.renderFilmstrip();
-  ctx.renderInspector();
-}
-
-/** Move the scrub position without rebuilding the strip. */
-function selectFrame(ctx: WorkbenchContext, index: number): void {
-  ctx.state.frame = index;
-  updateFrame(ctx);
-}
-
 /** Reflect the active frame, touching only what the frame changed. */
-export function updateFrame(ctx: WorkbenchContext): void {
+export function updateFrame(ctx: FilmstripPort): void {
   const { filmstrip } = ctx.regions;
   const { state } = ctx;
   filmstrip.dataset.activeFrame = String(state.frame);
@@ -683,7 +324,7 @@ export function updateFrame(ctx: WorkbenchContext): void {
  * updated where it stands. A stage that is not showing a Recording simply has
  * nothing to paint.
  */
-function paintPreview(ctx: WorkbenchContext): void {
+function paintPreview(ctx: FilmstripPort): void {
   const { state } = ctx;
   const viewer = ctx.regions.stage.querySelector<HTMLElement>('[data-recording-viewer]');
   if (!viewer || !state.recordingId) {
@@ -712,3 +353,6 @@ function paintPreview(ctx: WorkbenchContext): void {
     counter.textContent = `frame ${state.frame} / ${frameCount}`;
   }
 }
+
+/** Re-export the range label so views keep one wording. */
+export { rangeLabel };

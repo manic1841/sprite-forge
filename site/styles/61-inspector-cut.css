@@ -1,0 +1,163 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* --- segment editor (inspector) ------------------------------------------- */
+
+.wb-shell .segment-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-shell .segment-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--u-line);
+}
+
+/* The head is the cut's name and its two marks. The name yields, the marks keep
+   their size: a long id must not push Rename and Delete around. */
+.wb-shell .segment-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wb-shell .segment-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 12.5px/1.4 var(--ui-font);
+  color: var(--u-ink);
+}
+
+/* A mark on the block, not one of its verbs: no fill, no border, quiet until
+   touched. Delete is pushed to the corner, where it stays out of the reading line
+   while remaining inside what it removes. */
+.wb-shell .segment-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--u-muted);
+  font: 400 12px/1 var(--ui-mono);
+  cursor: pointer;
+}
+
+.wb-shell .segment-icon:hover {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+.wb-shell .segment-icon.is-remove {
+  margin-left: auto;
+}
+
+.wb-shell .segment-icon.is-remove:hover {
+  background: color-mix(in oklab, var(--wb-danger) 16%, transparent);
+  color: var(--wb-danger);
+}
+
+/* the range is what the cut is, so it reads as data, not as part of the name */
+.wb-shell .segment-frames {
+  margin: 0;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+/* The one verb that makes something outside this Segment: full width, on its own
+   line, using the shell's single "primary" treatment (the same one Commit wears). */
+.wb-shell .btn.segment-extract {
+  justify-content: center;
+  width: 100%;
+  height: 28px;
+  margin-top: 2px;
+  border: 1px solid var(--u-accent);
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+  font-weight: 600;
+}
+
+.wb-shell .btn.segment-extract:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--u-accent) 22%, var(--u-bg));
+}
+
+.wb-shell .segment-detail p {
+  margin: 0;
+}
+
+.wb-shell .sequence-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-shell .sequence-clip {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .asset-delete {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--u-line);
+}
+
+.wb-shell .validation {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--u-line);
+}
+
+.wb-shell .export-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wb-shell .export-form .field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 4px 12px;
+}
+
+/* aligned to the control's first line, not to its middle, so a multi-line field
+   (the bindings JSON) keeps its label above the box */
+.wb-shell .export-form .field>.k,
+.wb-shell .export-form .field>.field-label {
+  padding-top: 4px;
+  white-space: nowrap;
+}
+
+.wb-shell .export-form .choices {
+  grid-column: 2;
+}
+
+.wb-shell .export-summary {
+  display: grid;
+  gap: 2px;
+  font: 400 12px/1.5 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+.wb-shell .manifest {
+  font: 400 11.5px/1.6 var(--ui-mono);
+  color: var(--u-text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wb-shell .root {
+  font: 400 12px/1.5 var(--ui-mono);
+}

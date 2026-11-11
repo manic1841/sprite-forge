@@ -1,0 +1,263 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* ------------------------------------------------------------- rail lists */
+
+/* One heading scheme for the whole shell, in the product's own typeface rather than
+the mono capitals: the rail's sections and the inspector's are the same rank, so
+they share a rule. Region titles are the only emphasis; every level below them is
+carried by colour and spacing, not by shouting. */
+.wb-shell .ttl {
+  margin: 0 0 8px;
+  font: 600 13px/1.4 var(--ui-font);
+  letter-spacing: 0;
+  color: var(--u-ink);
+}
+
+.wb-shell .ttl.sub {
+  margin-top: 12px;
+  font: 500 11.5px/1.4 var(--ui-font);
+  letter-spacing: 0;
+  color: var(--u-muted);
+}
+
+/* a third level, for the labels inside a section */
+.wb-shell .ttl.mini {
+  font: 400 11.5px/1.4 var(--ui-font);
+  letter-spacing: 0;
+  color: var(--u-soft);
+}
+
+.wb-shell .asset {
+  display: block;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms var(--u-ease), border-color 160ms var(--u-ease);
+}
+
+.wb-shell .asset:hover {
+  background: var(--u-fill-2);
+}
+
+.wb-shell .asset.sel {
+  border-color: var(--u-accent);
+  background: var(--u-tint);
+}
+
+.wb-shell .asset-name {
+  display: block;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .asset-sub {
+  display: block;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+.wb-shell .tag {
+  font: 500 10.5px/1.4 var(--ui-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--u-muted);
+}
+
+/* ------------------------------------------------- rail: the store's levels */
+
+/* A section head is a title, a quiet count, and at most one `+`. The forms that
+   add to the store open from that `+`, so the rail reads as an index and never as
+   a row of empty inputs. */
+.wb-shell .rail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.wb-shell .rail-head:first-of-type {
+  margin-top: 2px;
+}
+
+.wb-shell .rail-head .ttl.sub {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .rail-count {
+  min-width: 1ch;
+  font: 400 11px/1 var(--ui-mono);
+  color: var(--u-soft);
+  text-align: right;
+}
+
+.wb-shell .rail-add {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--u-muted);
+  font: 400 14px/1 var(--ui-font);
+  cursor: pointer;
+  transition: background-color 160ms var(--u-ease), color 160ms var(--u-ease);
+}
+
+.wb-shell .rail-add:hover {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+.wb-shell .rail-add:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.wb-shell .rail-empty {
+  margin: 2px 0 0;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-soft);
+}
+
+/* a revealed rail form: the same dashed block the Import use to be, tightened */
+.wb-shell .rail-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 2px;
+  padding: 8px;
+  border: 1px dashed var(--u-line-2);
+  border-radius: 8px;
+}
+
+.wb-shell .rail-form-row {
+  display: flex;
+  gap: 6px;
+}
+
+.wb-shell .rail-form input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--u-line-2);
+  background: var(--u-fill);
+  color: var(--u-ink);
+  font: inherit;
+}
+
+.wb-shell .rail-form input:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.wb-shell .rail-form .field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.wb-shell .rail-form .btn {
+  flex: none;
+}
+
+.wb-shell .rail-hint {
+  margin: 0;
+  font: 400 11px/1.45 var(--ui-mono);
+  color: var(--u-soft);
+  word-break: break-word;
+}
+
+/* the store check closes the rail as one quiet line */
+.wb-shell .rail-foot {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--u-line);
+}
+
+.wb-shell .rail-foot:empty {
+  display: none;
+}
+
+.wb-shell .rail-foot-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--u-muted);
+  font: 400 11px/1.4 var(--ui-mono);
+  cursor: pointer;
+}
+
+.wb-shell .rail-foot-btn:hover {
+  color: var(--u-ink);
+  text-decoration: underline;
+}
+
+.wb-shell .rail-foot-note {
+  margin: 6px 0 0;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-soft);
+}
+
+.wb-shell .muted {
+  color: var(--u-muted);
+}
+
+/* ------------------------------------------------- rail: the store's levels */
+
+/* Recordings sit at the top with no owner; a Character owns everything below it,
+   so its Drafts and Assets are indented under its own row and shown only while
+   it is open. One open branch is what keeps the rail short on a desktop window. */
+.wb-shell .char-head {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  column-gap: 4px;
+  align-items: center;
+}
+
+.wb-shell .char-head .chev {
+  color: var(--u-soft);
+  font-size: 9px;
+}
+
+.wb-shell .char-head.open .chev {
+  color: var(--u-accent-text);
+}
+
+.wb-shell .char-body {
+  margin: 0 0 4px 8px;
+  padding-left: 9px;
+  border-left: 1px solid var(--u-line);
+}
+
+.wb-shell .char-branch {
+  margin-top: 7px;
+}
+
+.wb-shell .char-body .rail-empty {
+  margin-top: 2px;
+}
+
+.wb-shell .ttl.grp {
+  margin: 0 0 3px;
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--u-soft);
+}

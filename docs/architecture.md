@@ -140,10 +140,29 @@ stage and inspector follow, not the mode, so going from "cut" to "repair" to
 place; committing it shows the new Clip on the Character's Canvas.
 
 The client is a shell plus one module per region (`src/web/client/workbench/`:
-`dom`, `state`, `context`, `importForm`, `library`, `filmstrip`, `stageClip`,
-`stageAlign`, `stageExport`, `inspector`, `repair`). A view receives a
-`WorkbenchContext` and never imports a sibling, so a region can be replaced or
-tested on its own.
+`dom`, `state`, `ports`, `library`, `filmstrip`, `stageCut`, `stageClip`,
+`inspector`, `stageAlign`, `stageExport`). Rules that a region used to own in
+half — a marked range, a Repair gesture — live in a **deep session module**
+instead (`cutSession`, `draftEditor`): the module holds the invariants and the
+state slice it writes, and the regions only build DOM and call its verbs. A view
+receives a narrow port from `ports.ts` and never imports a sibling, so a region
+can be replaced or tested on its own. The inspector is a router over one section
+module per target (`recordingInspector`, `draftInspector`, `assetInspector`,
+`alignInspector`, `exportInspector`).
+
+A session is split from the **inside**, never across: `cutSession` composes
+`cutTargets` (the single Character picker), `cutPlayback` and `extractSegment`,
+and `draftEditor` composes `draftSheet` (the zoom rate and fit) and `repairTools`
+(the gestures). Each sub-module takes a narrow deps interface its session
+satisfies and never imports the session, so the verb set stays the facade and no
+cycle appears.
+
+The app sheet is split the same way it is read: `site/styles/` lines up
+`00-base` → `10-shell` → `20-chrome` → one file per region → `90-errors` →
+`98-responsive` → `99-dialogs`. The numeric prefix is the cascade order and the
+`<link>` list in `workbench.html` repeats it; `.wb-shell` is the scoping prefix
+in every file.
+
 
 This shape was chosen against two alternatives prototyped at equal fidelity — a
 **linear stepper** (one task per screen, heavy Next/Back) and a **timeline-first**

@@ -1,0 +1,198 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* --------------------------------------------------------------- the frames */
+
+.wb-shell img {
+  image-rendering: pixelated;
+}
+
+.wb-shell .draft-viewer,
+.wb-shell .recording-viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  /* `align-items: center` leaves the column content-sized, which would let a zoomed
+     frame widen the whole stage instead of scrolling inside it */
+  width: 100%;
+  min-width: 0;
+}
+
+.wb-shell .draft-stage {
+  display: flex;
+  flex: 1 1 0;
+  width: 100%;
+  /* Takes the viewer's spare height, so the frame's box resolves against it. The
+     board inside is the only thing that gives way, so this row must not floor on
+     the frame's size. */
+  min-height: 56px;
+  /* the board must take the row's height, not the frame's, or it grows the row
+     and never scrolls */
+  align-items: stretch;
+  justify-content: center;
+  gap: 16px;
+}
+
+/* the frame steppers: two round ghosts either side of the picture */
+.wb-shell .draft-stage .btn,
+.wb-shell .recording-viewer>.btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+}
+
+.wb-shell .draft-stage .btn {
+  align-self: center;
+}
+
+.wb-shell .recording-viewer>.pill,
+.wb-shell .draft-viewer>.pill {
+  margin: 0;
+  align-self: flex-end;
+}
+
+.wb-shell .draft-frames {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  /* a long draft gives the strip its own scroll rather than eating the picture's
+     height */
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 30%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+/* The board scrolls; the sheet inside it is the frame at its own pixels times the
+   zoom. `margin: auto` centres it while it fits and collapses away once it does
+   not, so the far edge stays reachable. */
+.wb-shell .draft-board {
+  display: flex;
+  flex: 1 1 0;
+  /* the board is what gives way when the stage is short, and scrolls instead */
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  /* `safe` centring: centred while the frame fits, and pushed to the top-left
+     corner once it does not, so the start stays reachable */
+  align-items: safe center;
+  justify-content: safe center;
+  border-radius: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+.wb-shell .draft-sheet {
+  position: relative;
+  flex: none;
+  line-height: 0;
+}
+
+/* Same box as the frame: one overlay pixel is one image pixel. */
+.wb-shell .draft-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* the pixel grid, once the pixels are big enough to aim at */
+.wb-shell .draft-sheet.is-grid::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(to right, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px var(--px)),
+    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px var(--px));
+}
+
+.wb-shell .draft-sheet .draft-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+
+.wb-shell .draft-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-shell .draft-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.wb-shell .draft-zoom .btn {
+  min-width: 22px;
+  padding: 0 5px;
+}
+
+.wb-shell .draft-zoom-label {
+  min-width: 30px;
+  text-align: center;
+  font: 400 11px/1.6 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+/* a fitted view is a default, not a zoom level: it reads quieter than a set one */
+.wb-shell .draft-zoom-label.is-fitted {
+  color: var(--u-soft);
+}
+
+.wb-shell .draft-cursor {
+  font-variant-numeric: tabular-nums;
+  color: var(--u-muted);
+}
+
+/* the frame is sized by the space left, so the cap is the height there is, not a
+   fixed 560px: `max-width` still keeps a wide frame from stretching the column */
+.wb-shell .draft-frame,
+.wb-shell .recording-frame {
+  flex: 0 1 auto;
+  width: auto;
+  height: auto;
+  max-height: 100%;
+  max-width: min(100%, 600px);
+  min-height: 0;
+  object-fit: contain;
+  border: 1px solid var(--u-line-2);
+  border-radius: 8px;
+  background-color: var(--u-fill);
+  box-shadow: var(--u-shadow-sm);
+}
+
+.wb-shell .draft-frame {
+  background-image:
+    linear-gradient(45deg, var(--u-fill-2) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--u-fill-2) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--u-fill-2) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--u-fill-2) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.wb-shell .sheet-box {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--u-line-2);
+  border-radius: 8px;
+  background: var(--u-fill);
+}
+
+.wb-shell .sheet {
+  display: block;
+  max-width: none;
+}

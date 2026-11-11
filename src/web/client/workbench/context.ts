@@ -1,14 +1,14 @@
 /**
- * The contract a view module needs from the shell.
+ * The contract the shell hands to its views.
  *
- * Views never import the shell and never import each other: they receive this,
- * read the state slice they draw, and call back for anything that has to touch
- * the store or re-render a sibling region. That is what keeps every module
- * testable and replaceable on its own.
+ * Views never import the shell and never import each other: they receive a
+ * narrow {@link BasePort} (see `./ports.ts`) plus the one session their region
+ * drives. This module is the composed shape the shell itself builds.
  */
 
-import type { WorkbenchApi } from '../api.js';
-import type { WorkbenchState } from './state.js';
+import type { CutSession, CutSessionDeps } from './cutSession.js';
+import type { DraftEditor } from './draftEditor.js';
+import type { BasePort } from './ports.js';
 
 /** The persistent region nodes, so a view can target its own container. */
 export interface Regions {
@@ -21,13 +21,9 @@ export interface Regions {
   readonly context: HTMLElement;
 }
 
-/** Services the shell offers its views. */
-export interface WorkbenchContext {
-  readonly api: WorkbenchApi;
-  readonly state: WorkbenchState;
+/** Everything the shell offers its views, composed from the narrow ports. */
+export interface WorkbenchContext extends BasePort {
   readonly root: HTMLElement;
-  readonly regions: Regions;
-
   /** Re-render the whole shell. */
   render(): void;
   /** Re-render one region. */
@@ -37,29 +33,11 @@ export interface WorkbenchContext {
   renderInspector(): void;
   renderContext(): void;
 
-  /** Open a Recording (guarded: a rejection becomes visible state). */
-  loadRecording(recordingId: string): Promise<void>;
-  /** Open a Draft (guarded). */
-  loadDraft(characterId: string, draftId: string): Promise<void>;
-  /** Open a committed Asset (guarded). */
-  loadAsset(characterId: string, assetKind: 'clip' | 'sequence', assetId: string): Promise<void>;
-  /** Open a Character itself: its Alignment face, where its Canvas is framed. */
-  loadCharacter(characterId: string): Promise<void>;
-  /** Show a Character's alignment face (guarded). */
-  loadAlignment(characterId: string): Promise<void>;
-  /** Open an Export (guarded). */
-  loadExport(target: string): Promise<void>;
-  /**
-   * Run a user action, turning a rejection into visible state.
-   *
-   * Everything a click can start goes through here: without it a refused
-   * `expand-canvas` was only ever seen in the console.
-   */
-  run(label: string, body: () => Promise<void>): Promise<void>;
-  /** Switch the active face. */
-  setMode(mode: WorkbenchState['mode']): void;
-  /** Re-scan the store into `state.scan`. */
-  rescan(): Promise<void>;
-  /** Register a promise so a harness can await it via `settled()`. */
+  /** Register a promise so a harness can await it via `settled`. */
   track(promise: Promise<void>): Promise<void>;
+
+  readonly cut: CutSession;
+  /** The dependency bag the session was built from, so detached controls rebuild. */
+  readonly cutDeps: CutSessionDeps;
+  readonly draft: DraftEditor;
 }

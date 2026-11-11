@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountWorkbench, slugifyId } from '../src/web/client/app.js';
 import { clampRange } from '../src/web/client/timeline.js';
-import { draftScale } from '../src/web/client/workbench/repair.js';
+import { draftScaleFor as draftScale } from '../src/web/client/workbench/draftEditor.js';
 import type { WorkbenchApi } from '../src/web/client/api.js';
 import type {
   AlignmentState,

@@ -1,0 +1,153 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* ------------------------------------------------- dialogs (confirm / ask) */
+/* Drawn in the page, not by the browser: `window.prompt` is missing in some of
+   the places the workbench runs. The backdrop is fixed and lives outside the
+   shell, so the shell styles are restated here rather than inherited. */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 45%);
+}
+
+.dialog {
+  width: min(100%, 380px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--u-line-2);
+  background: var(--u-surface);
+  color: var(--u-ink);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+  font: 400 13px/1.5 var(--ui-font);
+}
+
+.dialog-message {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.dialog input {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--u-line-2);
+  background: var(--u-fill);
+  color: var(--u-ink);
+  font: inherit;
+}
+
+.dialog input:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+/* a choice row: the radio, then a label with an optional note under it */
+.dialog-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.dialog-choice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.dialog-choice:hover {
+  background: var(--u-fill-2);
+}
+
+.dialog-choice:has(input:checked) {
+  background: var(--u-tint);
+}
+
+.dialog-choice input {
+  height: auto;
+  margin: 0;
+  accent-color: var(--u-accent);
+}
+
+/* A create row is not one more entry: it is held out of the scrolling list, under
+   a rule, and carries a `+` where the others carry a radio dot — so "New Character"
+   cannot be read as an existing Character. The radio is kept for the keyboard and
+   the checked state, just not drawn. */
+.dialog-creates {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--u-line-2);
+}
+
+.dialog-choice.is-create {
+  position: relative;
+}
+
+.dialog-choice.is-create input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dialog-choice.is-create::before {
+  content: '+';
+  flex: none;
+  width: 13px;
+  text-align: center;
+  font: 500 13px/1.2 var(--ui-mono);
+  color: var(--u-accent-text);
+}
+
+.dialog-choice.is-create:focus-within {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.dialog-choice.is-create .dialog-choice-label {
+  font-weight: 500;
+  color: var(--u-accent-text);
+}
+
+.dialog-choice-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog-choice-note {
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-actions .btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 0;
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+  font: 500 12.5px/1 var(--ui-font);
+  cursor: pointer;
+}
+
+.dialog-actions .btn.ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--u-line-2);
+  color: var(--u-muted);

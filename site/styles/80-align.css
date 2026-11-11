@@ -1,0 +1,183 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* ----------------------------------------------------------- repair + align */
+
+/* the inspector keeps the log the bar no longer needs to show */
+.wb-shell .repair-log {
+  padding: 10px;
+  border: 1px dashed var(--u-line-2);
+  border-radius: 8px;
+}
+
+.wb-shell .repair-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wb-shell .repair-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wb-shell .repair-ops {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font: 400 11.5px/1.6 var(--ui-mono);
+  color: var(--u-text-2);
+}
+
+.wb-shell .repair-op {
+  margin-bottom: 2px;
+}
+
+.wb-shell .repair-warning,
+.wb-shell .warning {
+  margin: 6px 0;
+  padding: 6px 9px;
+  border-left: 3px solid #d9822b;
+  border-radius: 5px;
+  background: color-mix(in oklab, #d9822b 14%, var(--u-bg));
+  color: #e8b57a;
+  font: 400 11.5px/1.5 var(--ui-mono);
+}
+
+.wb-shell .align-board {
+  /* the board is sized in px by the view (fitted to the stage), so it is not
+     zoomed here: one CSS px is one pointer px and drag maths stays exact */
+  position: relative;
+  margin-inline: auto;
+  border: 1px solid var(--u-line-2);
+  border-radius: 8px;
+  background: repeating-conic-gradient(var(--u-fill-2) 0% 25%, var(--u-fill) 0% 50%) 50% / 16px 16px;
+  overflow: hidden;
+}
+
+.wb-shell .align-anchor {
+  position: absolute;
+  z-index: 3;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--u-accent);
+  box-shadow: 0 0 0 1px var(--u-bg);
+}
+
+.wb-shell .align-ghost {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: 2;
+  opacity: 0.55;
+}
+
+.wb-shell .align-ghost-image {
+  display: block;
+}
+
+/* the board is fitted to the stage, so centring never clips its edges */
+.wb-shell .stage-view[data-stage-view="alignment"] {
+  align-items: center;
+  justify-content: center;
+}
+
+.wb-shell .align-offsets,
+.wb-shell .align-expand {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.wb-shell .align-offsets .field,
+.wb-shell .align-expand .field {
+  flex: 1;
+}
+
+.wb-shell .align-offsets input,
+.wb-shell .align-expand input {
+  width: 52px;
+}
+
+.wb-shell .align-clips {
+  margin: 0 0 8px;
+  padding-left: 16px;
+  font: 400 11.5px/1.6 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+/* placed work is a thumb rail: the first frame stands for the whole asset */
+.wb-shell .align-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(54px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-shell .align-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--u-line-2);
+  border-radius: 6px;
+  background: var(--u-fill);
+  cursor: pointer;
+}
+
+.wb-shell .align-thumb:hover {
+  border-color: var(--u-line-2);
+  background: var(--u-fill-2);
+}
+
+.wb-shell .align-thumb img {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: none;
+  /* the sheet is a wide strip of frames; anchor to the left so thumb 1 is shown */
+  object-fit: cover;
+  object-position: left center;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.wb-shell .align-thumb-id {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  max-width: 100%;
+  padding: 0 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: color-mix(in oklab, var(--u-bg) 78%, transparent);
+  color: var(--u-muted);
+  font: 400 9.5px/1.5 var(--ui-mono);
+}
+
+.wb-shell .align-thumb-open {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* a Draft's ghost is the drag handle for its offset */
+.wb-shell .align-ghost.draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.wb-shell .align-ghost.draggable:hover {
+  outline: 1px dashed color-mix(in oklab, var(--u-accent) 60%, transparent);
+  outline-offset: 1px;
+}
+
+.wb-shell .align-ghost.dragging {
+  cursor: grabbing;
+  z-index: 3;
+  opacity: 1;
+}

@@ -71,12 +71,51 @@ export interface ExportForm {
   bindings: string;
 }
 
-/** Everything the workbench remembers between renders. */
-export interface WorkbenchState {
+/**
+ * The shell's own slice: what is open, which face is up, and the last scan.
+ *
+ * Written by the shell alone. Views read it; only a load or a face switch moves
+ * it.
+ */
+export interface ShellState {
   mode: WorkbenchMode;
   target: Target;
   scan: StoreScan | null;
+  /** The message of the last failed load, shown until a load succeeds again. */
+  loadError: string | null;
+  /** The message of the last failed **action** (expand, offset, repair, ...). */
+  actionError: string | null;
+  /** The Import form's uncommitted input. */
+  pendingFile: File | null;
+  pendingImportId: string;
+  importIdTouched: boolean;
+  importNotice: string | null;
+  /**
+   * Which Recording's Segments the rail has open, if any.
+   *
+   * Opening a Recording in the stage does not unfold its branch: the rail only
+   * expands what was asked for on the rail, so a page arrives with the cut list
+   * folded away and a focused Recording does not quietly take a third of the rail.
+   */
+  railOpenRecording: string | null;
+  /**
+   * Which of the rail's create forms is open, if any.
+   *
+   * The rail lists what exists; the two forms that *add* to it only open when
+   * asked for, so the scan path is never interrupted by empty inputs.
+   */
+  railForm: 'none' | 'import' | 'character';
+  /** The last store validation report. */
+  validation: StoreCheckReport | null;
+}
 
+/**
+ * The Cutting slice: one loaded Recording, its playhead, its mark and its cut.
+ *
+ * Written by the cut session (`./cutSession.ts`) alone, so the range invariants
+ * have exactly one owner.
+ */
+export interface CutState {
   /** The loaded Recording and its cut list (also feeds the filmstrip). */
   recordingId: string | null;
   cutList: CutList | null;
@@ -120,7 +159,14 @@ export interface WorkbenchState {
    * re-render and so a Recording can be worked against one Character throughout.
    */
   extractCharacterId: string | null;
+}
 
+/**
+ * The Draft-editing slice: frames, zoom, brush settings and the Repair log.
+ *
+ * Written by the draft editor (`./draftEditor.ts`) alone.
+ */
+export interface DraftState {
   /** The loaded Draft. */
   draftDescriptor: ClipDraft | null;
   draftFrame: number;
@@ -139,56 +185,64 @@ export interface WorkbenchState {
   brushColor: string;
   brushSize: number;
   scope: 'frame' | 'clip';
+}
 
+/**
+ * The Alignment slice: the open Character, its Canvas and its placements.
+ *
+ * Written by the alignment inspector and both alignment faces alone.
+ */
+export interface AlignState {
   /** The Character the Alignment face is showing. */
   activeCharacterId: string | null;
   alignment: CharacterAlignment | null;
   alignmentWarnings: AlignmentWarning[];
   expandWidth: number;
   expandHeight: number;
+}
 
-  /** The loaded Export. */
-  manifest: ExportResult | null;
-
+/**
+ * The committed-Asset slice: the open Asset, its playback and a Sequence being
+ * composed.
+ *
+ * Written by the asset inspector and the clip stage alone.
+ */
+export interface AssetState {
   /** The loaded committed Asset (its meta and provenance), or `null`. */
   asset: CommittedAsset | CommittedSequence | null;
   /** The frame index shown while playing a baked sheet. */
   assetFrame: number;
   /** A Sequence being composed, if any. */
   sequenceDraft: SequenceDraft | null;
-  /** The Export form's values, so a re-render never wipes half-typed input. */
-  exportForm: ExportForm;
-  /** The last store validation report. */
-  validation: StoreCheckReport | null;
   /** The last reproducibility check for the open Asset. */
   reproducible: ReproducibilityReport | null;
-
-  /** The message of the last failed load, shown until a load succeeds again. */
-  loadError: string | null;
-  /** The message of the last failed **action** (expand, offset, repair, ...). */
-  actionError: string | null;
-
-  /** The Import form's uncommitted input. */
-  pendingFile: File | null;
-  pendingImportId: string;
-  importIdTouched: boolean;
-  importNotice: string | null;
-  /**
-   * Which Recording's Segments the rail has open, if any.
-   *
-   * Opening a Recording in the stage does not unfold its branch: the rail only
-   * expands what was asked for on the rail, so a page arrives with the cut list
-   * folded away and a focused Recording does not quietly take a third of the rail.
-   */
-  railOpenRecording: string | null;
-  /**
-   * Which of the rail's create forms is open, if any.
-   *
-   * The rail lists what exists; the two forms that *add* to it only open when
-   * asked for, so the scan path is never interrupted by empty inputs.
-   */
-  railForm: 'none' | 'import' | 'character';
 }
+
+/**
+ * The Export slice: one loaded Manifest and the form that produces the next one.
+ *
+ * Written by the export stage and inspector alone.
+ */
+export interface ExportState {
+  /** The loaded Export. */
+  manifest: ExportResult | null;
+  /** The Export form's values, so a re-render never wipes half-typed input. */
+  exportForm: ExportForm;
+}
+
+/**
+ * Everything the workbench remembers between renders.
+ *
+ * Composed of named slices so each one has an owning writer; a view reads the
+ * slice it draws rather than being handed a bag it may write anywhere.
+ */
+export type WorkbenchState = ShellState &
+  CutState &
+  DraftState &
+  AlignState &
+  AssetState &
+  ExportState;
+
 
 /** A fresh state: nothing open, defaults on the tools. */
 export function createState(): WorkbenchState {

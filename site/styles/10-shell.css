@@ -1,0 +1,102 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* ------------------------------------------------------------------ frame */
+
+/* The shell's own tokens. `--wb-danger` is the one hue the shared UI set does not
+   carry: only the irrecoverable verb (deleting a cut) uses it, and only on hover. */
+.wb-shell {
+  --wb-danger: color-mix(in oklab, #e0574e 78%, var(--u-ink));
+}
+
+.wb-shell .workbench {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* The three columns share one row under the header, so the header can span the
+   full width and never move when a face changes. */
+.wb-shell .shell-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.wb-shell .rail,
+.wb-shell .inspector {
+  flex: none;
+  overflow: auto;
+  padding: 16px 14px 22px;
+  background: var(--u-surface);
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+.wb-shell .rail {
+  width: 232px;
+  border-right: 1px solid var(--u-line-2);
+}
+
+.wb-shell .inspector {
+  width: 296px;
+  border-left: 1px solid var(--u-line-2);
+  /* top zone: what you reach for; bottom zone: what you read. Only the facts
+     scroll, so the controls never leave the panel. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.wb-shell .inspector-actions,
+.wb-shell .inspector-info {
+  padding: 14px 14px 4px;
+}
+
+.wb-shell .inspector-actions {
+  flex: none;
+  max-height: 58%;
+  overflow: auto;
+  border-bottom: 1px solid var(--u-line);
+  background: color-mix(in oklab, var(--u-surface) 90%, var(--u-bg));
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+.wb-shell .inspector-actions[hidden] {
+  display: none;
+}
+
+.wb-shell .inspector-info {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 22px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+/* On a desktop the rail is an index to be scanned, not a scroll pane: the levels
+   are compact and only the open Character expands, so an ordinary store fits the
+   window. The scroll pane stays for stores that outgrow it. */
+@media (min-width: 860px) {
+  .wb-shell .rail {
+    padding: 12px 12px 14px;
+  }
+
+  .wb-shell .rail .asset {
+    padding: 4px 8px;
+  }
+
+  .wb-shell .char-body .asset {
+    padding: 2px 6px;
+  }
+}
+
+.wb-shell .centre {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--u-bg);
+}

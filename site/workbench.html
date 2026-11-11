@@ -16,7 +16,22 @@
         rel="stylesheet">
     <link rel="stylesheet" href="assets/system.css">
     <link rel="stylesheet" href="assets/ui/base.css">
-    <link rel="stylesheet" href="workbench.css">
+    <!-- The app sheet is split by layer and region. Order is the cascade:
+         tokens/base → shell chrome → one file per region → errors → responsive
+         → dialogs. Keep the files in this order. -->
+    <link rel="stylesheet" href="styles/00-base.css">
+    <link rel="stylesheet" href="styles/10-shell.css">
+    <link rel="stylesheet" href="styles/20-chrome.css">
+    <link rel="stylesheet" href="styles/30-rail.css">
+    <link rel="stylesheet" href="styles/40-stage.css">
+    <link rel="stylesheet" href="styles/50-filmstrip.css">
+    <link rel="stylesheet" href="styles/60-inspector.css">
+    <link rel="stylesheet" href="styles/61-inspector-cut.css">
+    <link rel="stylesheet" href="styles/70-draft.css">
+    <link rel="stylesheet" href="styles/80-align.css">
+    <link rel="stylesheet" href="styles/90-errors.css">
+    <link rel="stylesheet" href="styles/98-responsive.css">
+    <link rel="stylesheet" href="styles/99-dialogs.css">
     <style>
         /*
   The page owns the frame (a slim bar and the full viewport); the workbench owns
@@ -141,7 +156,8 @@
         <div class="wb-fallback">
             <p><b>Starting the workbench…</b></p>
             <p class="muted">It reads the store through the local server. If this stays, start it with
-                <code>SPRITE_FORGE_STORE=./store pnpm web</code> and reload.</p>
+                <code>SPRITE_FORGE_STORE=./store pnpm web</code> and reload.
+            </p>
         </div>
     </div>
     <script type="module" src="workbench.js"></script>

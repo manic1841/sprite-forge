@@ -8,13 +8,13 @@
  * and the Situation→animation bindings.
  */
 
-import type { WorkbenchContext } from './context.js';
+import type { BasePort } from './ports.js';
 import { make } from './dom.js';
 import type { ExportForm } from './state.js';
 import type { ExportBindings, Facing } from '../types.js';
 
 /** Render the export face for the loaded target (or the form alone). */
-export function exportStageView(ctx: WorkbenchContext): HTMLElement {
+export function exportStageView(ctx: BasePort): HTMLElement {
   const view = make('div', 'stage-view');
   view.dataset.stageView = 'export';
 
@@ -43,7 +43,7 @@ export function exportStageView(ctx: WorkbenchContext): HTMLElement {
 }
 
 /** Build the Export form, restoring whatever the user already typed. */
-function exportForm(ctx: WorkbenchContext): HTMLElement {
+function exportForm(ctx: BasePort): HTMLElement {
   const form = make('form', 'export-form');
   form.dataset.exportForm = '';
   const values = ctx.state.exportForm;
@@ -185,7 +185,7 @@ function exportForm(ctx: WorkbenchContext): HTMLElement {
 }
 
 /** Every committed Asset id of a Character, for the checkbox lists. */
-function committedIds(ctx: WorkbenchContext, characterId: string): string[] {
+function committedIds(ctx: BasePort, characterId: string): string[] {
   const character = ctx.state.scan?.characters.find((candidate) => candidate.id === characterId);
   return (character?.assets ?? []).map((asset) => asset.id);
 }
@@ -196,7 +196,7 @@ function toggle(list: string[], value: string, on: boolean): string[] {
 }
 
 async function runExport(
-  ctx: WorkbenchContext,
+  ctx: BasePort,
   characterId: string,
   values: ExportForm,
   message: HTMLElement,

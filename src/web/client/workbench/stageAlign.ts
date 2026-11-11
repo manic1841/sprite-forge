@@ -6,7 +6,7 @@
  * small Canvas legible.
  */
 
-import type { WorkbenchContext } from './context.js';
+import type { AlignStagePort } from './ports.js';
 import { make } from './dom.js';
 import type { PlacementOffset } from '../types.js';
 
@@ -22,7 +22,7 @@ const SCALE = 4;
 const SCALE_MAX = 16;
 
 /** Render the alignment board, or the empty state. */
-export function alignmentStageView(ctx: WorkbenchContext): HTMLElement {
+export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
   const view = make('div', 'stage-view');
   view.dataset.stageView = 'alignment';
   const alignment = ctx.state.alignment;
@@ -114,7 +114,7 @@ export function alignmentStageView(ctx: WorkbenchContext): HTMLElement {
  * Whole numbers while it fits, or the Canvas pixels would be drawn at different
  * sizes; a Canvas too big for the stage drops to a fraction instead of clipping.
  */
-function fitScale(ctx: WorkbenchContext, canvas: { width: number; height: number }): number {
+function fitScale(ctx: AlignStagePort, canvas: { width: number; height: number }): number {
   const stage = ctx.regions.stage;
   // Leave the stage's own padding out of the available room.
   const width = stage.clientWidth - 44;
@@ -135,7 +135,7 @@ function fitScale(ctx: WorkbenchContext, canvas: { width: number; height: number
  * the inspector's inputs, so a refused offset surfaces like any other action.
  */
 function makeDraggable(
-  ctx: WorkbenchContext,
+  ctx: AlignStagePort,
   ghost: HTMLElement,
   characterId: string,
   draftId: string,
@@ -222,7 +222,7 @@ function releasePointer(target: HTMLElement, pointerId: number): void {
  * that moved under the Draft still says so.
  */
 async function applyDraggedOffset(
-  ctx: WorkbenchContext,
+  ctx: AlignStagePort,
   characterId: string,
   draftId: string,
   offset: PlacementOffset,

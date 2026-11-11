@@ -1,0 +1,62 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/*
+  The workbench page's app sheet.
+
+  The workbench is its own route (`/workbench`), so this sheet is the app, not a
+  section in a marketing page: the shell fills the viewport and every rule stays
+  scoped under `.wb-shell` so the shared kit's fragments cannot reach in.
+
+  Product scale, not page scale: 13px text, 12px meta, nothing under 11px.
+*/
+
+.wb-shell.ui {
+  --fx-bg: #141a18;
+  --fx-surface: #1b2320;
+  --fx-ink: #e6e7e0;
+  --fx-muted: #9aa29c;
+  --fx-accent: var(--p-accent);
+  --fx-accent-ink: var(--p-accent-ink);
+  --ui-font: var(--font-text);
+  --ui-mono: var(--font-mono);
+  --ui-radius: 10px;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--u-bg);
+  overflow: hidden;
+}
+
+/* the notice before the store answers, and the error line when /api is absent */
+.wb-fallback {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 10px;
+  align-content: center;
+  justify-items: start;
+  padding: 40px;
+  max-width: 60ch;
+}
+
+.wb-fallback p {
+  margin: 0;
+}
+
+.wb-fallback code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+.wb-note {
+  margin: 0;
+  padding: 0 40px 32px;
+  max-width: 60ch;
+  font: 400 12px/1.5 var(--font-mono);
+  color: var(--u-muted);
+}

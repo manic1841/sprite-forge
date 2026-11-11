@@ -8,11 +8,11 @@
  */
 
 import { slugifyId } from './state.js';
-import type { WorkbenchContext } from './context.js';
+import type { BasePort } from './ports.js';
 import { make } from './dom.js';
 
 /** Build the Import form, wired into `ctx`. */
-export function importForm(ctx: WorkbenchContext): HTMLElement {
+export function importForm(ctx: BasePort): HTMLElement {
   const { state } = ctx;
   const form = make('form', 'rail-form');
   form.dataset.importForm = '';
@@ -66,7 +66,7 @@ export function importForm(ctx: WorkbenchContext): HTMLElement {
 }
 
 /** Register the picked capture and open it. */
-async function runImport(ctx: WorkbenchContext, message: HTMLElement): Promise<void> {
+async function runImport(ctx: BasePort, message: HTMLElement): Promise<void> {
   const { state, api } = ctx;
   const file = state.pendingFile;
   const id = state.pendingImportId.trim();

@@ -23,10 +23,13 @@
 
 import type { WorkbenchApi } from './api.js';
 import type { WorkbenchContext } from './workbench/context.js';
+import type { CutSession, CutSessionDeps } from './workbench/cutSession.js';
+import { createCutSession } from './workbench/cutSession.js';
+import { createDraftEditor } from './workbench/draftEditor.js';
 import { make } from './workbench/dom.js';
 import { renderInspector as inspectorView } from './workbench/inspector.js';
 import { renderLibrary as libraryView } from './workbench/library.js';
-import { renderFilmstrip as filmstripView, stopPlayback } from './workbench/filmstrip.js';
+import { paintPlayButton, renderFilmstrip as filmstripView, updateFrame } from './workbench/filmstrip.js';
 import { alignmentStageView } from './workbench/stageAlign.js';
 import { clipStageView } from './workbench/stageClip.js';
 import { cutStageView } from './workbench/stageCut.js';
@@ -149,11 +152,55 @@ export function mountWorkbench(
   // --- context --------------------------------------------------------------
   let lastLoad: Promise<void> = Promise.resolve();
 
+  // The two sessions are built once, before any render; their deps are closures
+  // over the functions below, so a detached control still reaches the same rules.
+  let cut: CutSession;
+  const cutDeps: CutSessionDeps = {
+    api,
+    state,
+    regions: { rail, stage, filmstrip },
+    render: {
+      library: () => renderLibrary(),
+      stage: () => renderStage(),
+      filmstrip: () => renderFilmstrip(),
+      inspector: () => renderInspector(),
+      context: () => renderContext(),
+    },
+    run,
+    showFrame: (index) => {
+      state.frame = index;
+      updateFrame(ctx);
+    },
+    playStateChanged: () => paintPlayButton(ctx),
+    stop: () => cut.stop(),
+    loadDraft: openDraft,
+    loadRecording: openRecording,
+    rescan,
+  };
+  cut = createCutSession(cutDeps);
+
+  const draft = createDraftEditor({
+    api,
+    state,
+    regions: { stage, inspector },
+    run,
+    renderStage,
+    renderInspector,
+    renderContext,
+    setMode,
+    loadAsset: openAsset,
+    loadAlignment: openAlignment,
+    rescan,
+  });
+
   const ctx: WorkbenchContext = {
     api,
     state,
     root,
     regions: { rail, stage, filmstrip, inspector, header, context: contextPill },
+    cut,
+    cutDeps,
+    draft,
 
     render() {
       renderLibrary();
@@ -418,7 +465,7 @@ export function mountWorkbench(
       .readRecordingDelays(recordingId)
       .then((delays) => delays.delaysMs)
       .catch(() => []);
-    stopPlayback(state);
+    cut.stop();
     state.loadError = null;
     // Cutting is the only face a Recording has, so it is where a load lands.
     setMode(defaultFace(state.target));

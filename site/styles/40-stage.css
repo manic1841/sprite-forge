@@ -1,0 +1,128 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* ------------------------------------------------------------------- stage */
+
+/* the kit also owns a `.stage` (an absolutely placed fragment host); the app's
+   stage is a plain scroll pane, so those placement rules are undone here */
+.wb-shell .stage {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  display: grid;
+  align-content: stretch;
+  justify-items: stretch;
+  flex: 1;
+  min-height: 0;
+  /* the picture is fitted to the space and the panels are capped, so on a desktop
+     the stage is a fixed pane; a narrow window keeps its scroll as a fallback */
+  overflow: hidden;
+  padding: 16px 22px 26px;
+  background-image: radial-gradient(circle at 50% 0%, var(--u-fill) 0%, transparent 62%);
+  --fx-bg: #141a18;
+  --fx-surface: #1b2320;
+  --fx-ink: #e6e7e0;
+  --fx-muted: #9aa29c;
+  --fx-accent: var(--p-accent);
+  --fx-accent-ink: var(--p-accent-ink);
+  --ui-font: var(--font-text);
+  --ui-mono: var(--font-mono);
+  --ui-radius: 10px;
+}
+
+.wb-shell .stage>* {
+  position: static;
+  max-width: none;
+}
+
+.wb-shell p {
+  margin: 0 0 8px;
+}
+
+.wb-shell p:last-child {
+  margin-bottom: 0;
+}
+
+.wb-shell .list {
+  display: block;
+}
+
+.wb-shell .stage-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  /* a zoomed frame is content the stage must not widen to: `auto` min-width would
+     let it push the whole pane out */
+  min-width: 0;
+}
+
+.wb-shell .stage-view>.align-clips {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-shell .stage-view>.recording-viewer,
+.wb-shell .stage-view>.draft-viewer {
+  /* The viewer takes what the panels below it leave, rather than a full viewport
+     of its own: `flex-basis: 0` plus `min-height: 0` lets the picture give way
+     when there is a panel underneath, so the stage never has to scroll to show a
+     whole frame. */
+  flex: 1 1 0;
+  min-height: 64px;
+  justify-content: center;
+}
+
+.wb-shell .inspector-section {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--u-line);
+}
+
+.wb-shell .inspector-actions .inspector-section:last-child {
+  border-bottom: 0;
+}
+
+.wb-shell .inspector-section:last-child {
+  border-bottom: 0;
+}
+
+.wb-shell .inspector-section> :last-child {
+  margin-bottom: 0;
+}
+
+.wb-shell .inspector .kv+p,
+.wb-shell .inspector p.muted {
+  margin-top: 8px;
+}
+
+/* a stage's blocks keep a readable column and sit centred, not stretched. When a
+   picture shares the stage they are capped instead of free to grow: the picture
+   keeps the height they leave, and only a panel that genuinely outgrows its share
+   scrolls on its own. A face with no picture (Export) lets its block have the
+   whole stage, so the cap only applies alongside a viewer. */
+.wb-shell .stage-view>.segments,
+.wb-shell .stage-view>.repair-log,
+.wb-shell .stage-view>.align-clips,
+.wb-shell .stage-view>.records,
+.wb-shell .stage-view>.export-form {
+  width: min(100%, 620px);
+  margin-inline: auto;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.segments,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.repair-log,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.align-clips,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.records,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.export-form {
+  max-height: 46%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+}
+
+.wb-shell .stage-view>.export-form {
+  width: min(100%, 520px);
+  margin-inline: auto;
+}

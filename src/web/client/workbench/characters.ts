@@ -14,7 +14,7 @@
  * framing is shown, derived and grown.
  */
 
-import type { WorkbenchContext } from './context.js';
+import type { BasePort } from './ports.js';
 import { make } from './dom.js';
 import { activeAsset, activeDraft, type WorkbenchState } from './state.js';
 
@@ -25,7 +25,7 @@ import { activeAsset, activeDraft, type WorkbenchState } from './state.js';
  * `open` is the Character whose work is on screen; only it is expanded, which
  * keeps the rail to one open branch however much the store holds.
  */
-export function characterSection(ctx: WorkbenchContext, open: string | null): HTMLElement {
+export function characterSection(ctx: BasePort, open: string | null): HTMLElement {
   const section = make('div', 'characters');
   section.dataset.librarySection = 'characters';
   if (ctx.state.railForm === 'character') {
@@ -52,7 +52,7 @@ export function characterSection(ctx: WorkbenchContext, open: string | null): HT
  * later (derive from a frame, or expand). Nothing about cutting a Recording is
  * implied by creating one.
  */
-function createForm(ctx: WorkbenchContext): HTMLElement {
+function createForm(ctx: BasePort): HTMLElement {
   const form = make('form', 'rail-form character-create');
   form.dataset.characterAdd = '';
 
@@ -85,7 +85,7 @@ function createForm(ctx: WorkbenchContext): HTMLElement {
 }
 
 async function createCharacter(
-  ctx: WorkbenchContext,
+  ctx: BasePort,
   characterId: string,
   message: HTMLElement,
 ): Promise<void> {
@@ -111,7 +111,7 @@ async function createCharacter(
  * chevron. The counts are per kind inside the open branch, so the row itself only
  * has to say whether there is anything here at all.
  */
-function characterGroup(ctx: WorkbenchContext, characterId: string, open: boolean): HTMLElement {
+function characterGroup(ctx: BasePort, characterId: string, open: boolean): HTMLElement {
   const character = ctx.state.scan?.characters.find((entry) => entry.id === characterId);
   const total = (character?.drafts.length ?? 0) + (character?.assets.length ?? 0);
   const group = make('div', 'char-group');
@@ -139,7 +139,7 @@ function characterGroup(ctx: WorkbenchContext, characterId: string, open: boolea
 }
 
 /** A Character's Drafts and committed Assets, as its own nested branches. */
-function characterContents(ctx: WorkbenchContext, characterId: string): HTMLElement {
+function characterContents(ctx: BasePort, characterId: string): HTMLElement {
   const body = make('div', 'char-body');
   const character = ctx.state.scan?.characters.find((entry) => entry.id === characterId);
 
@@ -167,7 +167,7 @@ function characterContents(ctx: WorkbenchContext, characterId: string): HTMLElem
  * list rather than as a form with empty slots.
  */
 function assetBranch(
-  ctx: WorkbenchContext,
+  ctx: BasePort,
   label: string,
   kind: 'drafts' | 'clip' | 'sequence',
   entries: readonly { id: string }[],
