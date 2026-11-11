@@ -79,7 +79,7 @@ export function recordingInspector(
   // inspector is left with editing a stored Segment.
   const cut = make('section', 'inspector-section');
   cut.dataset.inspectorSection = 'cut';
-  cut.appendChild(subheading('Cut'));
+  cut.appendChild(subheading('Range'));
   cut.appendChild(segmentEditor(ctx, recordingId));
   actions.appendChild(cut);
 }

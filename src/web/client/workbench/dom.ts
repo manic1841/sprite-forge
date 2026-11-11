@@ -20,7 +20,7 @@ export function make(tag: string, className?: string, text?: string): HTMLElemen
 
 /** A region heading. */
 export function heading(text: string): HTMLElement {
-  return make('h3', 'ttl', text);
+  return make('h2', 'ttl', text);
 }
 
 /**

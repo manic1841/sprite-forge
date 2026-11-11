@@ -85,6 +85,11 @@ export function renderFilmstrip(ctx: FilmstripPort): void {
   frames.style.gridTemplateColumns = isFit
     ? `repeat(${frameCount}, minmax(0, 1fr))`
     : `repeat(${frameCount}, minmax(var(--cell-w), 1fr))`;
+  // A long Recording at 1× divides the strip down to a few pixels a cell, where
+  // three digits would be clipped mid-glyph. At that density the cells read as a
+  // density map and the counter carries the number; the digits come back as soon
+  // as the fit is wide enough to hold them (and at every zoom above 1×).
+  frames.classList.toggle('is-dense', isFit && fitWidth < CELL_PX);
   for (let index = 0; index < frameCount; index += 1) {
     const cell = make('button', 'cell');
     cell.dataset.frame = String(index);

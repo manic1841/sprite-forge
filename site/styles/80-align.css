@@ -34,7 +34,7 @@
 .wb-shell .repair-warning,
 .wb-shell .warning {
   margin: 6px 0;
-  padding: 6px 9px;
+  padding: 6px 12px;
   border-left: 3px solid #d9822b;
   border-radius: 5px;
   background: color-mix(in oklab, #d9822b 14%, var(--u-bg));

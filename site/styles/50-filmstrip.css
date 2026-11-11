@@ -3,7 +3,7 @@
 
 .wb-shell .filmstrip {
   flex: none;
-  padding: 9px 14px 12px;
+  padding: 9px 16px 12px;
   border-top: 1px solid var(--u-line);
   background: var(--u-surface);
 }
@@ -85,7 +85,7 @@
   justify-content: center;
   flex: none;
   height: 22px;
-  padding: 0 8px;
+  padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
@@ -178,7 +178,7 @@
   gap: 2px;
   padding: 0;
   /* the row is sized here, so the digits never clip */
-  height: 18px;
+  height: 22px;
 }
 
 .wb-shell .cell {
@@ -202,6 +202,28 @@
 .wb-shell .cell.inrange {
   border-color: color-mix(in oklab, var(--u-accent) 55%, transparent);
   background: var(--u-tint);
+}
+
+/* too narrow to hold a number: the cells close up into one band, and only the
+   clock comes from their edges, so it reads as a density strip, not a comb */
+.wb-shell .film.is-dense {
+  gap: 1px;
+}
+
+.wb-shell .film.is-dense .cell {
+  font-size: 0;
+  border-color: transparent;
+  border-width: 0;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--u-ink) 15%, var(--u-bg));
+}
+
+.wb-shell .film.is-dense .cell.inrange {
+  background: color-mix(in oklab, var(--u-accent) 55%, transparent);
+}
+
+.wb-shell .film.is-dense .cell.sel {
+  background: var(--u-accent);
 }
 
 .wb-shell .cell.sel {

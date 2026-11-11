@@ -9,7 +9,7 @@
   gap: 10px;
   flex: none;
   height: 48px;
-  padding: 0 14px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--u-line);
   background: var(--u-bg);
 }
@@ -22,7 +22,7 @@
   gap: 10px;
   flex: none;
   height: 38px;
-  padding: 0 14px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--u-line);
   background: var(--u-bg);
 }
@@ -43,7 +43,7 @@
 }
 
 .wb-shell .pill {
-  padding: 3px 9px;
+  padding: 3px 10px;
   border-radius: 999px;
   background: var(--u-tint);
   color: var(--u-accent-text);
@@ -63,7 +63,7 @@
   justify-content: center;
   gap: 6px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 12px;
   border-radius: 7px;
   border: 0;
   background: var(--u-fill-2);
@@ -136,7 +136,7 @@
 
 .wb-shell .btn.small {
   height: 22px;
-  padding: 0 7px;
+  padding: 0 9px;
   border-radius: 5px;
   font-size: 11.5px;
 }

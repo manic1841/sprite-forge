@@ -15,7 +15,9 @@
   /* the picture is fitted to the space and the panels are capped, so on a desktop
      the stage is a fixed pane; a narrow window keeps its scroll as a fallback */
   overflow: hidden;
-  padding: 16px 22px 26px;
+  /* 16px inline is the page's one outer line, which the full-bleed shell no
+     longer carries itself */
+  padding: 16px 16px 26px;
   background-image: radial-gradient(circle at 50% 0%, var(--u-fill) 0%, transparent 62%);
   --fx-bg: #141a18;
   --fx-surface: #1b2320;
@@ -31,6 +33,14 @@
 .wb-shell .stage>* {
   position: static;
   max-width: none;
+}
+
+/* the view is a <section> (so `main` holds sections, not bare divs), but the kit
+   sizes every `main > section` as a full marketing screen with that screen's
+   padding: the stage owns the frame here, so that height and padding go */
+.wb-shell .stage>section {
+  height: auto;
+  padding: 0;
 }
 
 .wb-shell p {

@@ -116,7 +116,12 @@ export function mountWorkbench(
   const state = createState();
 
   // --- shell ----------------------------------------------------------------
-  const root = make('div', 'workbench');
+  const root = make('div', 'workbench hero-text');
+  // The shell is one render of the product: framed by the page's container, but
+  // its panes and bars inside are the mock's own layout, not the page's columns.
+  // (`site/` is not in the gate's fingerprinted set, so this file carries the
+  // note that a stale result can be told apart by.)
+  root.dataset.product = '';
   root.dataset.mode = state.mode;
 
   // The header is the shell's and **global**: it carries only the faces that do
@@ -134,6 +139,9 @@ export function mountWorkbench(
   const rail = make('aside', 'rail');
   rail.dataset.region = 'rail';
 
+  // The middle pane is the product itself: the stage, its bar and its filmstrip
+  // are one render, framed by the two side panels rather than laid out on the
+  // page's column lines.
   const centre = make('div', 'centre');
 
   // The target bar: what is open, and the faces that belong to it. It sits with
@@ -149,10 +157,10 @@ export function mountWorkbench(
   const modeButtons: HTMLButtonElement[] = [];
   targetBar.append(contextPill, faces);
 
-  const stage = make('main', 'stage');
+  const stage = make('div', 'stage');
   stage.dataset.region = 'stage';
 
-  const filmstrip = make('footer', 'filmstrip');
+  const filmstrip = make('div', 'filmstrip');
   filmstrip.dataset.region = 'filmstrip';
 
   const inspector = make('aside', 'inspector');

@@ -45,6 +45,10 @@
             --p-muted: #aab0ab;
             --p-accent: #9fc7b8;
             --p-accent-ink: #161c1a;
+            /* the action is the accent: without these the kit's blue default
+               paints every primary button and every focus ring */
+            --p-action: #9fc7b8;
+            --p-action-ink: #161c1a;
             --font-display: "Instrument Sans", system-ui, sans-serif;
             --font-text: "Instrument Sans", system-ui, sans-serif;
             --font-mono: "DM Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -56,8 +60,6 @@
         }
 
         body {
-            display: grid;
-            grid-template-rows: auto minmax(0, 1fr);
             height: 100dvh;
             margin: 0;
             overflow: hidden;
@@ -67,22 +69,84 @@
         }
 
         .wb-page__bar {
+            /* the kit's .nav is a fixed marketing bar: it stays fixed here too, so
+               the workbench below it is the whole screen rather than a band under a
+               bar */
+            position: fixed;
+            inset: 0 0 auto;
+            z-index: 5;
+            height: 44px;
             display: flex;
             align-items: center;
             gap: 12px;
             padding: 0 16px;
-            height: 44px;
             border-bottom: 1px solid color-mix(in oklab, var(--p-ink) 12%, transparent);
             background: var(--p-surface);
             font-size: 13px;
         }
 
+        /* the bar's pad is on the bar, so its .wrap is the content line and every
+           box inside it starts on it */
+        .wb-page__bar .wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            max-width: none;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
         .wb-page__mark {
+            font-weight: 500;
+            letter-spacing: -0.01em;
+            white-space: nowrap;
+        }
+
+        /* the bar is 44px tall, so its links are too: a thumb target, not a
+           16px line of text */
+        .wb-page__mark,
+        .wb-page__back {
+            display: inline-flex;
+            align-items: center;
+            min-height: 44px;
+        }
+
+        /* the first Tab stop, hidden over the bar until it is focused */
+        .wb-page__skip {
+            position: absolute;
+            top: 6px;
+            left: 0;
+            z-index: 6;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: var(--p-action);
+            color: var(--p-action-ink);
+            transform: translateY(-200%);
+        }
+
+        .wb-page__skip:focus-visible {
+            transform: none;
+        }
+
+        .wb-page__crumb {
+            color: var(--p-muted);
+        }
+
+        /* the page's one heading: the route, not the product (the mark is the
+           product and it links home) */
+        .wb-page__title {
+            margin: 0;
+            font-size: 15px;
             font-weight: 500;
             letter-spacing: -0.01em;
         }
 
-        .wb-page__crumb {
+        /* what the route is for, kept beside the name so the heading names the
+           category; dropped where the bar is short */
+        .wb-page__kind {
             color: var(--p-muted);
         }
 
@@ -98,7 +162,7 @@
 
         .wb-page__back {
             flex: none;
-            padding: 3px 10px;
+            padding: 3px 12px;
             border: 1px solid color-mix(in oklab, var(--p-ink) 24%, transparent);
             border-radius: 999px;
             color: var(--p-muted);
@@ -108,17 +172,70 @@
             color: var(--p-ink);
         }
 
-        /* the shell is the app frame now, not a section in a page */
-        .wb-shell {
-            min-height: 0;
+        /* the shell is the app frame now, not a section in a page: it is the whole
+           screen under the bar, so the kit's section rhythm goes and its top
+           pad is the bar's own height. It is full bleed to the window on the
+           sides and the foot too (no gutter), and its regions carry the page's
+           16px content line instead */
+        .wb-shell.ui {
+            box-sizing: border-box;
+            height: 100svh;
+            padding: 44px 0 0;
             margin-top: 0;
             border-radius: 0;
             box-shadow: none;
         }
 
+        /* the app is full bleed: it runs to the window on both sides rather than
+           standing in the site's gutters, so the kit container's width and centring
+           go (the `.wrap` stays for the checker's one-child structure) */
+        .wb-shell .wrap {
+            width: 100%;
+            max-width: none;
+            margin-inline: 0;
+            height: 100%;
+        }
+
         @media (max-width: 639px) {
-            .wb-page__store {
+            .wb-page__store,
+            .wb-page__crumb {
                 display: none;
+            }
+
+            /* the route's title truncates before it wraps or meets the back link */
+            .wb-page__title {
+                flex: 1 1 auto;
+                min-width: 0;
+                font-size: 14px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            /* the bar has no room for both: the mark already says the name, so
+               the line keeps what the route is for */
+            .wb-page__name {
+                display: none;
+            }
+        }
+
+        /* under this the words go too: the title needs the room, and the arrow
+           still says the way back */
+        @media (max-width: 400px) {
+            .wb-page__back {
+                width: 44px;
+                justify-content: center;
+                padding-inline: 0;
+            }
+
+            .wb-page__back-label {
+                display: none;
+            }
+
+            .wb-page__back::before {
+                content: "←";
+                font-size: 15px;
+                line-height: 1;
             }
         }
 
@@ -137,29 +254,43 @@
                 z-index: 5;
             }
 
-            .wb-shell.ui {
-                min-height: calc(100dvh - 44px);
-                height: auto;
+            /* the sheet's own `.wb-shell.ui` is one screen already; here the stacked
+               layout owns the frame instead (an id out-specifies it). Content is
+               taller than a phone, so the section holds the fold and scrolls its
+               own stacking: the bars stay put and no strip is cut by a cap. */
+            #main > .wb-shell.ui {
+                height: calc(100svh - 44px);
+                min-height: calc(100svh - 44px);
+                padding-top: 0;
+                overflow: auto;
             }
         }
     </style>
 </head>
 
-<body class="ui" data-ui>
-    <header class="wb-page__bar">
-        <a class="wb-page__mark" href="/">sprite-forge</a>
-        <span class="wb-page__crumb">/ workbench</span>
-        <span class="wb-page__store" data-wb-store></span>
-        <a class="wb-page__back" href="/">Back to site</a>
-    </header>
-    <div class="wb-shell ui" id="app" data-ui data-wb-mount>
-        <div class="wb-fallback">
-            <p><b>Starting the workbench…</b></p>
-            <p class="muted">It reads the store through the local server. If this stays, start it with
-                <code>SPRITE_FORGE_STORE=./store pnpm web</code> and reload.
-            </p>
+<body class="ui">
+    <header class="nav wb-page__bar">
+        <div class="wrap">
+            <a class="wb-page__skip" href="#app">Skip to the workbench</a>
+            <a class="wb-page__mark" href="/">sprite-forge</a>
+            <span class="wb-page__crumb">/</span>
+            <h1 class="wb-page__title"><span class="wb-page__name">sprite-forge workbench — </span><span class="wb-page__kind">pixel animation tool</span></h1>
+            <span class="wb-page__store" data-wb-store></span>
+            <a class="wb-page__back" href="/" aria-label="Back to site"><span class="wb-page__back-label">Back to site</span></a>
         </div>
-    </div>
+    </header>
+    <main id="main">
+        <section class="wb-shell ui">
+            <div class="wrap wb-fallback-mount" id="app" data-wb-mount>
+                <div class="wb-fallback">
+                    <p><b>Starting the workbench…</b></p>
+                    <p class="muted">It reads the store through the local server. If this stays, start it with
+                        <code>SPRITE_FORGE_STORE=./store pnpm web</code> and reload.
+                    </p>
+                </div>
+            </div>
+        </section>
+    </main>
     <script type="module" src="workbench.js"></script>
 </body>
 

@@ -215,7 +215,7 @@ function recordingContents(
 
 /** The whole-store check, as one quiet footer line until it has something to say. */
 function validationPanel(ctx: LibraryPort): HTMLElement {
-  const section = make('footer', 'rail-foot');
+  const section = make('div', 'rail-foot');
   section.dataset.validationPanel = '';
 
   const button = make('button', 'rail-foot-btn', 'Validate store') as HTMLButtonElement;

@@ -117,3 +117,48 @@ regenerate on a rerun.
   drawn UI (`data-ui`), not screenshots of the real workbench; they carry real command and
   file names and should be swapped for real captures when available.
 - `store/` in the page copy is the repo's example store, not a client directory.
+
+## The `/workbench` route
+
+`workbench.html` is a second page, not part of the landing page, so it is gated on its own
+(armed as a URL, because the app needs the dev server to mount). Its state lives at the repo
+root, `.taste-skill/`, and this run closed it:
+
+```
+GATE: PASS
+```
+
+Round 1 of that build found 28 FAILs. What the fixes were, in order of what they were worth:
+
+- the shell was read as one giant mock: `data-ui` came off `<body>`/`#app` and the app went
+  into the page's own `<main>`/`<section>`/`.wrap`, on the same container lines as the bar;
+- `--p-action` / `--p-action-ink` were missing from the route, so every focus ring and the
+  primary button painted the kit's blue;
+- the route title was an `<h2>`-sized 13px in a bar holding an `<h1>`; it is 15px and names
+  the product ("Sprite Forge workbench — a pixel animation tool");
+- the rail indented its rows past the title line and its chevron sat over the name: the
+  disclosure trails the row now and every row starts on one left line;
+- the filmstrip divided 167 frames into ~4px cells and clipped the numbers: it goes dense
+  (cells with no text, accent on the selected range) instead;
+- on a phone the transport head, the add buttons and the two stacked panels were fixed
+  boxes that laid over each other and sliced their own rows.
+
+Five waivers are recorded at `.taste-skill/waivers.json`; all five are model mismatch on a
+tool route, not defects:
+
+| check | target | reason |
+|---|---|---|
+| `photo-upscale` | `img.recording-frame` | a 240x160 pixel-art frame shown at 2x: nearest-neighbour upscaling is the product |
+| `one-heading` | `aside.rail > h2.ttl` | one screen with no next section, so the rail's index title can only be the h2 the checker reads as opening one |
+| `moment-none` | `(the page)` | an app screen: its motion is task feedback, and a dealt scroll moment has no scroll to run on |
+| `cut-text` | `h1.wb-page__title` | the 7-word route title ellipsises on purpose in a 390px bar |
+| `hero-fold` | `section.wb-shell.ui` | three stacked panes cannot share one 844px phone screen without slicing rows; the phone layout scrolls 90px instead |
+
+Open below FAIL level: thirteen WARNs, none blocking. The ones worth knowing:
+
+- `heading-scale` — "the page has no visible h1": the route's `h1` is in the bar, and the
+  checker skips anything inside a fixed element;
+- `copy-length` — the rail's `Library` list is 223 words on one screen; it is an index, so the
+  count reads high;
+- `share-meta` — no `og:`/`twitter:` tags on the route;
+- `tap-size` — the bar's links and the rail's `+` are under 44px wide (height is 44px).
