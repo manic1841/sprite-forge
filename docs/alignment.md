@@ -30,29 +30,45 @@ so a session can start from the subject rather than from a capture. Such a Chara
 starts on a **provisional Canvas** (32×32, Anchor at 16,32) that is obviously not
 final.
 
-Framing is derived from a real frame, on the Alignment face: *frame canvas from frame*
-writes the Canvas the open Recording's frame implies. Once anything is drawn on the
-Canvas, framing follows the grow-only rule of *expand canvas* below (shrinking would
-crop), and the tool says so instead of silently doing either.
+Creating a Character normally asks for a **Segment** instead, and frames the Canvas from
+it: the size then comes from the subject rather than a guess. Framing can also be redone
+later, on the Alignment face (*frame canvas from frame*), which writes the Canvas the
+open Recording's frame implies.
 
 ## Adding a Clip
 
 A new Clip **adopts the Character's Canvas**. If the Clip does not fit — its content
 would extend beyond the Canvas — the tool does not silently grow the Canvas; it offers
-an explicit **expand canvas** action (below).
+an explicit **resize canvas** action (below).
 
-## Expand canvas
+## Resize canvas
 
-Expanding is an explicit, **Character-level** operation:
+Resizing is an explicit, **Character-level** operation, in either direction
+([ADR-0014](./adr/0014-canvas-is-resizable-down-to-content.md)):
 
-1. The Canvas grows to fit the new content (still symmetric about the Anchor).
+1. The Canvas changes, still symmetric about the Anchor.
 2. **Every** committed Clip and Sequence of that Character is re-baked to the new
-   Canvas — pixels are re-placed, content unchanged.
+   Canvas — pixels are re-placed, content unchanged. Growing adds margin; shrinking
+   crops only what falls outside.
 3. The change is recorded as one Character-level change.
 
+It cannot shrink past the **content floor**: the smallest symmetric Canvas the drawn
+pixels (plus any Draft's `placementOffset`) still fit on. A size below it is refused
+with the floor named. *Fit to content* resizes straight down to it.
+
+**The board holds its zoom.** The Alignment board is shown at one display rate (pixels
+per Canvas pixel) and a resize keeps it, so a smaller Canvas appears as a smaller board
+and the edges simply cut the pixels off — a crop, not a zoom-out, not a resample. The
+rate is clamped to the stage, though: growing past the room lowers it. Only a window
+resize clears it and refits. The board's `image-rendering: pixelated` keeps it honest at
+every rate, and the Canvas' size is printed under the board so the number is readable
+without measuring.
+
 The store is working data, not a version history: old sheets are overwritten, and the
-store's own version control (git) is the revision history. See
-[ADR-0006](./adr/0006-per-character-fixed-canvas-and-explicit-rebake.md).
+store's own version control (git) is the revision history.
+
+A Blank Character's provisional Canvas starts at 32×32; framing it from footage
+replaces it outright, and once drawn on the floor governs like any other resize.
 
 ## Manual placement offset
 
@@ -74,6 +90,20 @@ provenance:
 
 A fork shares its Character's Canvas. A fork never carries its own Canvas — variants
 differ in pixels and in their `placementOffset`, never in Canvas size.
+
+## Committed Clips and Placement
+
+Alignment is edited on a **Draft**. A committed Clip's Align face is read-only: it
+shows the baked `placementOffset` and offers *Fork to move*, because a fork is the
+only way back to an editable Draft ([ADR-0002](./adr/0002-immutable-assets-fork-to-edit.md)).
+Canvas resize is Character-level, so it lives on the Draft/Character Placement face,
+not on an immutable Asset.
+
+Read-only or not, a ghost is **one Canvas**, never a whole sheet: a Clip's sheet is
+`frameCount` Canvases wide, so its ghost is cropped to the first frame and placed by
+the recorded offset. Playback is the only place a sheet is addressed whole, and there
+too the frame is a crop of one frame's size rather than the strip squashed into a
+plate.
 
 ## Validity
 

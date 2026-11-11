@@ -1,13 +1,14 @@
 /**
- * The inspector for **Alignment**: placement offsets, the explicit Canvas
- * expand, framing from footage, and what is already placed.
+ * The inspector for **Alignment**: placement offsets, the Canvas size (either
+ * direction, down to the drawn content), the framing from footage, and what is
+ * already placed.
  *
  * The offset edit targets the active Draft (a committed Clip is immutable — fork
  * it to change its offset); committed Clips' offsets are shown read-only.
  */
 
 import type { AlignInspectorPort } from './ports.js';
-import { labeled, make, numberInput, subheading } from './dom.js';
+import { addRow, labeled, make, numberInput, subheading } from './dom.js';
 import { activeDraft } from './state.js';
 import type { PlacementOffset } from '../types.js';
 
@@ -37,8 +38,14 @@ export function alignInspector(
     return;
   }
 
+  // A committed Asset is a snapshot: its offset is shown, never edited here. The
+  // way to move it is a fork, which is offered in place of the inputs so the
+  // reader does not go looking for a control that is deliberately missing.
+  const assetTarget = state.target.kind === 'asset' ? state.target : null;
   const draft = activeDraft(state);
-  if (draft && draft.characterId === state.activeCharacterId) {
+  if (assetTarget) {
+    showAssetPlacement(ctx, section, assetTarget.characterId, assetTarget.assetKind, assetTarget.assetId);
+  } else if (draft && draft.characterId === state.activeCharacterId) {
     const offset = currentDraftOffset(ctx);
     const x = numberInput(offset.x, 'x', () => scheduleOffset(ctx));
     x.dataset.alignOffsetX = '';
@@ -64,23 +71,53 @@ export function alignInspector(
     );
   }
 
-  const expandRow = make('div', 'align-expand');
-  const width = numberInput(state.expandWidth, 'width', (value) => {
-    state.expandWidth = value;
-  });
-  width.dataset.expandWidth = '';
-  const height = numberInput(state.expandHeight, 'height', (value) => {
-    state.expandHeight = value;
-  });
-  height.dataset.expandHeight = '';
-  expandRow.append(labeled('Width', width), labeled('Height', height));
-  const expand = make('button', 'btn small', 'Expand canvas');
-  expand.dataset.expandCanvasAction = '';
-  expand.addEventListener('click', () => ctx.run('Expand canvas', () => applyExpand(ctx)));
-  section.appendChild(expandRow);
-  section.appendChild(expand);
+  if (!assetTarget) {
+    const floor = state.alignment.contentFloor;
+    const resizeRow = make('div', 'align-size');
+    const width = numberInput(state.resizeWidth, 'width', (value) => {
+      state.resizeWidth = value;
+    });
+    width.dataset.resizeWidth = '';
+    width.min = String(floor.width);
+    const height = numberInput(state.resizeHeight, 'height', (value) => {
+      state.resizeHeight = value;
+    });
+    height.dataset.resizeHeight = '';
+    height.min = String(floor.height);
+    resizeRow.append(labeled('Width', width), labeled('Height', height));
+    section.appendChild(resizeRow);
+
+    // Shrinking is allowed down to the drawn content only, so the floor is named
+    // rather than left to a rejected save. With nothing drawn, any size is fine.
+    const hint = make('p', 'muted align-floor');
+    hint.dataset.alignFloor = `${floor.width}x${floor.height}`;
+    if (!floor.hasContent) {
+      hint.textContent = 'nothing drawn yet — any size';
+    } else if (
+      floor.width === state.alignment.canvas.width &&
+      floor.height === state.alignment.canvas.height
+    ) {
+      hint.textContent = 'at the smallest size the content allows';
+    } else {
+      hint.textContent = `smallest the content allows: ${floor.width}x${floor.height}`;
+    }
+    section.appendChild(hint);
+
+    const resize = make('button', 'btn small', 'Resize canvas');
+    resize.dataset.resizeCanvasAction = '';
+    resize.addEventListener('click', () => ctx.run('Resize canvas', () => applyResize(ctx)));
+    section.appendChild(resize);
+
+    const fit = make('button', 'btn small ghost', 'Fit to content') as HTMLButtonElement;
+    fit.dataset.fitCanvasAction = '';
+    fit.disabled = !floor.hasContent;
+    fit.addEventListener('click', () => ctx.run('Fit canvas', () => applyFit(ctx)));
+    section.appendChild(fit);
+  }
   actions.appendChild(section);
-  actions.appendChild(frameFromFootage(ctx));
+  if (!assetTarget) {
+    actions.appendChild(frameFromFootage(ctx));
+  }
 
   // Warnings and what is already placed are read-only here: they sit under the
   // controls rather than between them. With neither there is nothing to add.
@@ -146,6 +183,64 @@ export function alignInspector(
   }
   readout.appendChild(thumbs);
   info.appendChild(readout);
+}
+
+/**
+ * A committed Asset's placement: its recorded offset, read-only, plus the fork
+ * that makes it editable again.
+ */
+function showAssetPlacement(
+  ctx: AlignInspectorPort,
+  section: HTMLElement,
+  characterId: string,
+  assetKind: 'clip' | 'sequence',
+  assetId: string,
+): void {
+  if (assetKind === 'sequence') {
+    section.appendChild(
+      make('p', 'muted', 'A Sequence has no offset of its own — place its source Clips.'),
+    );
+    return;
+  }
+  const entry = ctx.state.alignment?.clips.find((clip) => clip.id === assetId);
+  const offset = entry?.placementOffset ?? { x: 0, y: 0 };
+  const list = make('dl', 'kv');
+  addRow(list, 'offset', `${offset.x}, ${offset.y}`);
+  section.appendChild(list);
+  section.appendChild(
+    make('p', 'muted', 'Committed — this placement is baked. Fork the Clip to move it.'),
+  );
+
+  const fork = make('button', 'btn small', 'Fork to move') as HTMLButtonElement;
+  fork.dataset.alignFork = '';
+  fork.addEventListener('click', () => {
+    ctx.run('Fork', async () => {
+      const draft = await ctx.api.forkClip(characterId, assetId, freeDraftId(ctx, characterId, assetId));
+      await ctx.rescan();
+      await ctx.loadDraft(characterId, draft.id);
+    });
+  });
+  section.appendChild(fork);
+}
+
+/** The first free `<asset>-fork`, `<asset>-fork-2`, … draft id. */
+function freeDraftId(ctx: AlignInspectorPort, characterId: string, assetId: string): string {
+  const taken = new Set(
+    ctx.state.scan?.characters.find((candidate) => candidate.id === characterId)?.drafts.map(
+      (draft) => draft.id,
+    ) ?? [],
+  );
+  const base = `${assetId}-fork`;
+  if (!taken.has(base)) {
+    return base;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`;
+    if (!taken.has(candidate)) {
+      return candidate;
+    }
+  }
+  return base;
 }
 
 /**
@@ -249,15 +344,25 @@ async function applyOffset(ctx: AlignInspectorPort, offset: PlacementOffset): Pr
   restore?.focus();
 }
 
-async function applyExpand(ctx: AlignInspectorPort): Promise<void> {
+async function applyResize(ctx: AlignInspectorPort): Promise<void> {
   const characterId = ctx.state.activeCharacterId;
   if (!characterId) {
     return;
   }
   const canvas = ctx.state.alignment?.canvas;
-  const width = ctx.state.expandWidth || canvas?.width || 0;
-  const height = ctx.state.expandHeight || canvas?.height || 0;
-  await ctx.api.expandCanvas(characterId, width, height);
+  const width = ctx.state.resizeWidth || canvas?.width || 0;
+  const height = ctx.state.resizeHeight || canvas?.height || 0;
+  await ctx.api.resizeCanvas(characterId, width, height);
+  ctx.state.alignmentWarnings = [];
+  await refreshAlignment(ctx, characterId);
+}
+
+async function applyFit(ctx: AlignInspectorPort): Promise<void> {
+  const characterId = ctx.state.activeCharacterId;
+  if (!characterId) {
+    return;
+  }
+  await ctx.api.fitCanvas(characterId);
   ctx.state.alignmentWarnings = [];
   await refreshAlignment(ctx, characterId);
 }
@@ -268,8 +373,8 @@ async function refreshAlignment(
 ): Promise<void> {
   ctx.state.alignment = await ctx.api.readCharacterAlignment(characterId);
   // The canvas may have just changed; the expand inputs follow it until edited.
-  ctx.state.expandWidth = ctx.state.alignment.canvas.width;
-  ctx.state.expandHeight = ctx.state.alignment.canvas.height;
+  ctx.state.resizeWidth = ctx.state.alignment.canvas.width;
+  ctx.state.resizeHeight = ctx.state.alignment.canvas.height;
   ctx.renderStage();
   ctx.renderInspector();
 }

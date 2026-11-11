@@ -5,6 +5,7 @@ import {
   removeSegment,
   renameSegment,
   setSegmentRange,
+  setSegmentRect,
   ValidationError,
   validateArtifact,
 } from '../src/core/index.js';
@@ -430,5 +431,104 @@ describe('setSegmentRange', () => {
         }),
       ).rejects.toThrow(/No Segment/);
     });
+  });
+});
+
+describe('a Segment box', () => {
+  // A box is the source rectangle a Segment is confined to. It is source
+  // coordinates, so it is stored verbatim rather than checked against the source.
+
+  it('is stored on the Segment, and copied so a later caller edit cannot reach it', async () => {
+    await withStore(async (store) => {
+      seedRecording(store, 100);
+      const rect = { x: 4, y: 8, width: 16, height: 16 };
+
+      const cutList = await addSegment(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+        startFrame: 10,
+        endFrame: 20,
+        rect,
+      });
+
+      rect.x = 99;
+      expect(cutList.cuts).toEqual([
+        { id: 'walk', startFrame: 10, endFrame: 20, rect: { x: 4, y: 8, width: 16, height: 16 } },
+      ]);
+      validateArtifact('cuts', store.readJson(CUTS_PATH));
+    });
+  });
+
+  it('is set and cleared without disturbing the range or speed', async () => {
+    await withStore(async (store) => {
+      seedRecording(store, 100);
+      await addSegment(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+        startFrame: 10,
+        endFrame: 20,
+        speed: 2,
+      });
+
+      const set = await setSegmentRect(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+        rect: { x: 1, y: 2, width: 3, height: 4 },
+      });
+      expect(set.cuts).toEqual([
+        { id: 'walk', startFrame: 10, endFrame: 20, speed: 2, rect: { x: 1, y: 2, width: 3, height: 4 } },
+      ]);
+
+      const cleared = await setSegmentRect(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+      });
+      expect(cleared.cuts).toEqual([{ id: 'walk', startFrame: 10, endFrame: 20, speed: 2 }]);
+      expect(store.readJson(CUTS_PATH)).toMatchObject({
+        cuts: [{ id: 'walk', startFrame: 10, endFrame: 20, speed: 2 }],
+      });
+    });
+  });
+
+  it('rejects a box with a fractional or empty size, writing nothing', async () => {
+    await withStore(async (store) => {
+      seedRecording(store, 100);
+      await addSegment(store.root, {
+        recordingId: RECORDING_ID,
+        id: 'walk',
+        startFrame: 10,
+        endFrame: 20,
+      });
+
+      await expect(
+        setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: 'walk',
+          rect: { x: 0, y: 0, width: 0, height: 4 },
+        }),
+      ).rejects.toThrow(/at least 1x1/);
+
+      await expect(
+        setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: 'walk',
+          rect: { x: 0.5, y: 0, width: 2, height: 2 },
+        }),
+      ).rejects.toThrow(/must be an integer/);
+
+      expect(store.readJson(CUTS_PATH)).toMatchObject({
+        cuts: [{ id: 'walk', startFrame: 10, endFrame: 20 }],
+      });
+    });
+  });
+
+  it('is rejected by the schema when it has an extra key', () => {
+    expect(() =>
+      validateArtifact('cuts', {
+        hash: HASH,
+        frameCount: 100,
+        cuts: [{ id: 'walk', startFrame: 0, endFrame: 1, rect: { x: 0, y: 0, width: 1, height: 1, z: 2 } }],
+      }),
+    ).toThrow(ValidationError);
   });
 });

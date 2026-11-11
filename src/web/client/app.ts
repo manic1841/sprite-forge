@@ -32,10 +32,12 @@ import { renderLibrary as libraryView } from './workbench/library.js';
 import { paintPlayButton, renderFilmstrip as filmstripView, updateFrame } from './workbench/filmstrip.js';
 import { alignmentStageView } from './workbench/stageAlign.js';
 import { clipStageView } from './workbench/stageClip.js';
+import { composeStageView } from './workbench/stageCompose.js';
 import { cutStageView } from './workbench/stageCut.js';
 import { exportStageView } from './workbench/stageExport.js';
-import { createState, defaultFace, facesFor, slugifyId } from './workbench/state.js';
-import type { WorkbenchMode, WorkbenchState } from './workbench/state.js';
+import { assetStageView } from './workbench/stageView.js';
+import { createState, defaultFace, facesFor, slugifyId, activeCharacter, GLOBAL_FACES } from './workbench/state.js';
+import type { GlobalFace, WorkbenchMode, WorkbenchState } from './workbench/state.js';
 
 export { slugifyId };
 export type { WorkbenchMode, WorkbenchState };
@@ -48,6 +50,8 @@ const MODE_LABEL: Record<WorkbenchMode, string> = {
   cut: 'Cut',
   clip: 'Clip',
   align: 'Align',
+  view: 'View',
+  compose: 'Compose',
   export: 'Export',
 };
 
@@ -115,18 +119,15 @@ export function mountWorkbench(
   const root = make('div', 'workbench');
   root.dataset.mode = state.mode;
 
-  // The header is the shell's, not the stage's: switching face must leave it
-  // standing. The breadcrumb sits left, the faces right.
+  // The header is the shell's and **global**: it carries only the faces that do
+  // not belong to the open item. Composition and Export both hang off the
+  // Character, so they survive every target; a target's own faces live on the bar
+  // above the stage, which travels with it.
   const header = make('header', 'context-bar');
   header.dataset.region = 'context-bar';
-  const contextPill = make('span', 'pill');
-  contextPill.dataset.region = 'context';
-  const faces = make('nav', 'faces');
-  faces.dataset.region = 'faces';
-  // The faces are rebuilt per target: a face only exists while it means
-  // something, so they cannot be made once up front.
-  const modeButtons: HTMLButtonElement[] = [];
-  header.append(contextPill, faces);
+  const globalFaces = make('nav', 'faces global-faces');
+  globalFaces.dataset.region = 'global-faces';
+  header.append(globalFaces);
 
   const body = make('div', 'shell-body');
 
@@ -134,6 +135,19 @@ export function mountWorkbench(
   rail.dataset.region = 'rail';
 
   const centre = make('div', 'centre');
+
+  // The target bar: what is open, and the faces that belong to it. It sits with
+  // the stage so the header never has to change when the target does.
+  const targetBar = make('div', 'target-bar');
+  targetBar.dataset.region = 'target-bar';
+  const contextPill = make('span', 'pill');
+  contextPill.dataset.region = 'context';
+  const faces = make('nav', 'faces target-faces');
+  faces.dataset.region = 'faces';
+  // The faces are rebuilt per target: a face only exists while it means
+  // something, so they cannot be made once up front.
+  const modeButtons: HTMLButtonElement[] = [];
+  targetBar.append(contextPill, faces);
 
   const stage = make('main', 'stage');
   stage.dataset.region = 'stage';
@@ -144,7 +158,7 @@ export function mountWorkbench(
   const inspector = make('aside', 'inspector');
   inspector.dataset.region = 'inspector';
 
-  centre.append(stage, filmstrip);
+  centre.append(targetBar, stage, filmstrip);
   body.append(rail, centre, inspector);
   root.append(header, body);
   container.appendChild(root);
@@ -197,7 +211,7 @@ export function mountWorkbench(
     api,
     state,
     root,
-    regions: { rail, stage, filmstrip, inspector, header, context: contextPill },
+    regions: { rail, stage, filmstrip, inspector, header, targetBar, context: contextPill },
     cut,
     cutDeps,
     draft,
@@ -233,12 +247,38 @@ export function mountWorkbench(
   }
 
   /**
-   * Rebuild the mode bar from the faces the target has.
+   * Rebuild the two face bars.
    *
-   * A face that is the only one is not a choice, it is where you are: it reads as
-   * a plain label rather than as a button that does nothing when pressed.
+   * The header keeps the global faces (Composition, Export) and only changes when
+   * whether they can be used does: without a Character in play there is nothing to
+   * compose or export. The bar above the stage is rebuilt per target. On either
+   * bar, a face that is the only one is where you are, so it reads as a label
+   * rather than as a button that does nothing when pressed.
    */
   function renderModes(): void {
+    renderGlobalFaces();
+    renderTargetFaces();
+  }
+
+  function renderGlobalFaces(): void {
+    globalFaces.innerHTML = '';
+    const characterId = activeCharacter(state);
+    for (const mode of GLOBAL_FACES) {
+      const button = make('button', 'btn') as HTMLButtonElement;
+      button.dataset.mode = mode;
+      button.textContent = MODE_LABEL[mode];
+      button.classList.toggle('on', mode === state.mode);
+      // Both faces are about a Character; with none open there is no subject.
+      button.disabled = characterId === null;
+      button.title =
+        characterId === null ? `${MODE_LABEL[mode]} — pick a Character first` : MODE_LABEL[mode];
+      button.setAttribute('aria-pressed', String(mode === state.mode));
+      button.addEventListener('click', () => activateGlobal(mode, characterId));
+      globalFaces.appendChild(button);
+    }
+  }
+
+  function renderTargetFaces(): void {
     // The bar is rebuilt wholesale, so a label left from a single-face target goes
     // the same way the buttons do.
     faces.innerHTML = '';
@@ -246,9 +286,26 @@ export function mountWorkbench(
 
     const available = facesFor(state.target);
     if (available.length === 1) {
-      const label = make('span', 'face-label', MODE_LABEL[available[0]!]);
-      label.dataset.mode = available[0]!;
-      faces.appendChild(label);
+      const only = available[0]!;
+      // A lone face the header already carries (Export on an Export target) would
+      // be the same word twice, so the bar keeps only its breadcrumb.
+      if ((GLOBAL_FACES as readonly WorkbenchMode[]).includes(only)) {
+        return;
+      }
+      if (state.mode === only) {
+        const label = make('span', 'face-label', MODE_LABEL[only]);
+        label.dataset.mode = only;
+        faces.appendChild(label);
+        return;
+      }
+      // A lone face is not where you are while a global face is up: it is the way
+      // back, so it is a button there.
+      const back = make('button', 'btn') as HTMLButtonElement;
+      back.dataset.mode = only;
+      back.textContent = MODE_LABEL[only];
+      back.addEventListener('click', () => setMode(only));
+      faces.appendChild(back);
+      modeButtons.push(back);
       return;
     }
     for (const mode of available) {
@@ -263,6 +320,24 @@ export function mountWorkbench(
       faces.appendChild(button);
       modeButtons.push(button);
     }
+  }
+
+  /**
+   * Go to a global face.
+   *
+   * Composition is the Character's own work, so it opens the Character when
+   * something else is up — that is a jump, not a face switch, and the target bar
+   * has to follow it. Export works against the Character already in play.
+   */
+  function activateGlobal(mode: GlobalFace, characterId: string | null): void {
+    if (characterId === null) {
+      return;
+    }
+    if (mode === 'compose' && state.target.kind !== 'character') {
+      void track(loadCharacter(characterId)).then(() => setMode('compose'));
+      return;
+    }
+    setMode(mode);
   }
 
   function renderStage(): void {
@@ -287,6 +362,12 @@ export function mountWorkbench(
     }
     if (state.mode === 'align') {
       return alignmentStageView(ctx);
+    }
+    if (state.mode === 'view') {
+      return assetStageView(ctx);
+    }
+    if (state.mode === 'compose') {
+      return composeStageView(ctx);
     }
     if (state.mode === 'export') {
       return exportStageView(ctx);
@@ -377,11 +458,21 @@ export function mountWorkbench(
   }
 
   // --- modes ----------------------------------------------------------------
+  /**
+   * The faces available right now: the target's own, plus the global ones while a
+   * Character is in play (they have no subject without one).
+   */
+  function availableFaces(): WorkbenchMode[] {
+    const local = [...facesFor(state.target)];
+    return activeCharacter(state) === null ? local : [...local, ...GLOBAL_FACES];
+  }
+
   function setMode(mode: WorkbenchMode): void {
     const from = state.mode;
-    // A face only exists while the open target has it, so a request for a face it
-    // does not have falls back to the target's opening face instead of a blank one.
-    state.mode = facesFor(state.target).includes(mode) ? mode : defaultFace(state.target);
+    // A face only exists while the open target (or Character) has it, so a request
+    // for a face it does not have falls back to the target's opening face instead
+    // of a blank one.
+    state.mode = availableFaces().includes(mode) ? mode : defaultFace(state.target);
     root.dataset.mode = state.mode;
     renderModes();
     renderStage();
@@ -479,6 +570,7 @@ export function mountWorkbench(
   async function readDraft(characterId: string, draftId: string): Promise<void> {
     state.target = { kind: 'draft', characterId, draftId };
     state.activeCharacterId = characterId;
+    state.sequenceDraft = null;
     state.draftFrame = 0;
     // A new Draft starts fitted, whatever the last one was zoomed to.
     state.draftZoom = null;
@@ -496,9 +588,11 @@ export function mountWorkbench(
   async function readAlignment(characterId: string): Promise<void> {
     state.activeCharacterId = characterId;
     state.alignment = await api.readCharacterAlignment(characterId);
+    // A different Character starts at a scale that fits it, not at the last one's.
+    state.alignScale = null;
     if (state.alignment) {
-      state.expandWidth = state.alignment.canvas.width;
-      state.expandHeight = state.alignment.canvas.height;
+      state.resizeWidth = state.alignment.canvas.width;
+      state.resizeHeight = state.alignment.canvas.height;
     }
     if (state.target.kind === 'draft' && state.target.characterId === characterId) {
       const alignment = await api.readDraftAlignment(characterId, state.target.draftId);
@@ -518,6 +612,7 @@ export function mountWorkbench(
   ): Promise<void> {
     state.target = { kind: 'asset', characterId, assetKind, assetId };
     state.activeCharacterId = characterId;
+    state.sequenceDraft = null;
     state.assetFrame = 0;
     state.reproducible = null;
     state.asset =

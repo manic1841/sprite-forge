@@ -29,7 +29,7 @@ import type { Canvas } from './character.js';
 import { deriveAnchor } from './draft.js';
 import { readClipDraft, writeClipDraft, type ClipDraft } from './draft.js';
 import { StoreError } from './errors.js';
-import { placeOnCanvas } from './frames.js';
+import { contentBounds, placeOnCanvas } from './frames.js';
 import { assertValidId } from './ids.js';
 import {
   assetMetaPath,
@@ -97,16 +97,16 @@ export interface ReadDraftAlignmentOptions extends CharacterScopedOptions {
   draftId: string;
 }
 
-/** Inputs for {@link expandCanvas}. */
-export interface ExpandCanvasOptions extends CharacterScopedOptions {
-  /** The new Canvas width; must be a positive even integer >= the current width. */
+/** Inputs for {@link resizeCanvas}. */
+export interface ResizeCanvasOptions extends CharacterScopedOptions {
+  /** The new Canvas width; a positive even integer at least the content floor. */
   width: number;
-  /** The new Canvas height; must be a positive integer >= the current height. */
+  /** The new Canvas height; a positive integer at least the content floor. */
   height: number;
 }
 
-/** The result of {@link expandCanvas}. */
-export interface ExpandCanvasResult {
+/** The result of {@link resizeCanvas}. */
+export interface ResizeCanvasResult {
   /** The new Canvas/Anchor as written to `canvas.json`. */
   canvas: Canvas;
   /** The committed Clip ids that were re-baked to the new Canvas. */
@@ -127,10 +127,29 @@ export interface ExpandCanvasResult {
   repairWarnings: RepairWarning[];
 }
 
+/** The smallest Canvas the Character's content allows, per {@link contentFloor}. */
+export interface ContentFloor {
+  /** Even, at least 2. */
+  width: number;
+  /** At least 1. */
+  height: number;
+  /**
+   * Whether anything is actually drawn. With nothing drawn the Canvas can be
+   * resized freely (and a fit is a no-op), so the floor is only advisory.
+   */
+  hasContent: boolean;
+}
+
 /** A Character's Clips/Drafts and their offsets, for the Alignment stage. */
 export interface CharacterAlignment {
   canvas: Canvas;
-  clips: Array<{ id: string; placementOffset?: PlacementOffset }>;
+  /**
+   * The smallest Canvas the drawn content still fits on. Shrinking below it would
+   * crop, so the Alignment face shows it as the floor for the size inputs.
+   */
+  contentFloor: ContentFloor;
+  /** `frameCount` is carried so a Clip's ghost can show one frame, not its whole sheet. */
+  clips: Array<{ id: string; frameCount: number; placementOffset?: PlacementOffset }>;
   drafts: Array<{ id: string; placementOffset?: PlacementOffset }>;
 }
 
@@ -185,21 +204,23 @@ export async function readDraftAlignment(
 }
 
 /**
- * Grow the Character's Canvas and re-bake everything drawn on it (ADR-0006).
+ * Resize the Character's Canvas and re-bake everything drawn on it
+ * (ADR-0014, superseding the grow-only rule of ADR-0006).
  *
  * The new Canvas stays symmetric about the Anchor (`anchor.x == width/2`,
  * `anchor.y == height`). Because the Anchor is the bottom-centre reused for every
- * Asset, growing the Canvas is a pure translation of the existing content: every
- * committed Clip's sheet frames and every Draft's frames are moved by
- * `((newWidth - oldWidth)/2, newHeight - oldHeight)`, with content otherwise
- * unchanged, and every committed Sequence is re-concatenated from its re-placed
- * Clips. Old sheets are overwritten — the store is working data, and git is the
- * history.
+ * Asset, resizing is a pure translation of the existing content: every committed
+ * Clip's sheet frames and every Draft's frames are moved by
+ * `((newWidth - oldWidth)/2, newHeight - oldHeight)`. Growing leaves the content
+ * alone; shrinking crops only what lies outside, which {@link contentFloor} keeps
+ * to transparent margin. Every committed Sequence is re-concatenated from its
+ * re-placed Clips. Old sheets are overwritten — the store is working data, and git
+ * is the history.
  */
-export async function expandCanvas(
+export async function resizeCanvas(
   root: string,
-  options: ExpandCanvasOptions,
-): Promise<ExpandCanvasResult> {
+  options: ResizeCanvasOptions,
+): Promise<ResizeCanvasResult> {
   const { characterId, width, height } = options;
   assertValidId(characterId, 'character', 'characterId');
 
@@ -213,15 +234,24 @@ export async function expandCanvas(
   if (!Number.isInteger(height) || height < 1) {
     throw new StoreError(`Canvas height must be a positive integer; got ${height}.`);
   }
-  if (width < old.width || height < old.height) {
+
+  // Shrinking is allowed down to the content's own bounds: below that the re-bake
+  // would crop pixels the user probably still wants, so the floor is enforced and
+  // named rather than silently trimming. With nothing drawn there is no floor.
+  const floor = await contentFloor(root, { characterId });
+  if (floor.hasContent && (width < floor.width || height < floor.height)) {
     throw new StoreError(
-      `Expand canvas can only grow: asked for ${width}x${height}, current Canvas is ` +
-        `${old.width}x${old.height}. Shrinking would crop every Asset.`,
+      `Canvas cannot shrink below the content: ${characterId} needs at least ` +
+        `${floor.width}x${floor.height} (asked for ${width}x${height}).`,
     );
   }
 
   const canvas: Canvas = { width, height, anchor: { x: width / 2, y: height } };
   validateArtifact('canvas', canvas, { artifact: canvasPath(characterId) });
+
+  if (width === old.width && height === old.height) {
+    return { canvas: old, rebakedClips: [], rebakedSequences: [], repairWarnings: [] };
+  }
 
   const dx = (width - old.width) / 2;
   const dy = height - old.height;
@@ -287,10 +317,9 @@ export interface FrameCanvasFromSegmentOptions {
  * ({@link BLANK_CANVAS}); this replaces it with the framing the footage implies, so
  * the placeholder is never left in place by accident.
  *
- * A Character that already has work keeps `expandCanvas`'s grow-only rule: content
- * drawn on the old Canvas cannot be cropped without a re-bake, so shrinking is
- * refused rather than silently done. With nothing drawn yet the Canvas is simply
- * written, which is what lets a provisional Canvas be smaller than the subject.
+ * A Character that already has work still cannot be cropped blindly: the Canvas
+ * is resized through {@link resizeCanvas}, whose content floor refuses a size
+ * below the pixels already drawn.
  */
 export async function frameCanvasFromSegment(
   root: string,
@@ -315,16 +344,145 @@ export async function frameCanvasFromSegment(
     (await listDirectories(root, draftsDir(characterId))).length > 0 ||
     (await listDirectories(root, sequencesDir(characterId))).length > 0;
 
-  if (!drawn || (canvas.width >= old.width && canvas.height >= old.height)) {
+  if (!drawn) {
     validateArtifact('canvas', canvas, { artifact: canvasPath(characterId) });
     await writeJsonFile(root, canvasPath(characterId), canvas);
     return canvas;
   }
 
-  throw new StoreError(
-    `Framing wants ${canvas.width}x${canvas.height}, but "${characterId}" is drawn on ` +
-      `${old.width}x${old.height} and expand can only grow. Expand to that size instead.`,
-  );
+  // Drawn on: re-bake through the resize path, which also guards the content
+  // floor when the derived framing is smaller than what is already drawn.
+  const resized = await resizeCanvas(root, {
+    characterId,
+    width: canvas.width,
+    height: canvas.height,
+  });
+  return resized.canvas;
+}
+
+/**
+ * The smallest Canvas the Character's drawn content still fits on.
+ *
+ * Measured from every committed Clip's sheet and every Draft's frames, with each
+ * artifact's `placementOffset` added because that is what a bake applies. The
+ * floor is symmetric about the Anchor, so it is always even and never below 2x1.
+ * All-transparent frames contribute nothing — a frame with no pixels cannot be
+ * cropped further, and a Character with nothing drawn reports `hasContent: false`
+ * with the bare 2x1 minimum.
+ *
+ * This is what lets {@link resizeCanvas} shrink safely: down to here only
+ * transparent margin is lost.
+ */
+export async function contentFloor(
+  root: string,
+  options: CharacterScopedOptions,
+): Promise<ContentFloor> {
+  const { characterId } = options;
+  assertValidId(characterId, 'character', 'characterId');
+
+  const canvas = await readCanvas(root, characterId);
+  const anchorX = canvas.anchor.x;
+  const anchorY = canvas.anchor.y;
+  let left = 0;
+  let right = 0;
+  let top = 0;
+  let bottom = 0;
+
+  const measure = (image: RgbaImage, offset: PlacementOffset = { x: 0, y: 0 }): void => {
+    const bounds = contentBounds(image);
+    if (bounds === null) {
+      return;
+    }
+    const minX = bounds.x + offset.x;
+    const maxX = bounds.x + bounds.width + offset.x;
+    const minY = bounds.y + offset.y;
+    const maxY = bounds.y + bounds.height + offset.y;
+    left = Math.max(left, anchorX - minX);
+    right = Math.max(right, maxX - anchorX);
+    top = Math.max(top, anchorY - minY);
+    bottom = Math.max(bottom, maxY - anchorY);
+  };
+
+  for (const clipId of await listDirectories(root, clipsDir(characterId))) {
+    const metaRel = assetMetaPath(characterId, 'clip', clipId);
+    if (!(await pathExists(root, metaRel))) {
+      continue;
+    }
+    const meta = (await readJsonFile(root, metaRel)) as { frameCount: number };
+    let decoded: { data: Buffer; info: { width: number; height: number } };
+    try {
+      decoded = await sharp(await readBinaryFile(root, sheetPath(characterId, 'clip', clipId)))
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+    } catch {
+      // An unreadable sheet is a validation problem of its own; the floor should
+      // still answer for the rest of the Character.
+      continue;
+    }
+    const { data, info } = decoded;
+    // The placement offset is already baked into a committed sheet; only the
+    // per-frame cell has to be lifted out of it.
+    for (let index = 0; index < meta.frameCount; index++) {
+      const frame: RgbaImage = {
+        width: canvas.width,
+        height: canvas.height,
+        data: new Uint8Array(canvas.width * canvas.height * 4),
+      };
+      for (let y = 0; y < canvas.height; y++) {
+        const from = (y * info.width + index * canvas.width) * 4;
+        frame.data.set(data.subarray(from, from + canvas.width * 4), y * canvas.width * 4);
+      }
+      measure(frame);
+    }
+  }
+
+  for (const draftId of await listDirectories(root, draftsDir(characterId))) {
+    if (!(await pathExists(root, draftPath(characterId, draftId)))) {
+      continue;
+    }
+    const draft = await readClipDraft(root, { characterId, draftId });
+    const offset = draft.placementOffset ?? { x: 0, y: 0 };
+    for (const frameRel of draft.frames) {
+      let decoded: { data: Buffer; info: { width: number; height: number } };
+      try {
+        decoded = await sharp(await readBinaryFile(root, frameRel))
+          .ensureAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+      } catch {
+        continue;
+      }
+      const { data, info } = decoded;
+      measure(
+        { width: info.width, height: info.height, data: new Uint8Array(data) },
+        offset,
+      );
+    }
+  }
+
+  return {
+    width: Math.max(2, 2 * Math.ceil(Math.max(left, right))),
+    height: Math.max(1, Math.ceil(top + bottom)),
+    hasContent: left > 0 || right > 0 || top > 0 || bottom > 0,
+  };
+}
+
+/**
+ * Shrink the Canvas to exactly the content floor, discarding transparent margin
+ * only. A Canvas already at its floor — or one with nothing drawn — is left as it
+ * is.
+ */
+export async function fitCanvasToContent(
+  root: string,
+  options: CharacterScopedOptions,
+): Promise<ResizeCanvasResult> {
+  const floor = await contentFloor(root, options);
+  if (!floor.hasContent) {
+    const canvas = await readCanvas(root, options.characterId);
+    return { canvas, rebakedClips: [], rebakedSequences: [], repairWarnings: [] };
+  }
+  return resizeCanvas(root, { ...options, width: floor.width, height: floor.height });
 }
 
 /** Read every Clip/Draft offset for a Character — the Alignment stage's view model. */
@@ -335,6 +493,7 @@ export async function readCharacterAlignment(
   const { characterId } = options;
   assertValidId(characterId, 'character', 'characterId');
   const canvas = await readCanvas(root, characterId);
+  const floor = await contentFloor(root, { characterId });
 
   const clips: CharacterAlignment['clips'] = [];
   for (const clipId of await listDirectories(root, clipsDir(characterId))) {
@@ -346,8 +505,12 @@ export async function readCharacterAlignment(
       placementOffset?: PlacementOffset;
     };
     validateArtifact('clip-provenance', provenance, { artifact: provenanceRel });
+    const meta = (await readJsonFile(root, assetMetaPath(characterId, 'clip', clipId))) as {
+      frameCount: number;
+    };
     clips.push({
       id: clipId,
+      frameCount: meta.frameCount,
       ...(provenance.placementOffset ? { placementOffset: { ...provenance.placementOffset } } : {}),
     });
   }
@@ -364,7 +527,7 @@ export async function readCharacterAlignment(
     });
   }
 
-  return { canvas, clips, drafts };
+  return { canvas, contentFloor: floor, clips, drafts };
 }
 
 // --- internals ----------------------------------------------------------------

@@ -9,6 +9,7 @@
 
 import type { CutStagePort } from './ports.js';
 import { make } from './dom.js';
+import type { Bounds } from '../types.js';
 
 /** Render the cut face for the loaded Recording. */
 export function cutStageView(ctx: CutStagePort): HTMLElement {
@@ -43,6 +44,32 @@ export function cutStageView(ctx: CutStagePort): HTMLElement {
   img.alt = `${recordingId} frame ${ctx.state.frame}`;
   fitRecordingFrame(ctx, img);
 
+  // The box lives on the selected Segment, so it is drawn on the frame only while
+  // one is selected: it is that Segment's window, not the Recording's. The layer
+  // is a sibling placed over the image; dragging anywhere on the frame draws.
+  const holder = make('div', 'cut-frame');
+  holder.append(img);
+  const selected = (cutList.cuts ?? []).find((cut) => cut.id === ctx.state.selectedCut);
+  if (selected) {
+    const box = make('div', 'cut-box');
+    box.dataset.cutBox = selected.id;
+    // The image may not have decoded yet, so the box is positioned again on load
+    // rather than only here (its percentages need the natural size).
+    const place = (): void => placeBox(box, selected.rect, img);
+    place();
+    img.addEventListener('load', place);
+    // The ghost follows the pointer during a drag, before anything is written.
+    const ghost = make('div', 'cut-box-ghost');
+    ghost.dataset.cutBoxGhost = '';
+    ghost.hidden = true;
+    holder.append(box, ghost);
+    holder.dataset.drawBox = '';
+    holder.addEventListener('pointerdown', (event) => {
+      ghost.hidden = false;
+      ctx.cut.beginBox(selected.id, holder, event);
+    });
+  }
+
   const next = make('button', 'btn ghost', '▶') as HTMLButtonElement;
   next.dataset.frameStep = 'next';
   next.disabled = ctx.state.frame >= cutList.frameCount - 1;
@@ -53,7 +80,7 @@ export function cutStageView(ctx: CutStagePort): HTMLElement {
   counter.textContent = `frame ${ctx.state.frame} / ${cutList.frameCount}`;
 
   const row = make('div', 'draft-stage');
-  row.append(prev, img, next);
+  row.append(prev, holder, next);
   preview.append(row, counter);
   view.appendChild(preview);
   return view;
@@ -61,6 +88,35 @@ export function cutStageView(ctx: CutStagePort): HTMLElement {
 
 /** How far a small frame is blown up on the preview, in screen px per image px. */
 const PREVIEW_SCALE_MAX = 16;
+
+/**
+ * Place a box layer over the frame, as percentages of the frame's own pixels.
+ *
+ * Percentages rather than screen pixels keep the box correct at any preview
+ * scale, including the scale the fit picks when the stage is resized.
+ */
+function placeBox(layer: HTMLElement, rect: Bounds | undefined, img?: HTMLImageElement): void {
+  const image = img ?? (layer.parentElement?.querySelector('img') as HTMLImageElement | null);
+  // The laid-out size stands in until the frame has decoded (and in a DOM-only
+  // environment that never decodes it), so the box is still truthful.
+  const laidOut = image?.getBoundingClientRect();
+  const width = image?.naturalWidth || Math.round(laidOut?.width ?? 0);
+  const height = image?.naturalHeight || Math.round(laidOut?.height ?? 0);
+  if (!rect || width <= 0 || height <= 0) {
+    layer.hidden = rect === undefined;
+    layer.style.left = '';
+    layer.style.top = '';
+    layer.style.width = '';
+    layer.style.height = '';
+    return;
+  }
+  layer.hidden = false;
+  layer.dataset.box = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+  layer.style.left = `${(rect.x / width) * 100}%`;
+  layer.style.top = `${(rect.y / height) * 100}%`;
+  layer.style.width = `${(rect.width / width) * 100}%`;
+  layer.style.height = `${(rect.height / height) * 100}%`;
+}
 
 /**
  * Grows a small frame to the space there is, up to {@link PREVIEW_SCALE_MAX}.

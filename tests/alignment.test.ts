@@ -1,5 +1,5 @@
 // Ticket #28 — Canvas alignment: the per-Clip manual `placementOffset` and the
-// explicit Character-wide **expand canvas**.
+// explicit Character-wide **resize canvas**.
 //
 // The seam is the core command surface, driven in-process against a temporary
 // store. Tests assert on observable behaviour: the descriptor/provenance read
@@ -17,13 +17,15 @@ import { describe, expect, it } from 'vitest';
 import {
   addSegment,
   commitDraft,
+  contentFloor,
   createCharacter,
-  expandCanvas,
   extractClipDraft,
+  fitCanvasToContent,
   forkAsset,
   ingestRecording,
   readDraftAlignment,
   readDraftRepair,
+  resizeCanvas,
   setPlacementOffset,
   StoreError,
   validateStore,
@@ -213,7 +215,7 @@ describe('fork carries the placement offset', () => {
   });
 });
 
-describe('expandCanvas', () => {
+describe('resizeCanvas', () => {
   it('grows the Canvas symmetrically and re-bakes every committed Clip', async () => {
     await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
       await withStore(async (store) => {
@@ -227,7 +229,7 @@ describe('expandCanvas', () => {
         const before = await decode(store, SHEET);
         expect([before.width, before.height]).toEqual([8, 6]);
 
-        const result = await expandCanvas(store.root, {
+        const result = await resizeCanvas(store.root, {
           characterId: CHARACTER_ID,
           width: 8,
           height: 10,
@@ -261,7 +263,7 @@ describe('expandCanvas', () => {
         });
         await appendRepair(store, { tool: 'erase-rect', geometry: { x: 1, y: 4, width: 1, height: 1 } });
 
-        await expandCanvas(store.root, { characterId: CHARACTER_ID, width: 8, height: 10 });
+        await resizeCanvas(store.root, { characterId: CHARACTER_ID, width: 8, height: 10 });
 
         // The Draft's frames are the new Canvas size...
         const frame = await decode(store, `characters/${CHARACTER_ID}/drafts/${DRAFT_ID}/frames/000.png`);
@@ -295,7 +297,7 @@ describe('expandCanvas', () => {
           assetId: ASSET_ID,
         });
 
-        const result = await expandCanvas(store.root, {
+        const result = await resizeCanvas(store.root, {
           characterId: CHARACTER_ID,
           width: 8,
           height: 10,
@@ -305,20 +307,57 @@ describe('expandCanvas', () => {
     });
   });
 
-  it('refuses to shrink the Canvas or break the symmetry invariant', async () => {
+  it('shrinks the Canvas down to the content, cropping only transparent margin', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        await extract(store);
+        await commitDraft(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          assetId: ASSET_ID,
+        });
+        // Content spans x 1..3 and y 4..5: the floored Canvas is 4x2, so shrinking
+        // to it keeps every opaque pixel and drops only transparent margin.
+        expect(await contentFloor(store.root, { characterId: CHARACTER_ID })).toEqual({
+          width: 4,
+          height: 2,
+          hasContent: true,
+        });
+
+        const result = await resizeCanvas(store.root, {
+          characterId: CHARACTER_ID,
+          width: 4,
+          height: 2,
+        });
+
+        expect(result.canvas).toEqual({ width: 4, height: 2, anchor: { x: 2, y: 2 } });
+        const after = await decode(store, SHEET);
+        expect([after.width, after.height]).toEqual([8, 2]);
+        expect(pixel(after, 1, 0)).toEqual([255, 0, 0, 255]);
+        expect(pixel(after, 2, 1)).toEqual([255, 0, 0, 255]);
+        expect(pixel(after, 6, 0)).toEqual([255, 0, 0, 255]);
+        await expect(validateStore(store.root)).resolves.toBeDefined();
+      });
+    });
+  });
+
+  it('refuses to shrink below the content floor and names the smallest size', async () => {
     await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
       await withStore(async (store) => {
         await seed(gif, store);
         await extract(store);
 
+        // Height 1 would cut through the two rows of content.
         await expect(
-          expandCanvas(store.root, { characterId: CHARACTER_ID, width: 2, height: 10 }),
-        ).rejects.toThrow(StoreError);
+          resizeCanvas(store.root, { characterId: CHARACTER_ID, width: 4, height: 1 }),
+        ).rejects.toThrow(/needs at least 4x2/);
+        // An odd width still has no integer Anchor.
         await expect(
-          expandCanvas(store.root, { characterId: CHARACTER_ID, width: 5, height: 10 }),
+          resizeCanvas(store.root, { characterId: CHARACTER_ID, width: 5, height: 10 }),
         ).rejects.toThrow(StoreError);
 
-        // A rejected expand leaves the Canvas untouched and the Draft intact.
+        // A rejected resize leaves the Canvas untouched and the Draft intact.
         expect(store.readJson(`characters/${CHARACTER_ID}/canvas.json`)).toEqual({
           width: 4,
           height: 6,
@@ -326,6 +365,67 @@ describe('expandCanvas', () => {
         });
         expect(store.listFiles()).toContain(DRAFT_PATH);
       });
+    });
+  });
+
+  it('counts a Draft placement offset in the floor', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        await extract(store);
+        // Shift the content two to the right: the symmetric floor becomes 6 wide.
+        await setPlacementOffset(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          offset: { x: 2, y: 0 },
+        });
+
+        expect((await contentFloor(store.root, { characterId: CHARACTER_ID })).width).toBe(8);
+        await expect(
+          resizeCanvas(store.root, { characterId: CHARACTER_ID, width: 6, height: 6 }),
+        ).rejects.toThrow(/needs at least 8x2/);
+      });
+    });
+  });
+
+  it('fits the Canvas to the content in one call', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        await extract(store);
+
+        const result = await fitCanvasToContent(store.root, { characterId: CHARACTER_ID });
+        expect(result.canvas).toEqual({ width: 4, height: 2, anchor: { x: 2, y: 2 } });
+        expect(store.readJson(`characters/${CHARACTER_ID}/canvas.json`)).toEqual(result.canvas);
+      });
+    });
+  });
+
+  it('resizes an empty Character freely and leaves a fit alone', async () => {
+    await withStore(async (store) => {
+      await createCharacter(store.root, {
+        characterId: CHARACTER_ID,
+        width: 30,
+        height: 47,
+        anchor: { x: 15, y: 47 },
+      });
+
+      // Nothing drawn: the floor is only advisory, so a silent guess can be undone.
+      expect(await contentFloor(store.root, { characterId: CHARACTER_ID })).toEqual({
+        width: 2,
+        height: 1,
+        hasContent: false,
+      });
+      const shrunk = await resizeCanvas(store.root, {
+        characterId: CHARACTER_ID,
+        width: 12,
+        height: 16,
+      });
+      expect(shrunk.canvas).toEqual({ width: 12, height: 16, anchor: { x: 6, y: 16 } });
+
+      // A fit on an empty Character keeps the size rather than collapsing to 2x1.
+      const fitted = await fitCanvasToContent(store.root, { characterId: CHARACTER_ID });
+      expect(fitted.canvas).toEqual(shrunk.canvas);
     });
   });
 });

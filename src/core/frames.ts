@@ -5,6 +5,10 @@
  * content bounds** so no frame carries dead margin, then **placed on the
  * Character's shared Canvas** so every Asset of the Character lines up
  * (docs/alignment.md). All functions here are pure buffer operations.
+ *
+ * A Segment may also carry a **box**: a rectangle of the source frame the
+ * extraction is confined to (docs/recordings.md). It is clipped to the frame
+ * first, so a stale box against a replaced source still yields pixels.
  */
 
 import type { RgbaImage } from './background.js';
@@ -51,6 +55,41 @@ export function unionBounds(boxes: readonly Bounds[]): Bounds {
   const maxX = Math.max(...boxes.map((box) => box.x + box.width));
   const maxY = Math.max(...boxes.map((box) => box.y + box.height));
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * `rect` clipped to an image of `width`×`height`, or `null` when nothing of it
+ * remains inside.
+ *
+ * A stored box outlives the frame it was drawn on, so it can end up outside a
+ * replaced (smaller) source. Clipping rather than rejecting keeps extraction
+ * working; the narrower result is visible in the output size.
+ */
+export function clampBounds(
+  rect: Bounds,
+  width: number,
+  height: number,
+): Bounds | null {
+  const x = Math.min(Math.max(rect.x, 0), width);
+  const y = Math.min(Math.max(rect.y, 0), height);
+  const maxX = Math.min(rect.x + rect.width, width);
+  const maxY = Math.min(rect.y + rect.height, height);
+  if (maxX <= x || maxY <= y) {
+    return null;
+  }
+  return { x, y, width: maxX - x, height: maxY - y };
+}
+
+/** The overlap of two boxes, or `null` when they do not meet. */
+export function intersectBounds(a: Bounds, b: Bounds): Bounds | null {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const maxX = Math.min(a.x + a.width, b.x + b.width);
+  const maxY = Math.min(a.y + a.height, b.y + b.height);
+  if (maxX <= x || maxY <= y) {
+    return null;
+  }
+  return { x, y, width: maxX - x, height: maxY - y };
 }
 
 /** Copy the `bounds` region of `image` into a new, tight image. */

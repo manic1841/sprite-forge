@@ -233,8 +233,45 @@ describe('forge CLI', () => {
     });
   });
 
-  it('extract writes a Clip Draft that a reload reads back', async () => {
-    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
+  it('cut sets and clears a Segment box, and rejects a malformed one', async () => {
+    await withSyntheticGif({ frames: 4, delaysMs: [50, 50, 60, 50] }, async (source) => {
+      await withStore(async (store) => {
+        await forge([
+          'ingest', '--store', store.root, '--recording-file', source.path, '--id', 'mgba-2026-09',
+        ]);
+        await forge([
+          'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+          '--action', 'add', '--id', 'walk', '--start', '1', '--end', '3',
+        ]);
+
+        const boxed = await forge([
+          'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+          '--action', 'rect', '--id', 'walk', '--rect', '1,2,3,4',
+        ]);
+        expect(boxed.code).toBe(0);
+        expect(JSON.parse(boxed.stdout).cuts).toEqual([
+          { id: 'walk', startFrame: 1, endFrame: 3, rect: { x: 1, y: 2, width: 3, height: 4 } },
+        ]);
+
+        const malformed = await forge([
+          'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+          '--action', 'rect', '--id', 'walk', '--rect', '1,2,3',
+        ]);
+        expect(malformed.code).toBe(1);
+
+        const cleared = await forge([
+          'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+          '--action', 'rect', '--id', 'walk', '--rect', 'none',
+        ]);
+        expect(cleared.code).toBe(0);
+        expect(JSON.parse(cleared.stdout).cuts).toEqual([
+          { id: 'walk', startFrame: 1, endFrame: 3 },
+        ]);
+      });
+    });
+  });
+
+  it('extract writes a Clip Draft that a reload reads back', async () => {    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
       await withStore(async (store) => {
         expect(
           (
@@ -417,7 +454,7 @@ describe('forge CLI', () => {
     });
   });
 
-  it('align sets a placement offset and expands the Canvas (round-trip)', async () => {
+  it('align sets a placement offset and resizes the Canvas (round-trip)', async () => {
     await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
       await withStore(async (store) => {
         const seed = [
@@ -445,7 +482,7 @@ describe('forge CLI', () => {
 
         const expanded = await forge([
           'align', '--store', store.root, '--character', 'hero',
-          '--action', 'expand', '--width', '6', '--height', '8',
+          '--action', 'resize', '--width', '6', '--height', '8',
         ]);
         expect(expanded.code).toBe(0);
         expect(JSON.parse(expanded.stdout).canvas).toEqual({

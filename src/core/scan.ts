@@ -19,6 +19,9 @@ import {
   exportDir,
   recordingDir,
   sequenceDir,
+  sequenceDraftDir,
+  sequenceDraftPath,
+  sequenceDraftsDir,
 } from './layout.js';
 import { isDirectory, listDirectories, pathExists } from './store/index.js';
 import type { ScannedAsset, ScannedCharacter, ScannedDraft, StoreScan } from './types.js';
@@ -30,6 +33,7 @@ export interface CharacterTree {
   sequences: string[];
   repairs: string[];
   drafts: string[];
+  sequenceDrafts: string[];
 }
 
 /** The raw directory tree of a store: ids only, no artifact contents. */
@@ -55,6 +59,7 @@ export async function readStoreTree(root: string): Promise<StoreTree> {
       sequences: await listDirectories(root, `${characterDir(id)}/sequences`),
       repairs: await listDirectories(root, `${characterDir(id)}/repairs`),
       drafts: await listDirectories(root, draftsDir(id)),
+      sequenceDrafts: await listDirectories(root, sequenceDraftsDir(id)),
     });
   }
   const exports = await listDirectories(root, EXPORTS_DIR);
@@ -81,6 +86,13 @@ export async function scan(root: string): Promise<StoreScan> {
         ...toAssets('sequence', character.id, character.sequences),
       ],
       drafts: await toDrafts(root, character.id, character.drafts),
+      sequenceDrafts: await toDrafts(
+        root,
+        character.id,
+        character.sequenceDrafts,
+        sequenceDraftDir,
+        sequenceDraftPath,
+      ),
     });
   }
 
@@ -96,11 +108,17 @@ export async function scan(root: string): Promise<StoreScan> {
  * A folder under `drafts/` counts as a Draft only when it carries a descriptor —
  * the same "recognise by artifact" rule a Character follows for `canvas.json`.
  */
-async function toDrafts(root: string, characterId: string, ids: string[]): Promise<ScannedDraft[]> {
+async function toDrafts(
+  root: string,
+  characterId: string,
+  ids: string[],
+  dirOf: (characterId: string, id: string) => string = draftDir,
+  pathOf: (characterId: string, id: string) => string = draftPath,
+): Promise<ScannedDraft[]> {
   const drafts: ScannedDraft[] = [];
   for (const id of ids) {
-    if (await pathExists(root, draftPath(characterId, id))) {
-      drafts.push({ id, dir: draftDir(characterId, id) });
+    if (await pathExists(root, pathOf(characterId, id))) {
+      drafts.push({ id, dir: dirOf(characterId, id) });
     }
   }
   return drafts;

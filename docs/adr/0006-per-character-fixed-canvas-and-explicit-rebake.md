@@ -1,5 +1,9 @@
 # One fixed Canvas per Character; expanding it is an explicit Character-level rebake
 
+> Partly superseded by [ADR-0014](./0014-canvas-is-resizable-down-to-content.md): the
+> Canvas is no longer grow-only, but it is still one per Character and still re-baked
+> Character-wide only by an explicit operation.
+
 A Character has a single Canvas and Anchor (`characters/<id>/canvas.json`), shared by
 every Clip, Sequence, and fork of that Character. The Anchor is the first frame's
 foot base, and the Canvas is horizontally symmetric about it so `flipX` stays aligned.

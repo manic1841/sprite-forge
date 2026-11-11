@@ -19,9 +19,9 @@ Recording ─▶ (extract Segment) ─▶ Clip ─▶ (concatenate) ─▶ Seque
 | # | Stage | What it does |
 | --- | --- | --- |
 | 1 | **Ingest** | Read a Recording; take frame count and per-frame delays from its metadata; capture the source path (the decode loses it). |
-| 2 | **Extract** | Select a Segment — a half-open frame range — by hand, frame-accurately. |
+| 2 | **Extract** | Select a Segment — a half-open frame range, optionally confined to a source box — by hand, frame-accurately. |
 | 3 | **De-background** | Colour-key the corner-sampled background colour to RGBA. |
-| 4 | **Crop + align** | Crop to the union bounds, then place the frames on the Character's shared Canvas via the Anchor. |
+| 4 | **Crop + align** | Crop to the union bounds (inside the box, if any), then place the frames on the Character's shared Canvas via the Anchor. |
 | 5 | **Repair** | Replay the Clip's Repair script (brush/eyedropper edits). |
 | 6 | **Compose** | Concatenate Clips into a Sequence. |
 | 7 | **Commit** | Promote a Draft into an immutable, named Asset. |
@@ -49,7 +49,8 @@ resolved absolute path is always shown. See
 ├─ characters/
 │  └─ <character-id>/
 │     ├─ canvas.json            # the shared Canvas / Anchor
-│     ├─ drafts/<draft-id>/     # editable, not-yet-committed work
+│     ├─ drafts/<draft-id>/     # editable, not-yet-committed Clip drafts
+│     ├─ sequence-drafts/<id>/  # ordered-Clip compositions still being edited
 │     ├─ repairs/<clip-id>/     # Repair scripts (input, not asset content)
 │     ├─ clips/<clip-id>/       # committed Clip assets
 │     └─ sequences/<seq-id>/    # committed Sequence assets
@@ -62,7 +63,7 @@ A committed Asset folder holds the **contract artifacts** plus its **provenance*
 clips/<clip-id>/
 ├─ sheet.png        # baked strip, already aligned to the Character's Canvas
 ├─ meta.json        # id, frameCount, delaysMs, loop  (frame size = the Character Canvas)
-└─ provenance.json  # recordingId+hash, segment{cutId,start,end,speed}, background, repair ref, placementOffset, derivedFrom?, toolVersion
+└─ provenance.json  # recordingId+hash, segment{cutId,start,end,speed,rect?}, background, repair ref, placementOffset, derivedFrom?, toolVersion
 ```
 
 A Sequence has the same shape (`sheet.png` + `meta.json` + `provenance.json`) with
@@ -79,6 +80,10 @@ frame size is **never** stored per Asset: it is always the Character's Canvas.
 
 - A **Draft** lives on disk under `characters/<id>/drafts/<draft-id>/`, so it survives
   a reload and both front ends can resume it.
+- A **Sequence composition** is a draft too, but has no frames: it is the ordered
+  Clip list at `characters/<id>/sequence-drafts/<id>/draft.json`, and it belongs to
+  the Character so a composition can start before any Sequence exists. It is
+  consumed on commit.
 - **Commit** bakes the Draft into `clips/<id>/` (or `sequences/<id>/`), writes its
   provenance, requires a name, and removes the Draft. The Asset is then immutable.
 - **Fork** opens an existing Asset as a new Draft. On commit, the new Asset's
@@ -121,27 +126,42 @@ of competing with page sections.
 - **Rail (left, persistent)** — the Library region: the Import form at the top of
   Recordings, then the Recordings, Drafts, committed Assets and Exports that
   already exist; click an item to load it.
-- **Stage (centre)** — the active view, chosen by a **mode** switch: *Clip editor*
-  (a Recording's preview and segmentation, or a Draft's frame and Repair brush —
-  the two share one screen because they are the same job), *Alignment* (Clips
-  ghosted on the shared Canvas against the Anchor), or *Export* (Situation
-  bindings and the resulting Manifest).
+- **Header (top, persistent)** — the **global** faces only: *Compose* and *Export*.
+  Both are about a whole Character rather than about the open item, so they outlive
+  every target and never move; with no Character in play they are disabled.
+  Composition jumps to the Character when something else is open.
+- **Target bar (above the stage)** — what is open, and the faces that belong to it.
+  A face belongs to its subject: *Cut* (a Recording's preview and segmentation),
+  *Align* (a Draft placed on the shared Canvas against the Anchor), *Clip* (a
+  Draft's frame and Repair brush), *View* (a committed Asset played back). An
+  editable thing and its committed snapshot never share one. A Draft is aligned
+  **before** it is painted: the Canvas is the coordinate space Repair is judged in,
+  and a later Canvas change invalidates Repair geometry while an offset is cheap to
+  nudge. A committed Asset's Align face is read-only and offers a fork instead.
+- **Stage (centre)** — the active view.
 - **Inspector (right, contextual)** — whatever the stage's **target** needs: the
   Draft's per-frame facts, the Repair controls and Commit; the Recording's facts
-  and cut guidance; per-Clip placement offsets in alignment; the live
+  and cut guidance; a committed Asset's provenance, Fork and Verify; the live
   `manifest.json` in export.
 - **Filmstrip (bottom, docked)** — the current Segment frame-by-frame, plus the
   Recording's timeline with its draggable cut ranges.
 
-Switching modes swaps only the stage; the rail, inspector and filmstrip stay put.
-The **target** — a Recording, a Draft, a Character or an Export — is what the
-stage and inspector follow, not the mode, so going from "cut" to "repair" to
-"commit" never leaves the screen. Extracting a Segment opens the new Draft in
-place; committing it shows the new Clip on the Character's Canvas.
+Switching modes swaps only the stage; the rail, header, target bar, inspector and
+filmstrip keep their nodes. The **target** — a Recording, a Draft, a Character or
+an Export — is what the stage and inspector follow, not the mode, so going from
+"cut" to "place" to "repair" to "commit" never leaves the screen. Extracting a
+Segment opens the new Draft on Placement; committing it opens the new Clip's
+read-only View.
+
+Composition is its own face on the **Character**, not a panel on a Sequence: a
+composition can be started before any Sequence exists, and it is persisted under
+`sequence-drafts/` so half-built work survives a reload like a Clip Draft. A
+Sequence fork writes a composition and opens it there; committing consumes it.
 
 The client is a shell plus one module per region (`src/web/client/workbench/`:
 `dom`, `state`, `ports`, `library`, `filmstrip`, `stageCut`, `stageClip`,
-`inspector`, `stageAlign`, `stageExport`). Rules that a region used to own in
+`stageView`, `stageCompose`, `inspector`, `stageAlign`, `stageExport`). Rules that a
+region used to own in
 half — a marked range, a Repair gesture — live in a **deep session module**
 instead (`cutSession`, `draftEditor`): the module holds the invariants and the
 state slice it writes, and the regions only build DOM and call its verbs. A view

@@ -131,11 +131,17 @@ async function forkAsset(
   draftId: string,
 ): Promise<void> {
   if (assetKind === 'sequence') {
-    // A Sequence has no frames of its own; forking one opens its composition.
+    // A Sequence has no frames of its own; forking it writes a composition draft
+    // and opens it on the Character's Compose face, where its Clip list lives.
     const fork = await ctx.api.forkSequence(characterId, assetId);
-    ctx.state.sequenceDraft = { name: fork.id, clips: [...fork.clips], forkOf: assetId };
-    ctx.renderStage();
-    ctx.renderInspector();
+    const draft = await ctx.api.saveSequenceDraft(characterId, {
+      clips: fork.clips,
+      forkOf: assetId,
+    });
+    ctx.state.sequenceDraft = draft;
+    await ctx.rescan();
+    await ctx.loadCharacter(characterId);
+    ctx.setMode('compose');
     return;
   }
   const draft = await ctx.api.forkClip(characterId, assetId, draftId === '' ? undefined : draftId);

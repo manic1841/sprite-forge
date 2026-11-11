@@ -16,8 +16,10 @@ export interface Regions {
   readonly stage: HTMLElement;
   readonly filmstrip: HTMLElement;
   readonly inspector: HTMLElement;
-  /** The shell header: breadcrumb and faces. */
+  /** The shell header: the global faces only. */
   readonly header: HTMLElement;
+  /** The bar above the stage: what is open and the faces that belong to it. */
+  readonly targetBar: HTMLElement;
   readonly context: HTMLElement;
 }
 

@@ -14,7 +14,7 @@
  * framing is shown, derived and grown.
  */
 
-import type { BasePort } from './ports.js';
+import type { BasePort, LibraryPort } from './ports.js';
 import { make } from './dom.js';
 import { activeAsset, activeDraft, type WorkbenchState } from './state.js';
 
@@ -25,7 +25,7 @@ import { activeAsset, activeDraft, type WorkbenchState } from './state.js';
  * `open` is the Character whose work is on screen; only it is expanded, which
  * keeps the rail to one open branch however much the store holds.
  */
-export function characterSection(ctx: BasePort, open: string | null): HTMLElement {
+export function characterSection(ctx: LibraryPort, open: string | null): HTMLElement {
   const section = make('div', 'characters');
   section.dataset.librarySection = 'characters';
   if (ctx.state.railForm === 'character') {
@@ -46,11 +46,11 @@ export function characterSection(ctx: BasePort, open: string | null): HTMLElemen
 }
 
 /**
- * Create a **blank** Character by id.
+ * Create a Character by id, framed **from a Segment** or **blank**.
  *
- * No footage is needed: the Character starts on a provisional Canvas and is framed
- * later (derive from a frame, or expand). Nothing about cutting a Recording is
- * implied by creating one.
+ * Framing from a Segment is the default: the Canvas comes from the subject, so the
+ * Character never starts on a guessed size. A blank Character keeps the
+ * provisional Canvas and is framed later.
  */
 function createForm(ctx: BasePort): HTMLElement {
   const form = make('form', 'rail-form character-create');
@@ -66,27 +66,108 @@ function createForm(ctx: BasePort): HTMLElement {
   button.type = 'submit';
   button.dataset.characterAddRun = '';
 
-  // Nothing about cutting a Recording is implied by creating one, so the only
-  // hint is what the Character is for: a blank Canvas framed later.
   const message = make('p', 'rail-hint');
   message.dataset.characterMessage = '';
-  message.textContent = 'blank — frame it from footage afterwards';
+
+  // Where the Canvas comes from. Segment framing is the default; blank is the
+  // escape hatch for a Character created before any footage exists.
+  const source = document.createElement('select');
+  source.dataset.characterSource = '';
+  source.setAttribute('aria-label', 'Canvas source');
+  for (const [value, label] of [
+    ['segment', 'Frame from a Segment'],
+    ['blank', 'Blank canvas'],
+  ] as const) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    source.appendChild(option);
+  }
+
+  const framing = make('div', 'rail-form-stack');
+  framing.dataset.characterFraming = '';
+  const recordings = ctx.state.scan?.recordings ?? [];
+  let cuts: readonly string[] = [];
+
+  const recordingSelect = document.createElement('select');
+  recordingSelect.dataset.characterRecordingSource = '';
+  recordingSelect.setAttribute('aria-label', 'Recording to frame from');
+  for (const recording of recordings) {
+    const option = document.createElement('option');
+    option.value = recording.id;
+    option.textContent = recording.id;
+    recordingSelect.appendChild(option);
+  }
+
+  const segmentSelect = document.createElement('select');
+  segmentSelect.dataset.characterSegmentSource = '';
+  segmentSelect.setAttribute('aria-label', 'Segment to frame from');
+
+  const renderCuts = (): void => {
+    segmentSelect.innerHTML = '';
+    for (const cutId of cuts) {
+      const option = document.createElement('option');
+      option.value = cutId;
+      option.textContent = cutId;
+      segmentSelect.appendChild(option);
+    }
+    if (cuts.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'no segments in this Recording';
+      segmentSelect.appendChild(option);
+    }
+  };
+
+  const loadCuts = async (): Promise<void> => {
+    cuts = [];
+    if (recordings.length > 0) {
+      try {
+        const list = await ctx.api.readCutList(recordingSelect.value);
+        cuts = list.cuts.map((cut) => cut.id);
+      } catch {
+        cuts = [];
+      }
+    }
+    renderCuts();
+  };
+
+  recordingSelect.addEventListener('change', () => void loadCuts());
+  void loadCuts();
+
+  framing.append(recordingSelect, segmentSelect);
+
+  const syncMessage = (): void => {
+    framing.hidden = source.value !== 'segment';
+    if (source.value === 'segment') {
+      message.textContent = recordings.length
+        ? 'the Canvas is framed from the chosen Segment'
+        : 'no Recordings yet — import one, or use a blank canvas';
+    } else {
+      message.textContent = 'blank — frame it from footage afterwards';
+    }
+  };
+  source.addEventListener('change', syncMessage);
+  syncMessage();
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     void ctx.run('Create Character', () =>
-      createCharacter(ctx, idInput.value.trim(), message),
+      createCharacter(ctx, idInput.value.trim(), source.value, recordingSelect.value, segmentSelect.value, message),
     );
   });
 
   row.append(idInput, button);
-  form.append(row, message);
+  form.append(row, source, framing, message);
   return form;
 }
 
 async function createCharacter(
   ctx: BasePort,
   characterId: string,
+  source: string,
+  recordingId: string,
+  cutId: string,
   message: HTMLElement,
 ): Promise<void> {
   if (!characterId) {
@@ -94,7 +175,23 @@ async function createCharacter(
     return;
   }
   try {
-    await ctx.api.createCharacter(characterId);
+    if (source === 'segment') {
+      if (!recordingId || !cutId) {
+        message.textContent = 'pick a Recording and a Segment to frame from';
+        return;
+      }
+      // Derive first: a bad Segment then fails before the Character exists rather
+      // than leaving a blank one behind.
+      const derived = await ctx.api.deriveAnchor(recordingId, cutId);
+      await ctx.api.createCharacter(characterId, {
+        width: derived.canvas.width,
+        height: derived.canvas.height,
+        anchorX: derived.canvas.anchor.x,
+        anchorY: derived.canvas.anchor.y,
+      });
+    } else {
+      await ctx.api.createCharacter(characterId);
+    }
     // The form closes once the Character exists: the rail goes back to being a list.
     ctx.state.railForm = 'none';
     await ctx.rescan();
@@ -111,7 +208,7 @@ async function createCharacter(
  * chevron. The counts are per kind inside the open branch, so the row itself only
  * has to say whether there is anything here at all.
  */
-function characterGroup(ctx: BasePort, characterId: string, open: boolean): HTMLElement {
+function characterGroup(ctx: LibraryPort, characterId: string, open: boolean): HTMLElement {
   const character = ctx.state.scan?.characters.find((entry) => entry.id === characterId);
   const total = (character?.drafts.length ?? 0) + (character?.assets.length ?? 0);
   const group = make('div', 'char-group');
@@ -129,13 +226,40 @@ function characterGroup(ctx: BasePort, characterId: string, open: boolean): HTML
     make('span', 'asset-name', characterId),
     make('span', 'rail-count', String(total)),
   );
-  head.addEventListener('click', () => void ctx.loadCharacter(characterId));
+  head.addEventListener('click', () => openOrExtract(ctx, characterId));
   group.appendChild(head);
 
   if (open) {
     group.appendChild(characterContents(ctx, characterId));
   }
   return group;
+}
+
+/**
+ * Open the Character — or, while a Segment is selected on an open Recording, hand
+ * that Segment to it as a Draft.
+ *
+ * Picking a Character in the rail is the same question the save dialog asks, so it
+ * answers it the same way: the Segment is extracted into the Character instead of
+ * the Character merely opening beside an already-stored cut. Extraction is the
+ * only verb that crosses faces on purpose (ADR-0012), and it lands on the Draft it
+ * produced. With no cut in hand the row stays plain navigation.
+ */
+function openOrExtract(ctx: LibraryPort, characterId: string): void {
+  const cutId = ctx.state.selectedCut;
+  if (ctx.state.target.kind !== 'recording' || ctx.state.recordingId === null || cutId === null) {
+    void ctx.loadCharacter(characterId);
+    return;
+  }
+  // Extraction reads this, so the clicked Character wins over an earlier target.
+  ctx.state.extractCharacterId = characterId;
+  void ctx.run('Extract segment', async () => {
+    // A declined expand (or any refusal) still opens the Character, so the click
+    // never behaves worse than plain navigation.
+    if (!(await ctx.cut.extract(cutId))) {
+      await ctx.loadCharacter(characterId);
+    }
+  });
 }
 
 /** A Character's Drafts and committed Assets, as its own nested branches. */

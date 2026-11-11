@@ -39,10 +39,13 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
   board.dataset.alignmentCanvas = '';
   board.dataset.canvasWidth = String(canvas.width);
   board.dataset.canvasHeight = String(canvas.height);
-  // One Canvas pixel is at most SCALE display pixels, and less when the Canvas
-  // would not otherwise fit: an oversized board would be clipped by the stage, and
-  // with it the very edges a placement is chosen against.
-  const scale = fitScale(ctx, canvas);
+  // The scale is held across renders, so resizing the Canvas actually changes the
+  // board's size. Refitting every render would blow a shrunken board back up to the
+  // stage, and a crop would read as the pixels having been scaled instead. Growing
+  // past the room still lowers the scale; a window resize clears it entirely.
+  const fitted = fitScale(ctx, canvas);
+  const scale = ctx.state.alignScale === null ? fitted : Math.min(ctx.state.alignScale, fitted);
+  ctx.state.alignScale = scale;
   board.dataset.alignScale = String(scale);
   board.style.width = `${canvas.width * scale}px`;
   board.style.height = `${canvas.height * scale}px`;
@@ -56,7 +59,12 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
   board.appendChild(anchor);
 
   const characterId = ctx.state.activeCharacterId ?? '';
-  const addGhost = (label: string, src: string, offset: PlacementOffset | undefined): HTMLElement => {
+  const addGhost = (
+    label: string,
+    src: string,
+    offset: PlacementOffset | undefined,
+    frameCount = 1,
+  ): HTMLElement => {
     const off = offset ?? { x: 0, y: 0 };
     const ghost = make('div', 'align-ghost');
     ghost.dataset.alignGhost = '';
@@ -64,12 +72,18 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
     ghost.dataset.offsetX = String(off.x);
     ghost.dataset.offsetY = String(off.y);
     ghost.style.transform = `translate(${off.x * scale}px, ${off.y * scale}px)`;
+    // A ghost is one Canvas, so a sheet with several frames is shown as its first
+    // frame: the image is laid out `frameCount` Canvases wide and the ghost clips
+    // the rest.
+    ghost.style.width = `${canvas.width * scale}px`;
+    ghost.style.height = `${canvas.height * scale}px`;
+    ghost.style.overflow = 'hidden';
     const img = document.createElement('img');
     img.className = 'align-ghost-image';
     img.dataset.alignGhostImage = '';
     img.src = src;
     img.alt = label;
-    img.style.width = `${canvas.width * scale}px`;
+    img.style.width = `${canvas.width * scale * frameCount}px`;
     img.style.height = `${canvas.height * scale}px`;
     ghost.appendChild(img);
     board.appendChild(ghost);
@@ -77,7 +91,12 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
   };
 
   for (const clip of alignment.clips) {
-    const ghost = addGhost(clip.id, ctx.api.sheetUrl(characterId, 'clip', clip.id), clip.placementOffset);
+    const ghost = addGhost(
+      clip.id,
+      ctx.api.sheetUrl(characterId, 'clip', clip.id),
+      clip.placementOffset,
+      clip.frameCount,
+    );
     ghost.dataset.kind = 'clip';
     ghost.dataset.asset = clip.id;
   }
@@ -94,14 +113,23 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
     makeDraggable(ctx, ghost, characterId, draft.id, scale);
   }
 
-  view.appendChild(board);
-  // The rate is a fit, so a resize has to lay the board out again. The listener
-  // outlives this render, so it drops itself once the board is gone.
+  // Its size in Canvas pixels, under the board: a resize changes a number, and the
+  // number is the honest record of a crop.
+  const size = make('p', 'align-size-readout', `${canvas.width} × ${canvas.height}`);
+  size.dataset.alignSizeReadout = '';
+
+  const frame = make('div', 'align-frame');
+  frame.append(board, size);
+  view.appendChild(frame);
+  // A window resize is what the held rate exists to survive, so it is also what
+  // clears it: the new room decides the scale again. The listener outlives this
+  // render, so it drops itself once the board is gone.
   const refit = (): void => {
-    if (!board.isConnected) {
+    if (!frame.isConnected) {
       window.removeEventListener('resize', refit);
       return;
     }
+    ctx.state.alignScale = null;
     ctx.renderStage();
   };
   window.addEventListener('resize', refit);

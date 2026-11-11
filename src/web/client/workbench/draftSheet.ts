@@ -110,7 +110,7 @@ export function zoomControls(
 
   const step = (factor: number): HTMLButtonElement => {
     const zoomIn = factor > 0;
-    const button = make('button', 'btn small ghost', zoomIn ? '+' : '−') as HTMLButtonElement;
+    const button = make('button', 'dock-btn ghost', zoomIn ? '+' : '−') as HTMLButtonElement;
     button.dataset.draftZoomStep = String(factor);
     button.setAttribute('aria-label', zoomIn ? 'Zoom in' : 'Zoom out');
     button.addEventListener('click', () => {
@@ -123,7 +123,7 @@ export function zoomControls(
     return button;
   };
 
-  const fit = make('button', 'btn small ghost', 'Fit') as HTMLButtonElement;
+  const fit = make('button', 'dock-btn ghost', 'Fit') as HTMLButtonElement;
   fit.dataset.draftZoomFit = '';
   fit.addEventListener('click', () => {
     deps.state.draftZoom = null;

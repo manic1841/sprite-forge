@@ -15,7 +15,7 @@
 
 import type { WorkbenchApi } from '../api.js';
 import { clampRange } from '../timeline.js';
-import type { Segment } from '../types.js';
+import type { Bounds, Segment } from '../types.js';
 import { confirmAction, promptText } from './dialog.js';
 import { createPlayback } from './cutPlayback.js';
 import { askCharacterTarget, createCharacterFramedFrom, type CutTargetDeps } from './cutTargets.js';
@@ -69,10 +69,16 @@ export interface CutSession {
     range: HTMLElement,
     event: PointerEvent,
   ): void;
+  /** Draw a Segment's source box on the stage; releasing persists it. */
+  beginBox(cutId: string, frame: HTMLElement, event: PointerEvent): void;
+  /** Persist a Segment's box, or clear it when `rect` is `null`. */
+  setBox(cutId: string, rect: Bounds | null): Promise<void>;
+  /** Fill the box with the Segment's own content bounds, widened to at least 1×1. */
+  boxContent(cutId: string): Promise<void>;
   /** Keep the marked range as a Segment, asking for its name and Character. */
   saveSelection(): Promise<void>;
   /** Extract a Segment into its Character, repairing the framing if needed. */
-  extract(cutId: string): Promise<void>;
+  extract(cutId: string): Promise<boolean>;
   /** Rename a stored Segment. */
   rename(cutId: string): Promise<void>;
   /** Delete a stored Segment, behind a confirmation. */
@@ -296,6 +302,110 @@ export function createCutSession(deps: CutSessionDeps): CutSession {
     render.inspector();
   }
 
+  // --- the box --------------------------------------------------------------
+
+  /**
+   * Draw the source box: press at one corner, release at the other.
+   *
+   * A Segment is one piece of footage, so its time range and its window are
+   * edited side by side. The drag stays inside the frame, and a press without
+   * movement still leaves a 1x1 box rather than nothing to see. Releasing writes
+   * the box; the stage reads it off the cut, so nothing is held here.
+   */
+  function beginBox(cutId: string, frame: HTMLElement, down: PointerEvent): void {
+    down.preventDefault();
+    const img = frame.querySelector<HTMLImageElement>('[data-recording-frame]');
+    if (!img) {
+      return;
+    }
+    const origin = boxPoint(down, img);
+    const ghost = frame.querySelector<HTMLElement>('[data-cut-box-ghost]');
+    const paint = (rect: Bounds): void => {
+      if (!ghost) {
+        return;
+      }
+      const size = sourceSize(img);
+      ghost.hidden = false;
+      ghost.dataset.box = `${rect.x},${rect.y},${rect.width},${rect.height}`;
+      ghost.style.left = `${(rect.x / size.width) * 100}%`;
+      ghost.style.top = `${(rect.y / size.height) * 100}%`;
+      ghost.style.width = `${(rect.width / size.width) * 100}%`;
+      ghost.style.height = `${(rect.height / size.height) * 100}%`;
+    };
+    const settle = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', key);
+      if (ghost) {
+        ghost.hidden = true;
+      }
+    };
+
+    const move = (event: PointerEvent): void => {
+      const to = boxPoint(event, img);
+      paint(boxBetween(origin, to, sourceSize(img)));
+    };
+    const up = (event: PointerEvent): void => {
+      settle();
+      const to = boxPoint(event, img);
+      void setBox(cutId, boxBetween(origin, to, sourceSize(img)));
+    };
+    const cancel = (): void => {
+      settle();
+      render.stage();
+    };
+    const key = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cancel();
+      }
+    };
+
+    paint(boxBetween(origin, origin, sourceSize(img)));
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', key);
+  }
+
+  async function setBox(cutId: string, rect: Bounds | null): Promise<void> {
+    const recordingId = state.recordingId;
+    if (!recordingId) {
+      return;
+    }
+    state.cutList = await api.setSegmentRect(recordingId, cutId, rect);
+    render.stage();
+    render.inspector();
+  }
+
+  /**
+   * Fill the box with the Segment's content.
+   *
+   * Extraction measures a keyed frame, so a box drawn against pixels the key
+   * cannot remove is only a starting point; this snaps it to what actually
+   * survives, and is also the "tighten" on an existing box. A Segment that draws
+   * nothing has nothing to offer and says so rather than writing an empty box.
+   */
+  async function boxContent(cutId: string): Promise<void> {
+    const recordingId = state.recordingId;
+    if (!recordingId) {
+      return;
+    }
+    const bounds = await api.segmentContentBounds(recordingId, cutId);
+    if (bounds === null) {
+      throw new Error('This Segment draws nothing; there is no content to box.');
+    }
+    // The box must be at least one pixel, which a single-pixel subject satisfies
+    // only if the union is widened to the same 1x1 floor.
+    await setBox(cutId, {
+      x: bounds.x,
+      y: bounds.y,
+      width: Math.max(bounds.width, 1),
+      height: Math.max(bounds.height, 1),
+    });
+  }
+
   // --- saving ---------------------------------------------------------------
 
   async function saveSelection(): Promise<void> {
@@ -341,8 +451,8 @@ export function createCutSession(deps: CutSessionDeps): CutSession {
     render.inspector();
   }
 
-  async function extract(cutId: string): Promise<void> {
-    await extractSegment(deps, cutId);
+  async function extract(cutId: string): Promise<boolean> {
+    return await extractSegment(deps, cutId);
   }
 
   return {
@@ -357,8 +467,53 @@ export function createCutSession(deps: CutSessionDeps): CutSession {
     extract,
     rename,
     remove,
+    beginBox,
+    setBox,
+    boxContent,
     togglePlayback: playback.toggle,
     stop: playback.stop,
+  };
+}
+
+/** The frame's own pixel size, falling back to its laid-out box while it decodes. */
+function sourceSize(img: HTMLImageElement): { width: number; height: number } {
+  const rect = img.getBoundingClientRect();
+  return {
+    width: img.naturalWidth || Math.max(1, Math.round(rect.width)),
+    height: img.naturalHeight || Math.max(1, Math.round(rect.height)),
+  };
+}
+
+/** The source pixel under a pointer event. */
+function boxPoint(event: PointerEvent, img: HTMLImageElement): { x: number; y: number } {
+  const rect = img.getBoundingClientRect();
+  const size = sourceSize(img);
+  return {
+    x: Math.floor(((event.clientX - rect.left) / (rect.width || 1)) * size.width),
+    y: Math.floor(((event.clientY - rect.top) / (rect.height || 1)) * size.height),
+  };
+}
+
+/**
+ * The box between two dragged corners, clamped to the frame and inclusive of both
+ * endpoints, so a press with no movement still describes one pixel.
+ */
+function boxBetween(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  size: { width: number; height: number },
+): Bounds {
+  const clampX = (value: number): number => Math.min(Math.max(value, 0), size.width - 1);
+  const clampY = (value: number): number => Math.min(Math.max(value, 0), size.height - 1);
+  const x1 = clampX(from.x);
+  const y1 = clampY(from.y);
+  const x2 = clampX(to.x);
+  const y2 = clampY(to.y);
+  return {
+    x: Math.min(x1, x2),
+    y: Math.min(y1, y2),
+    width: Math.abs(x2 - x1) + 1,
+    height: Math.abs(y2 - y1) + 1,
   };
 }
 
@@ -387,7 +542,7 @@ export function renderSelectionActions(deps: CutSessionDeps): HTMLElement {
   label.textContent = state.selection ? rangeLabel(state.selection) : '';
 
   const save = document.createElement('button');
-  save.className = 'btn small';
+  save.className = 'dock-btn';
   save.type = 'button';
   save.dataset.pickSave = '';
   save.textContent = '✂';
@@ -399,7 +554,7 @@ export function renderSelectionActions(deps: CutSessionDeps): HTMLElement {
   });
 
   const cancel = document.createElement('button');
-  cancel.className = 'btn small ghost';
+  cancel.className = 'dock-btn ghost';
   cancel.type = 'button';
   cancel.dataset.pickCancel = '';
   cancel.textContent = '✕';

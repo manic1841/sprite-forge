@@ -64,6 +64,11 @@
     overflow: auto;
   }
 
+  .wb-shell .draft-transport {
+    margin: 0 -16px -16px;
+    padding: 9px 16px 0;
+  }
+
   .wb-shell .draft-frame,
   .wb-shell .recording-frame {
     max-width: 100%;
@@ -77,6 +82,12 @@
 
   .wb-shell .faces {
     overflow: hidden;
+  }
+
+  /* With the breadcrumb gone the targets bar has nothing left to say, so it
+     folds away rather than leaving an empty rule above the stage. */
+  .wb-shell .target-bar:not(:has(.btn)) {
+    display: none;
   }
 }
 

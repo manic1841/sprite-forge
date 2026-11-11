@@ -22,13 +22,14 @@ import {
   commitSequence,
   createCharacter,
   exportCharacter,
-  expandCanvas,
+  resizeCanvas,
   extractClipDraft,
   ingestRecording,
   readDraftAlignment,
   readDraftRepair,
   setPlacementOffset,
   setSegmentRange,
+  setSegmentRect,
   verifyReproducible,
 } from '../src/core/index.js';
 import { withStore, type StoreFixture } from './harness.js';
@@ -114,8 +115,48 @@ describe('verifyReproducible — a committed Clip', () => {
     );
   });
 
-  it('detects a genuine mismatch: a tampered committed sheet does not reproduce', async () => {
+  it('replays a boxed extract: the box is part of provenance', async () => {
     await withSyntheticGif(
+      { frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#ff0000' },
+      async (gif) => {
+        await withStore(async (store) => {
+          await seedClip(gif, store);
+          // A box records the window the pixels came through, so a re-run must
+          // reach the same pixels through the same window.
+          await setSegmentRect(store.root, {
+            recordingId: RECORDING_ID,
+            id: 'red',
+            rect: { x: 1, y: 3, width: 2, height: 2 },
+          });
+          await extractClipDraft(store.root, {
+            characterId: CHARACTER_ID,
+            recordingId: RECORDING_ID,
+            cutId: 'red',
+            draftId: 'red-boxed',
+          });
+          await commitDraft(store.root, {
+            characterId: CHARACTER_ID,
+            draftId: 'red-boxed',
+            assetId: 'red-boxed',
+          });
+
+          const provenance = store.readJson(
+            `characters/${CHARACTER_ID}/clips/red-boxed/provenance.json`,
+          );
+          expect(provenance).toMatchObject({ segment: { rect: { x: 1, y: 3, width: 2, height: 2 } } });
+
+          const report = await verifyReproducible(store.root, {
+            characterId: CHARACTER_ID,
+            kind: 'clip',
+            id: 'red-boxed',
+          });
+          expect(report.reproducible).toBe(true);
+        });
+      },
+    );
+  });
+
+  it('detects a genuine mismatch: a tampered committed sheet does not reproduce', async () => {    await withSyntheticGif(
       { frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#ff0000' },
       async (gif) => {
         await withStore(async (store) => {
@@ -519,7 +560,7 @@ describe('validity warnings', () => {
     );
   });
 
-  it('warns that a Repair script and a placement offset are stale after expandCanvas', async () => {
+  it('warns that a Repair script and a placement offset are stale after resizeCanvas', async () => {
     await withSyntheticGif(
       { frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#ff0000' },
       async (gif) => {
@@ -557,7 +598,7 @@ describe('validity warnings', () => {
             offset: { x: 1, y: 0 },
           });
 
-          await expandCanvas(store.root, { characterId: CHARACTER_ID, width: 10, height: 8 });
+          await resizeCanvas(store.root, { characterId: CHARACTER_ID, width: 10, height: 8 });
 
           const repair = await readDraftRepair(store.root, {
             characterId: CHARACTER_ID,
@@ -616,7 +657,7 @@ describe('validity warnings', () => {
             assetId: CLIP_ID,
           });
 
-          const result = await expandCanvas(store.root, {
+          const result = await resizeCanvas(store.root, {
             characterId: CHARACTER_ID,
             width: 10,
             height: 8,

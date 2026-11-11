@@ -20,6 +20,12 @@ A named cut in a Recording's cut list: a half-open frame range
 (`[startFrame, endFrame)`) covering one action's worth of footage.
 _Avoid_: slice, span, take
 
+**Box**:
+A Segment's optional source rectangle, in source pixels, that its extraction is
+confined to — a window on the frame, for footage whose backdrop the colour key
+cannot clear.
+_Avoid_: crop region, marquee, ROI, mask
+
 **Cut list**:
 A Recording's own record of its Segments, stored beside the Recording.
 _Avoid_: chapter list, index

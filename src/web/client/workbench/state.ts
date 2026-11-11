@@ -17,6 +17,7 @@ import type {
   ExportResult,
   RepairState,
   ReproducibilityReport,
+  SequenceDraft,
   StoreCheckReport,
   StoreScan,
 } from '../types.js';
@@ -27,8 +28,12 @@ import type {
  * A face belongs to what is open, not to a fixed toolbar — Cutting only means
  * something for a Recording, and Alignment only for something with a Canvas — so
  * the mode bar offers just the faces the current target has.
+ *
+ * `view` and `clip` are deliberately separate: a committed Asset is a snapshot
+ * and gets a read-only View, while `clip` is the editable Draft editor. Sharing
+ * one face for both made the same controls mean two different things.
  */
-export const WORKBENCH_MODES = ['cut', 'clip', 'align', 'export'] as const;
+export const WORKBENCH_MODES = ['cut', 'clip', 'align', 'view', 'compose', 'export'] as const;
 export type WorkbenchMode = (typeof WORKBENCH_MODES)[number];
 
 /**
@@ -53,13 +58,8 @@ export type Target =
   | { kind: 'character'; characterId: string }
   | { kind: 'export'; target: string };
 
-/** A Sequence being composed: its ordered source Clips and its lineage. */
-export interface SequenceDraft {
-  name: string;
-  clips: string[];
-  /** The Sequence this list was forked from, recorded on the next commit. */
-  forkOf: string | null;
-}
+/** A Sequence being composed: see the core `SequenceDraft` recipe. */
+export type { SequenceDraft };
 
 /** The Export form's uncommitted input, kept across re-renders. */
 export interface ExportForm {
@@ -197,15 +197,23 @@ export interface AlignState {
   activeCharacterId: string | null;
   alignment: CharacterAlignment | null;
   alignmentWarnings: AlignmentWarning[];
-  expandWidth: number;
-  expandHeight: number;
+  /**
+   * Screen pixels per Canvas pixel on the Alignment board; `null` fits the stage.
+   *
+   * Held rather than recomputed每 render: refitting would blow a shrunken board
+   * back up to the stage, and a crop would then read as the pixels having been
+   * scaled instead. A window resize clears it to refit.
+   */
+  alignScale: number | null;
+  resizeWidth: number;
+  resizeHeight: number;
 }
 
 /**
  * The committed-Asset slice: the open Asset, its playback and a Sequence being
  * composed.
  *
- * Written by the asset inspector and the clip stage alone.
+ * Written by the asset inspector, the View stage and the Compose stage.
  */
 export interface AssetState {
   /** The loaded committed Asset (its meta and provenance), or `null`. */
@@ -271,8 +279,9 @@ export function createState(): WorkbenchState {
     activeCharacterId: null,
     alignment: null,
     alignmentWarnings: [],
-    expandWidth: 0,
-    expandHeight: 0,
+    alignScale: null,
+    resizeWidth: 0,
+    resizeHeight: 0,
     manifest: null,
     asset: null,
     assetFrame: 0,
@@ -321,20 +330,33 @@ export function activeAsset(
 }
 
 /**
+ * The faces the **shell header** offers: they belong to the Character, not to
+ * what is open, so they outlive every target. Composition and Export are about a
+ * whole Character; a Recording, a Draft and an Asset all come and go beneath them.
+ */
+export const GLOBAL_FACES = ['compose', 'export'] as const;
+export type GlobalFace = (typeof GLOBAL_FACES)[number];
+
+/**
  * The faces each kind of target has, default face first.
  *
  * The bar shows exactly this list, so an irrelevant face is never offered: a
  * Recording cannot be aligned, a Character has no pixels to repair, and an
  * Export has nothing to cut. Order is by the work's own progression — cutting is
- * where a Recording starts; Alignment is secondary to a Draft's repair. Export is
- * offered wherever there is a Character to export from.
+ * where a Recording starts; a Draft is **placed first, then painted**, because a
+ * later Canvas change invalidates Repair geometry while an offset is cheap to
+ * nudge. A committed Asset opens on its read-only View and only shows Placement
+ * as a reference.
+ *
+ * `compose` and `export` are not here: they are {@link GLOBAL_FACES}, offered by
+ * the header whatever is open.
  */
 const FACES: Record<Target['kind'], readonly WorkbenchMode[]> = {
   none: ['clip'],
   recording: ['cut'],
-  draft: ['clip', 'align', 'export'],
-  asset: ['clip', 'align', 'export'],
-  character: ['align', 'export'],
+  draft: ['align', 'clip'],
+  asset: ['view', 'align'],
+  character: ['align'],
   export: ['export'],
 };
 

@@ -52,19 +52,117 @@
   align-self: flex-end;
 }
 
-.wb-shell .draft-frames {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: center;
-  /* a long draft gives the strip its own scroll rather than eating the picture's
-     height */
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 30%;
-  overflow-y: auto;
+/* The dock under the frame: same surface, hairline and mono head as the
+   filmstrip, so the two transports read as one system. */
+.wb-shell .draft-transport {
+  flex: none;
+  align-self: stretch;
+  width: auto;
+  /* bleed through the stage's padding so the dock meets its edges, the way the
+     filmstrip does */
+  margin: 0 -22px -26px;
+  padding: 9px 22px 0;
+  border-top: 1px solid var(--u-line);
+  background: var(--u-surface);
+}
+
+/* the frame cells are a strip, not a wrapping pile: one row, its own scroll */
+.wb-shell .draft-frames-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 10px;
   scrollbar-width: thin;
   scrollbar-color: var(--u-line-2) transparent;
+}
+
+.wb-shell .draft-frames {
+  display: flex;
+  gap: 2px;
+  min-width: 100%;
+}
+
+.wb-shell .draft-frames .cell {
+  flex: 1 1 18px;
+  min-width: 18px;
+  height: 20px;
+}
+
+/* The bar under the head: tools left, settings beside them, Undo pushed to the
+   far end. No boxes — the shared `.dock-btn` chrome carries the tools. */
+.wb-shell .repair-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.wb-shell .repair-tools {
+  display: inline-flex;
+  gap: 2px;
+}
+
+/* the four tools are glyphs, so they are square chips rather than labelled ones:
+   the name moves to the tooltip and the accessible name stays on the button */
+.wb-shell .tool-btn {
+  width: 26px;
+  padding: 0;
+}
+
+.wb-shell .tool-btn .ic {
+  display: block;
+  width: 16px;
+  height: 16px;
+  /* the base reset caps a svg at 100%, which would flatten it in a width-less chip */
+  max-width: none;
+}
+
+.wb-shell .repair-bar .repair-settings {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--u-line);
+}
+
+/* labels and inputs shrink to the bar's 22px line, not the inspector's stack */
+.wb-shell .repair-bar .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-shell .repair-bar .field-label {
+  white-space: nowrap;
+}
+
+.wb-shell .repair-bar :is(input, select) {
+  height: 22px;
+  padding: 0 5px;
+  border-color: transparent;
+  border-radius: 4px;
+  background: var(--u-fill-2);
+  font-size: 11px;
+}
+
+.wb-shell .repair-bar input[type="color"] {
+  width: 30px;
+  height: 22px;
+  padding: 2px;
+  background: transparent;
+}
+
+.wb-shell .repair-bar input[type="number"] {
+  width: 46px;
+}
+
+.wb-shell .repair-bar select {
+  width: auto;
+}
+
+.wb-shell .repair-bar [data-repair-undo] {
+  margin-left: auto;
 }
 
 /* The board scrolls; the sheet inside it is the frame at its own pixels times the
@@ -122,20 +220,13 @@
   border-radius: 0;
 }
 
-.wb-shell .draft-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .wb-shell .draft-zoom {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
+  gap: 2px;
 }
 
-.wb-shell .draft-zoom .btn {
+.wb-shell .draft-zoom .dock-btn {
   min-width: 22px;
   padding: 0 5px;
 }
@@ -190,6 +281,79 @@
   border: 1px solid var(--u-line-2);
   border-radius: 8px;
   background: var(--u-fill);
+}
+
+/* —— the Segment's box —— */
+
+/* The box is a window on the source, so it is drawn *over* the frame it confines:
+   the dark surround is everything the extract will throw away. */
+.wb-shell .cut-frame {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  /* the vignette below has a huge spread, so it must be clipped to the frame */
+  overflow: hidden;
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.wb-shell .cut-frame .recording-frame {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 0;
+}
+
+.wb-shell .cut-frame[data-draw-box]::after {
+  /* the dirty region: only a hint of one, so an empty stage does not look painted */
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px transparent;
+}
+
+.wb-shell .cut-box,
+.wb-shell .cut-box-ghost {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid var(--u-accent);
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 38%);
+}
+
+.wb-shell .cut-box-ghost {
+  border-style: dashed;
+  background: rgb(255 255 255 / 6%);
+}
+
+.wb-shell .cut-box-ghost[hidden],
+.wb-shell .cut-box[hidden] {
+  display: none;
+}
+
+.wb-shell .segment-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.wb-shell .segment-box-readout {
+  flex: 1 0 100%;
+  margin: 0;
+  font-family: var(--u-mono);
+  font-size: 11px;
+  color: var(--u-muted);
+}
+
+/* The playback's box is sized to one frame (a sheet is cropped, not stretched), so
+   it must not take the row's height and centring is the row's job. */
+.wb-shell .stage-view[data-stage-view="asset-view"] .draft-stage {
+  align-items: center;
 }
 
 .wb-shell .sheet {

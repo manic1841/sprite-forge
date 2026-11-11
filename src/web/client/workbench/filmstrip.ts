@@ -27,20 +27,20 @@ export function renderFilmstrip(ctx: FilmstripPort): void {
   filmstrip.innerHTML = '';
   filmstrip.dataset.activeFrame = String(state.frame);
 
-  const header = make('div', 'filmstrip-header');
+  const header = make('div', 'filmstrip-header transport-head');
   header.dataset.filmstripHeader = '';
-  const title = make('span', 'ttl');
+  const title = make('span', 'ttl transport-title');
   title.textContent = state.recordingId
     ? `Recording — ${state.recordingId}`
     : 'Recording — none loaded';
-  const sub = make('span', 'muted');
+  const sub = make('span', 'muted transport-note');
   sub.textContent = state.cutList
     ? `${frameCounter(state.frame, state.cutList.frameCount, state.cutList.cuts.length)}`
     : 'load a Recording to scrub its frames';
 
   // The strip carries its own action area: the counter, the verbs a marked range
   // offers, and Play — which is what checks the range before it is kept.
-  const controls = make('span', 'filmstrip-controls');
+  const controls = make('span', 'filmstrip-controls transport-actions');
   controls.dataset.filmstripControls = '';
   controls.append(sub);
   if (state.selection) {
@@ -183,7 +183,7 @@ function playButton(ctx: FilmstripPort): HTMLElement {
   const playable = (ctx.state.cutList?.frameCount ?? 0) > 0;
   const button = make(
     'button',
-    'btn small ghost filmstrip-play',
+    'btn small ghost dock-btn filmstrip-play',
     ctx.state.playing ? '⏸ Pause' : '▶ Play',
   ) as HTMLButtonElement;
   button.type = 'button';

@@ -19,7 +19,7 @@ import {
   commitDraft,
   commitSequence,
   createCharacter,
-  expandCanvas,
+  resizeCanvas,
   extractClipDraft,
   forkAsset,
   ingestRecording,
@@ -397,7 +397,7 @@ describe('forking a Sequence', () => {
   });
 });
 
-describe('expandCanvas re-bakes committed Sequences', () => {
+describe('resizeCanvas re-bakes committed Sequences', () => {
   it('re-places a Sequence’s frames on the grown Canvas, content unchanged', async () => {
     await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#ff0000' }, async (red) => {
       await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [30, 70], foreground: '#00ff00' }, async (green) => {
@@ -412,7 +412,7 @@ describe('expandCanvas re-bakes committed Sequences', () => {
           const before = await decode(store, sheetRel);
           expect([before.width, before.height]).toEqual([16, 6]);
 
-          const result = await expandCanvas(store.root, {
+          const result = await resizeCanvas(store.root, {
             characterId: CHARACTER_ID,
             width: 8,
             height: 10,

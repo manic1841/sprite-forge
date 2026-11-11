@@ -9,6 +9,7 @@
 
 import type { RecordingInspectorPort } from './ports.js';
 import { addRow, make, subheading } from './dom.js';
+import type { Segment } from '../types.js';
 
 // --- Character ---------------------------------------------------------------
 
@@ -153,12 +154,16 @@ export function segmentEditor(ctx: RecordingInspectorPort, recordingId: string):
     ),
   );
 
+  detail.appendChild(boxEditor(ctx, selected));
+
   // Extract is the one verb that makes something outside this Segment, so it is the
   // block's only solid button, full width, on its own line.
   const extract = make('button', 'btn small segment-extract', 'Extract') as HTMLButtonElement;
   extract.dataset.segmentExtract = selected.id;
   extract.addEventListener('click', () => {
-    ctx.run('Extract segment', () => ctx.cut.extract(selected.id));
+    ctx.run('Extract segment', async () => {
+      await ctx.cut.extract(selected.id);
+    });
   });
 
   detail.appendChild(extract);
@@ -170,6 +175,47 @@ export function segmentEditor(ctx: RecordingInspectorPort, recordingId: string):
 }
 
 // --- Footage picker ----------------------------------------------------------
+
+/**
+ * The Segment's **box**: the rectangle of the source it is confined to.
+ *
+ * A Source whose backdrop the colour key cannot remove carries other colours into
+ * the extract; a box is the way out, because it is applied before the key runs and
+ * outside it nothing is measured. Drag on the frame to set one. The numbers are
+ * read-only here — the drag is the editor, and one textual form next to it would
+ * just be a second place to keep right.
+ */
+function boxEditor(ctx: RecordingInspectorPort, selected: Segment): HTMLElement {
+  const block = make('div', 'segment-box');
+  block.dataset.segmentBox = selected.id;
+
+  if (selected.rect) {
+    const rect = selected.rect;
+    block.appendChild(
+      make('p', 'segment-box-readout', `box ${rect.x},${rect.y} ${rect.width}×${rect.height}`),
+    );
+    const clear = make('button', 'btn small ghost', 'Whole frame') as HTMLButtonElement;
+    clear.dataset.segmentBoxClear = selected.id;
+    clear.title = 'Drop the box and extract the whole frame again';
+    clear.addEventListener('click', () => {
+      ctx.run('Clear box', () => ctx.cut.setBox(selected.id, null));
+    });
+    block.appendChild(clear);
+  } else {
+    block.appendChild(
+      make('p', 'rail-hint', 'No box: the whole frame is extracted. Drag on the frame to box a part of it.'),
+    );
+  }
+
+  const fit = make('button', 'btn small ghost', 'Box content') as HTMLButtonElement;
+  fit.dataset.segmentBoxFit = selected.id;
+  fit.title = 'Set the box to what survives the background key';
+  fit.addEventListener('click', () => {
+    ctx.run('Box content', () => ctx.cut.boxContent(selected.id));
+  });
+  block.appendChild(fit);
+  return block;
+}
 
 /**
  * Open a Recording **for this Character**: the way footage enters a Character.

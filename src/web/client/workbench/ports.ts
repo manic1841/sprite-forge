@@ -61,7 +61,7 @@ export interface RecordingInspectorPort extends BasePort {
   readonly cut: CutSession;
 }
 
-/** The clip stage: a Draft's frames, or a committed Asset's playback. */
+/** The clip stage: a Draft's frames and Repair bench. */
 export interface ClipStagePort extends BasePort {
   readonly draft: DraftEditor;
 }
@@ -75,6 +75,7 @@ export interface DraftInspectorPort extends BasePort {
 export interface InspectorPort extends RecordingInspectorPort, DraftInspectorPort {}
 
 /** All the remaining inspectors only need the base capabilities. */
+export type AssetViewStagePort = BasePort;
 export type AssetInspectorPort = BasePort;
 export type AlignInspectorPort = BasePort;
 export type CharacterInspectorPort = BasePort;

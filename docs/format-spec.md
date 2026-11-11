@@ -87,7 +87,10 @@ Schema: [`schemas/cuts.schema.json`](../schemas/cuts.schema.json).
   "hash": "sha256:…",   // content hash of source.gif
   "frameCount": 523,     // frame count of source.gif
   "cuts": [
-    { "id": "walk", "startFrame": 293, "endFrame": 327, "speed": 1 }
+    {
+      "id": "walk", "startFrame": 293, "endFrame": 327, "speed": 1,
+      "rect": { "x": 240, "y": 300, "width": 32, "height": 32 }
+    }
   ]
 }
 ```
@@ -100,6 +103,7 @@ Schema: [`schemas/cuts.schema.json`](../schemas/cuts.schema.json).
 | `cuts[].startFrame` | ✅ | Inclusive start. |
 | `cuts[].endFrame` | ✅ | Exclusive end. Must be `> startFrame`. |
 | `cuts[].speed` | ➖ | Playback multiplier; omitted when `1`. Does **not** change the range. |
+| `cuts[].rect` | ➖ | A source rectangle the Segment is confined to; omitted when the whole frame is used. See Rule 2.3. |
 
 **Rule 2.1 — overlap is allowed.** Cuts may overlap or repeat ranges; only
 **identity** (unique cut ids) is enforced. Listed in frame order for readability
@@ -108,6 +112,15 @@ only.
 **Rule 2.2 — per-frame delays are not stored.** They are read from `source.gif`
 metadata when a Clip is generated. `cuts.json` records only what the source
 cannot: the assigned `recording-id`, its hash, and the cuts.
+
+**Rule 2.3 — `rect` is a window, not a mask.** It is source pixels, applied to the
+raw frame before de-backgrounding, and nothing outside it reaches the output or the
+Anchor. It exists for footage whose backdrop the colour key cannot remove, so the
+extract can be confined to the subject. `x`/`y` are `>= 0` and `width`/`height`
+`>= 1`, all integers; the rectangle is **clipped** to the frame on use rather than
+validated against the source size, so a box saved against a since-replaced larger
+source still extracts. Extraction is refused with the frame named when a frame
+shows nothing inside the box.
 
 ## 3. `canvas.json` — the shared Canvas and Anchor
 
@@ -219,7 +232,7 @@ Schema: [`schemas/clip.provenance.schema.json`](../schemas/clip.provenance.schem
 | --- | --- | --- |
 | `recordingId` | ✅ | The source Recording (assigned at ingest). |
 | `recordingHash` | ✅ | `sha256:` + 64 hex. |
-| `segment` | ✅ | A **snapshot** of the resolved cut; later re-cutting does not change it. |
+| `segment` | ✅ | A **snapshot** of the resolved cut; later re-cutting does not change it. It carries `rect` when the Segment had a box (Rule 2.3), so a re-run reaches the same pixels through the same window. |
 | `background` | ✅ | `{hex, source: "sampled"\|"override", tolerance}`. |
 | `repair` | ➖ | Path to the Repair script, relative to the store root. Omitted or `null` when there is no Repair. |
 | `placementOffset` | ➖ | Manual placement on top of the automatic Anchor; **omitted when `{0,0}`**. |

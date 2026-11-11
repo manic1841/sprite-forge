@@ -53,9 +53,15 @@ export function renderInspector(ctx: InspectorPort): void {
     alignInspector(ctx, actions, info);
   } else if (state.mode === 'export') {
     exportInspector(ctx, info);
+  } else if (state.mode === 'compose') {
+    if (state.target.kind === 'character') {
+      characterInspector(ctx, state.target.characterId, actions, info);
+    }
   } else if (state.target.kind === 'draft') {
     draftInspector(ctx, actions, info);
   } else if (state.target.kind === 'asset') {
+    // Both the read-only View and the Clip editor fall back to the Asset's own
+    // facts; only a Draft has an editor to mount.
     assetInspector(ctx, actions, info);
   } else if (state.target.kind === 'character') {
     characterInspector(ctx, state.target.characterId, actions, info);

@@ -224,7 +224,7 @@ describe('frameCanvasFromSegment', () => {
     });
   });
 
-  it('refuses to shrink a Character that already has work drawn on its Canvas', async () => {
+  it('resizes a Character that already has work drawn on its Canvas', async () => {
     await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
       await withStore(async (store) => {
         await ingestRecording(store.root, { recordingId: 'rec', sourcePath: gif.path });
@@ -239,19 +239,16 @@ describe('frameCanvasFromSegment', () => {
         const { extractClipDraft } = await import('../src/core/index.js');
         await extractClipDraft(store.root, { characterId: 'hero', recordingId: 'rec', cutId: 'walk' });
 
-        const failure = await frameCanvasFromSegment(store.root, {
+        // Framing is smaller than the Canvas now, so it shrinks through the resize
+        // path — but never below the drawn content.
+        const canvas = await frameCanvasFromSegment(store.root, {
           characterId: 'hero',
           recordingId: 'rec',
-        }).catch((error) => error);
-
-        expect(failure).toBeInstanceOf(StoreError);
-        expect((failure as Error).message).toMatch(/can only grow/i);
-        // The old Canvas is untouched.
-        expect(store.readJson('characters/hero/canvas.json')).toEqual({
-          width: 40,
-          height: 40,
-          anchor: { x: 20, y: 40 },
         });
+
+        const floor = canvas;
+        expect(floor.width).toBeLessThan(40);
+        expect(store.readJson('characters/hero/canvas.json')).toEqual(canvas);
       });
     });
   });

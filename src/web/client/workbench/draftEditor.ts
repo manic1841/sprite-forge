@@ -24,6 +24,7 @@ import {
   type SheetDeps,
 } from './draftSheet.js';
 import { colorInput, labeled, make, scopeSelect, sizeInput } from './dom.js';
+import { icon, type IconName } from './icons.js';
 import { attachFootprint, attachPainting, undoRepair, type RepairDeps } from './repairTools.js';
 import type { WorkbenchState } from './state.js';
 
@@ -80,21 +81,30 @@ export function createDraftEditor(deps: DraftEditorDeps): DraftEditor {
     bar.dataset.repairBar = '';
 
     const tools = make('div', 'repair-tools');
-    const toolButton = (tool: typeof state.tool, label: string): void => {
-      const button = make('button', 'btn small', label);
+    // Each tool is a glyph rather than a word: four verbs in a row read faster as
+    // shapes, and the name stays available on hover and to a screen reader.
+    const toolButton = (
+      tool: typeof state.tool,
+      label: string,
+      glyph: IconName,
+    ): void => {
+      const button = make('button', 'dock-btn tool-btn') as HTMLButtonElement;
       button.dataset.repairTool = tool;
+      button.title = label;
+      button.setAttribute('aria-label', label);
       button.classList.toggle('on', state.tool === tool);
       button.setAttribute('aria-pressed', String(state.tool === tool));
+      button.appendChild(icon(glyph));
       button.addEventListener('click', () => {
         state.tool = tool;
         deps.renderStage();
       });
       tools.appendChild(button);
     };
-    toolButton('paint', 'Brush');
-    toolButton('erase', 'Eraser');
-    toolButton('rect', 'Rect');
-    toolButton('eyedropper', 'Eyedropper');
+    toolButton('paint', 'Brush', 'brush');
+    toolButton('erase', 'Eraser', 'eraser');
+    toolButton('rect', 'Rect', 'rect');
+    toolButton('eyedropper', 'Eyedropper', 'eyedropper');
     bar.appendChild(tools);
 
     const settings = make('div', 'repair-settings');
@@ -127,7 +137,7 @@ export function createDraftEditor(deps: DraftEditorDeps): DraftEditor {
     );
     bar.appendChild(settings);
 
-    const undo = make('button', 'btn small', 'Undo') as HTMLButtonElement;
+    const undo = make('button', 'dock-btn', 'Undo') as HTMLButtonElement;
     undo.dataset.repairUndo = '';
     undo.disabled = (state.repair?.operations.length ?? 0) === 0;
     undo.addEventListener('click', () => deps.run('Undo repair', () => undoRepair(repair)));
@@ -224,23 +234,31 @@ export function createDraftEditor(deps: DraftEditorDeps): DraftEditor {
     next.disabled = state.draftFrame >= draft.frameCount - 1;
     next.addEventListener('click', () => stepFrame(1));
 
-    const counter = make('span', 'pill');
+    const counter = make('span', 'transport-note transport-counter');
     counter.dataset.draftFrameCounter = '';
     counter.textContent = `frame ${state.draftFrame} / ${draft.frameCount}`;
 
-    const readout = make('span', 'pill draft-cursor');
+    const readout = make('span', 'transport-note draft-cursor');
     readout.dataset.draftCursor = '';
     readout.title = 'pixel under the pointer';
     readout.textContent = '—';
 
     const row = make('div', 'draft-stage');
     row.append(prev, board, next);
-    // The tools hang under the frame they paint on; the inspector keeps the log.
-    const bar = repairBar();
 
-    const status = make('div', 'draft-status');
+    // The tools are a transport dock under the frame, in the same language as the
+    // filmstrip: a head with the counter and zoom, the tools, then the frame strip.
+    const transport = make('div', 'draft-transport');
+    transport.dataset.draftTransport = '';
+    const head = make('div', 'transport-head');
+    const note = make('span', 'transport-note');
+    note.append(counter, readout);
     const zoom = zoomControls(sheet, board, img);
-    status.append(counter, readout, zoom.group);
+    const headActions = make('span', 'transport-actions');
+    headActions.appendChild(zoom.group);
+    head.append(note, headActions);
+    // The inspector keeps the log; the tools stay under the frame they paint on.
+    transport.append(head, repairBar());
 
     const cells = make('div', 'draft-frames');
     cells.setAttribute('role', 'list');
@@ -255,7 +273,10 @@ export function createDraftEditor(deps: DraftEditorDeps): DraftEditor {
       cells.appendChild(cell);
     }
 
-    viewer.append(row, bar, status, cells);
+    const strip = make('div', 'draft-frames-scroll');
+    strip.appendChild(cells);
+    transport.appendChild(strip);
+    viewer.append(row, transport);
     view.appendChild(viewer);
     // Sized once mounted; the frame's own size may not be known yet, so
     // `applySheetSize` also listens for the load.

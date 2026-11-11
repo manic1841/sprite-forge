@@ -8,10 +8,17 @@
  *
  * Extracting a Segment runs stages 2-4 of the pipeline for one frame range:
  *
- *   1. **Extract** — decode the Segment's frames from the Recording's `source.gif`.
+ *   1. **Extract** — decode the Segment's frames from the Recording's `source.gif`,
+ *      confined to the Segment's box when it has one.
  *   2. **De-background** — colour-key the corner-sampled backdrop to binary alpha.
+ *      The key is sampled from the whole frame even when there is a box: a box
+ *      exists to exclude colours the key cannot reach, so it must not pick it.
  *   3. **Crop + align** — crop to the union of content bounds, then place the
  *      frames on the Character's shared Canvas via the Anchor.
+ *
+ * A Segment's box is a **window** on the source: pixels outside it never reach the
+ * output, and the box's size is the most the extraction can produce. It exists for
+ * footage whose background cannot be keyed away cleanly (docs/recordings.md).
  *
  * The Draft carries the per-frame delays and a `loop` flag, and records the
  * background `{hex, source, tolerance}` so the de-background step is reproducible.
@@ -33,7 +40,7 @@ import {
 } from './background.js';
 import type { Canvas, CanvasAnchor } from './character.js';
 import { StoreError, ValidationError, type ValidationIssue } from './errors.js';
-import { contentBounds, cropTo, placeOnCanvas, unionBounds, type Bounds } from './frames.js';
+import { clampBounds, contentBounds, cropTo, placeOnCanvas, unionBounds, type Bounds } from './frames.js';
 import { assertValidId, isValidId } from './ids.js';
 import {
   canvasPath,
@@ -66,6 +73,8 @@ export interface DraftSegmentSnapshot {
   endFrame: number;
   /** Playback multiplier; `1` when the Segment carries none. */
   speed: number;
+  /** The Segment's source rectangle; absent when it covered the whole frame. */
+  rect?: Bounds;
 }
 
 /** How the backdrop was chosen, so the de-background step is reproducible. */
@@ -202,7 +211,12 @@ export async function extractClipDraft(
 
   const rendered = await renderSegmentFrames(root, {
     recordingId,
-    segment: { startFrame: cut.startFrame, endFrame: cut.endFrame, speed: cut.speed ?? 1 },
+    segment: {
+      startFrame: cut.startFrame,
+      endFrame: cut.endFrame,
+      speed: cut.speed ?? 1,
+      ...(cut.rect === undefined ? {} : { rect: cut.rect }),
+    },
     canvas,
     ...(options.background !== undefined ? { background: options.background } : {}),
     tolerance,
@@ -234,6 +248,7 @@ export async function extractClipDraft(
       startFrame: cut.startFrame,
       endFrame: cut.endFrame,
       speed: cut.speed ?? 1,
+      ...(cut.rect === undefined ? {} : { rect: { ...cut.rect } }),
     },
     background: rendered.background,
     frameCount: rendered.frames.length,
@@ -254,7 +269,7 @@ export interface RenderSegmentFramesOptions {
   /** The Recording the Segment was cut from. */
   recordingId: string;
   /** The half-open frame range to render — a live cut or a provenance snapshot. */
-  segment: { startFrame: number; endFrame: number; speed?: number };
+  segment: { startFrame: number; endFrame: number; speed?: number; rect?: Bounds };
   /** The Character's shared Canvas the frames are placed on. */
   canvas: Canvas;
   /** An explicit `#rrggbb` background override; sampled from a corner when omitted. */
@@ -304,6 +319,27 @@ export async function renderSegmentFrames(
   const decoded = await decodeSegment(bytes, recordingId, segment);
 
   const frames = decoded.frames;
+  const size = { width: frames[0]!.width, height: frames[0]!.height };
+
+  // A box is a window on the source, so it is applied before **anything** is
+  // measured: the background is sampled from the box's own corner (an unmatchable
+  // surround would otherwise be sampled instead), and no pixel outside it is
+  // looked at again. It is clipped, not rejected, so a box saved against a
+  // smaller replaced source still yields what it can.
+  const box =
+    segment.rect === undefined ? null : clampBounds(segment.rect, size.width, size.height);
+  if (segment.rect !== undefined && box === null) {
+    throw new StoreError(
+      `Segment [${segment.startFrame}, ${segment.endFrame}) has a box outside the ` +
+        `${size.width}x${size.height} source: ` +
+        `${segment.rect.x},${segment.rect.y} ${segment.rect.width}x${segment.rect.height}.`,
+    );
+  }
+  const windowed = box === null ? frames : frames.map((frame) => cropTo(frame, box));
+
+  // The key colour is sampled from the **whole** frame, not the box: the box is
+  // there to exclude colours the key cannot reach, so it must not decide the key.
+  // A tight box would otherwise put the subject in its own corner and key it away.
   const override = options.background !== undefined;
   const background: Rgb = override
     ? parseHexColor(options.background!)
@@ -315,19 +351,26 @@ export async function renderSegmentFrames(
   };
 
   // De-background every frame to binary alpha (research §2-3).
-  const keyed = frames.map((frame) => keyBackground(frame, background, tolerance));
+  const keyed = windowed.map((frame) => keyBackground(frame, background, tolerance));
 
   // Crop to the union of content bounds; place by the FIRST frame's foot base.
   const perFrame = keyed.map((frame) => contentBounds(frame));
-  const first = perFrame[0] ?? null;
-  if (first === null) {
+  // Every frame must show something: an all-background frame would bake to a
+  // fully transparent one and read as a flicker, which is far more likely a box
+  // in the wrong place than intentional. The frame is named so it can be found.
+  const hollow = perFrame.indexOf(null);
+  if (hollow !== -1) {
     throw new StoreError(
-      `Segment [${segment.startFrame}, ${segment.endFrame}) has no content to extract ` +
-        `(every frame is the background colour).`,
+      box === null
+        ? `Segment [${segment.startFrame}, ${segment.endFrame}) has no content to extract ` +
+            `(frame ${segment.startFrame + hollow} is the background colour).`
+        : `Frame ${segment.startFrame + hollow} has no content inside the box ` +
+            `(${box.x},${box.y} ${box.width}x${box.height}); every pixel there is the ` +
+            `background colour.`,
     );
   }
   const union = unionBounds(perFrame.filter((box): box is Bounds => box !== null));
-  const { dx, dy } = automaticPlacement(first, union, canvas);
+  const { dx, dy } = automaticPlacement(perFrame[0]!, union, canvas);
 
   const placed = keyed.map((frame) =>
     placeOnCanvas(cropTo(frame, union), canvas.width, canvas.height, dx, dy),
@@ -406,16 +449,36 @@ export async function deriveAnchor(
 
   let startFrame = 0;
   let endFrame = 1;
+  let box: Bounds | null = null;
   if (options.cutId !== undefined) {
     assertValidId(options.cutId, 'cut', 'cutId');
     const segment = await resolveSegment(root, recordingId, options.cutId);
     startFrame = segment.startFrame;
     endFrame = segment.endFrame;
+    box = segment.rect === undefined ? null : { ...segment.rect };
   }
 
   const bytes = await readSource(root, recordingId);
   const decoded = await decodeSegment(bytes, recordingId, { startFrame, endFrame });
-  const frame = decoded.frames[0]!;
+  const size = {
+    width: decoded.frames[0]!.width,
+    height: decoded.frames[0]!.height,
+  };
+  // A box confines what the Anchor and Canvas may be measured from, so it is
+  // resolved before any pixel is looked at — the same window extraction uses.
+  // A box wholly outside a replaced source measures nothing, hence the error
+  // rather than a silent whole-frame fallback.
+  const windowed = box === null ? null : clampBounds(box, size.width, size.height);
+  if (box !== null && windowed === null) {
+    throw new StoreError(
+      `Segment [${startFrame}, ${endFrame}) has a box outside the ` +
+        `${size.width}x${size.height} source: ` +
+        `${box.x},${box.y} ${box.width}x${box.height}.`,
+    );
+  }
+  const frames =
+    windowed === null ? decoded.frames : decoded.frames.map((frame) => cropTo(frame, windowed));
+  const frame = frames[0]!;
   const background: Rgb =
     options.background !== undefined
       ? parseHexColor(options.background)
@@ -424,7 +487,7 @@ export async function deriveAnchor(
   if (first === null) {
     throw new StoreError(
       `Cannot derive an Anchor: frame ${startFrame} of Recording "${recordingId}" has no ` +
-        `content (every pixel is the background colour).`,
+        `content (every pixel ${windowed === null ? '' : 'inside the box '}is the background colour).`,
     );
   }
 
@@ -439,9 +502,9 @@ export async function deriveAnchor(
   // otherwise fail on a later, larger frame.
   if (options.cutId !== undefined) {
     const union = unionBounds(
-      decoded.frames.flatMap((entry) => {
-        const box = contentBounds(keyBackground(entry, background, tolerance));
-        return box === null ? [] : [box];
+      frames.flatMap((entry) => {
+        const cell = contentBounds(keyBackground(entry, background, tolerance));
+        return cell === null ? [] : [cell];
       }),
     );
     canvas = canvasFitting(first, union);
@@ -464,12 +527,80 @@ function canvasFitting(first: Bounds, union: Bounds): Canvas {
   return { width, height, anchor: { x: width / 2, y: height } };
 }
 
+/** Inputs for {@link segmentContentBounds}. */
+export interface SegmentContentBoundsOptions {
+  /** The Recording the Segment belongs to. */
+  recordingId: string;
+  /** The Segment to measure. */
+  cutId: string;
+  /** An explicit `#rrggbb` background override; sampled from a corner when omitted. */
+  background?: string;
+  /** Per-channel key tolerance; defaults to 24. */
+  tolerance?: number;
+}
+
+/**
+ * The tight box around everything a Segment draws, in **source** pixels.
+ *
+ * This is what a box is pre-filled with, so drawing one starts from the subject
+ * rather than from an empty stage. A Segment that already has a box is measured
+ * inside it, which makes the same call a "tighten" on an existing window.
+ *
+ * Unlike extraction this does not fail on a hollow frame: it answers with the
+ * union of what is there, or `null` when the Segment draws nothing at all.
+ */
+export async function segmentContentBounds(
+  root: string,
+  options: SegmentContentBoundsOptions,
+): Promise<Bounds | null> {
+  const { recordingId, cutId } = options;
+  assertValidId(recordingId, 'recording', 'recordingId');
+  assertValidId(cutId, 'cut', 'cutId');
+  const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
+  if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255) {
+    throw new StoreError(`Tolerance must be an integer in 0..255; got ${tolerance}.`);
+  }
+
+  const segment = await resolveSegment(root, recordingId, cutId);
+  const bytes = await readSource(root, recordingId, segment.hash);
+  const decoded = await decodeSegment(bytes, recordingId, segment);
+  const size = { width: decoded.frames[0]!.width, height: decoded.frames[0]!.height };
+  const box = segment.rect === undefined ? null : clampBounds(segment.rect, size.width, size.height);
+  if (segment.rect !== undefined && box === null) {
+    throw new StoreError(
+      `Segment [${segment.startFrame}, ${segment.endFrame}) has a box outside the ` +
+        `${size.width}x${size.height} source: ` +
+        `${segment.rect.x},${segment.rect.y} ${segment.rect.width}x${segment.rect.height}.`,
+    );
+  }
+  const windowed = box === null ? decoded.frames : decoded.frames.map((frame) => cropTo(frame, box));
+
+  const background: Rgb =
+    options.background !== undefined
+      ? parseHexColor(options.background)
+      : sampleBackgroundColor(decoded.frames);
+
+  const cells = windowed
+    .map((frame) => contentBounds(keyBackground(frame, background, tolerance)))
+    .filter((cell): cell is Bounds => cell !== null);
+  if (cells.length === 0) {
+    return null;
+  }
+  const union = unionBounds(cells);
+  // Back into source coordinates, so the answer can be stored as a box as-is.
+  return {
+    x: union.x + (box?.x ?? 0),
+    y: union.y + (box?.y ?? 0),
+    width: union.width,
+    height: union.height,
+  };
+}
+
 /**
  * Carry forward the human-editable fields already present on a Draft id, so a
  * re-extract does not silently discard the Repair script reference or the framing
  * the offset/script were authored against. A Draft that does not exist yields `{}`.
- */
-async function readPreservedDraftState(
+ */async function readPreservedDraftState(
   root: string,
   characterId: string,
   draftId: string,
@@ -598,7 +729,13 @@ async function resolveSegment(
   root: string,
   recordingId: string,
   cutId: string,
-): Promise<{ startFrame: number; endFrame: number; speed?: number; hash: string }> {
+): Promise<{
+  startFrame: number;
+  endFrame: number;
+  speed?: number;
+  rect?: Bounds;
+  hash: string;
+}> {
   const cutList = await readCutList(root, recordingId);
   const segment = cutList.cuts.find((cut) => cut.id === cutId);
   if (!segment) {
@@ -608,6 +745,7 @@ async function resolveSegment(
     startFrame: segment.startFrame,
     endFrame: segment.endFrame,
     ...(segment.speed !== undefined ? { speed: segment.speed } : {}),
+    ...(segment.rect !== undefined ? { rect: segment.rect } : {}),
     hash: cutList.hash,
   };
 }
@@ -788,7 +926,7 @@ function validateDraftDescriptor(value: unknown, artifact: string, draftId: stri
 
   const segment = value.segment;
   if (isRecord(segment)) {
-    const { cutId, startFrame, endFrame, speed } = segment;
+    const { cutId, startFrame, endFrame, speed, rect } = segment;
     if (typeof cutId !== 'string' || !isValidId(cutId)) {
       issue('/segment/cutId', 'must match /^[a-z][a-z0-9-]*$/');
     }
@@ -803,6 +941,22 @@ function validateDraftDescriptor(value: unknown, artifact: string, draftId: stri
     }
     if (!isNumber(speed) || speed <= 0) {
       issue('/segment/speed', 'must be a number > 0');
+    }
+    if (rect !== undefined) {
+      if (!isRecord(rect)) {
+        issue('/segment/rect', 'must be an object');
+      } else {
+        for (const key of ['x', 'y'] as const) {
+          if (!isInteger(rect[key]) || (rect[key] as number) < 0) {
+            issue(`/segment/rect/${key}`, 'must be an integer >= 0');
+          }
+        }
+        for (const key of ['width', 'height'] as const) {
+          if (!isInteger(rect[key]) || (rect[key] as number) < 1) {
+            issue(`/segment/rect/${key}`, 'must be an integer >= 1');
+          }
+        }
+      }
     }
   } else {
     issue('/segment', 'must be an object');

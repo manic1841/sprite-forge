@@ -25,13 +25,14 @@ import {
   deleteAsset,
   deriveAnchor,
   discardDraft,
-  expandCanvas,
   exportCharacter,
   extractClipDraft,
+  fitCanvasToContent,
   ForgeError,
   forkAsset,
   frameCanvasFromSegment,
   ingestRecording,
+  listSequenceDrafts,
   readAssetSheet,
   readCharacterAlignment,
   readClip,
@@ -44,12 +45,18 @@ import {
   readRecordingDelays,
   readRecordingFrame,
   readSequence,
+  readSequenceDraft,
   removeSegment,
+  removeSequenceDraft,
   renameSegment,
+  resizeCanvas,
   sampleDraftRepairColor,
+  saveSequenceDraft,
   scan,
+  segmentContentBounds,
   setPlacementOffset,
   setSegmentRange,
+  setSegmentRect,
   undoRepairOperation,
   validateStore,
   ValidationError,
@@ -154,18 +161,19 @@ export async function handleApiRequest(
       return ok(await readCharacterAlignment(storeRoot, { characterId }));
     }
 
-    // /api/characters/<characterId>/expand-canvas — the explicit Character-wide re-bake.
+    // /api/characters/<characterId>/resize-canvas — the explicit Character-wide
+    // re-bake, in either direction (down to the content floor).
     if (
       method === 'POST' &&
       segments[0] === 'api' &&
       segments[1] === 'characters' &&
-      segments[3] === 'expand-canvas' &&
+      (segments[3] === 'resize-canvas' || segments[3] === 'expand-canvas') &&
       segments.length === 4
     ) {
       const characterId = decodeURIComponent(segments[2]!);
       const body = asRecord(request.body);
       return ok(
-        await expandCanvas(storeRoot, {
+        await resizeCanvas(storeRoot, {
           characterId,
           width: requiredNumber(body, 'width'),
           height: requiredNumber(body, 'height'),
@@ -173,8 +181,20 @@ export async function handleApiRequest(
       );
     }
 
+    // /api/characters/<characterId>/fit-canvas — shrink to the content floor.
+    if (
+      method === 'POST' &&
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'fit-canvas' &&
+      segments.length === 4
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      return ok(await fitCanvasToContent(storeRoot, { characterId }));
+    }
+
     // /api/characters/<characterId>/frame-canvas — frame a blank Character from a
-    // Segment (replaces the provisional Canvas; grow-only once work exists).
+    // Segment (replaces the provisional Canvas; a drawn Character is resized).
     if (
       method === 'POST' &&
       segments[0] === 'api' &&
@@ -357,6 +377,20 @@ export async function handleApiRequest(
       return ok(await readRecordingDelays(storeRoot, recordingId));
     }
 
+    // GET /api/recordings/<recordingId>/cuts/<cutId>/content — the tight box the
+    // Segment draws, in source pixels; `null` when it draws nothing.
+    if (
+      method === 'GET' &&
+      matches(segments, ['api', 'recordings', segments[2] ?? '', 'cuts', segments[4] ?? '', 'content'])
+    ) {
+      return ok(
+        await segmentContentBounds(storeRoot, {
+          recordingId: decodeURIComponent(segments[2]!),
+          cutId: decodeURIComponent(segments[4]!),
+        }),
+      );
+    }
+
     // GET /api/recordings/<recordingId>/anchor?cut=<cutId> — preview a derived Canvas.
     if (
       method === 'GET' &&
@@ -451,6 +485,7 @@ export async function handleApiRequest(
       }
       if (method === 'POST' && cutId === undefined) {
         const body = asRecord(request.body);
+        const rect = optionalRect(body, 'rect');
         return ok(
           await addSegment(storeRoot, {
             recordingId,
@@ -458,19 +493,39 @@ export async function handleApiRequest(
             startFrame: requiredNumber(body, 'startFrame'),
             endFrame: requiredNumber(body, 'endFrame'),
             speed: optionalNumber(body, 'speed'),
+            ...(rect === undefined || rect === null ? {} : { rect }),
           }),
         );
       }
       if (method === 'PATCH' && cutId !== undefined) {
         const body = asRecord(request.body);
-        return ok(
-          await setSegmentRange(storeRoot, {
+        let cutList = await readCutList(storeRoot, recordingId);
+        // The range and the box are edited by the same verb: a Segment is one
+        // piece of footage, and the inspector may change either.
+        if ('startFrame' in body || 'endFrame' in body) {
+          const current = cutList.cuts.find((cut) => cut.id === cutId);
+          cutList = await setSegmentRange(storeRoot, {
             recordingId,
             id: cutId,
-            startFrame: requiredNumber(body, 'startFrame'),
-            endFrame: requiredNumber(body, 'endFrame'),
-          }),
-        );
+            startFrame:
+              'startFrame' in body
+                ? requiredNumber(body, 'startFrame')
+                : (current?.startFrame ?? requiredNumber(body, 'startFrame')),
+            endFrame:
+              'endFrame' in body
+                ? requiredNumber(body, 'endFrame')
+                : (current?.endFrame ?? requiredNumber(body, 'endFrame')),
+          });
+        }
+        const rect = optionalRect(body, 'rect');
+        if (rect !== undefined) {
+          cutList = await setSegmentRect(storeRoot, {
+            recordingId,
+            id: cutId,
+            rect: rect === null ? undefined : rect,
+          });
+        }
+        return ok(cutList);
       }
       if (method === 'DELETE' && cutId !== undefined) {
         return ok(await removeSegment(storeRoot, { recordingId, id: cutId }));
@@ -510,6 +565,8 @@ export async function handleApiRequest(
     }
 
     // POST /api/characters/<characterId>/sequences — concatenate Clips into a Sequence.
+    // A `draftId` names the Sequence draft the composition came from; it is
+    // removed once the Asset is on disk, the same way a Clip Draft is consumed.
     if (
       method === 'POST' &&
       segments[0] === 'api' &&
@@ -518,15 +575,52 @@ export async function handleApiRequest(
       segments.length === 4
     ) {
       const body = asRecord(request.body);
-      return {
-        status: 201,
-        body: await commitSequence(storeRoot, {
-          characterId: decodeURIComponent(segments[2]!),
-          sequenceId: requiredString(body, 'name'),
-          clips: requiredStringArray(body, 'clips'),
-          derivedFrom: undefined,
-        }),
-      };
+      const characterId = decodeURIComponent(segments[2]!);
+      const draftId = requiredOptionalString(body, 'draftId');
+      const forkOf = requiredOptionalString(body, 'forkOf');
+      const committed = await commitSequence(storeRoot, {
+        characterId,
+        sequenceId: requiredString(body, 'name'),
+        clips: requiredStringArray(body, 'clips'),
+        derivedFrom: forkOf === undefined ? undefined : { kind: 'sequence', id: forkOf },
+      });
+      if (draftId !== undefined) {
+        await removeSequenceDraft(storeRoot, { characterId, draftId });
+      }
+      return { status: 201, body: committed };
+    }
+
+    // /api/characters/<characterId>/sequence-drafts[/<draftId>]
+    if (
+      segments[0] === 'api' &&
+      segments[1] === 'characters' &&
+      segments[3] === 'sequence-drafts'
+    ) {
+      const characterId = decodeURIComponent(segments[2]!);
+      const draftId = segments[4] === undefined ? undefined : decodeURIComponent(segments[4]);
+
+      if (method === 'GET' && draftId === undefined) {
+        return ok({ drafts: await listSequenceDrafts(storeRoot, characterId) });
+      }
+      if (method === 'GET' && draftId !== undefined) {
+        return ok(await readSequenceDraft(storeRoot, { characterId, draftId }));
+      }
+      if (method === 'POST' && draftId === undefined) {
+        const body = asRecord(request.body);
+        return {
+          status: 201,
+          body: await saveSequenceDraft(storeRoot, {
+            characterId,
+            draftId: requiredOptionalString(body, 'draftId'),
+            clips: requiredStringArray(body, 'clips'),
+            forkOf: requiredOptionalString(body, 'forkOf') ?? null,
+          }),
+        };
+      }
+      if (method === 'DELETE' && draftId !== undefined) {
+        await removeSequenceDraft(storeRoot, { characterId, draftId });
+        return ok({ discarded: draftId });
+      }
     }
 
     // POST /api/characters/<characterId>/drafts/<draftId>/discard
@@ -719,6 +813,32 @@ function optionalNumber(body: Record<string, unknown>, key: string): number | un
     throw new ForgeError(`"${key}" must be a number.`);
   }
   return value;
+}
+
+/**
+ * Read a box body field: `{x, y, width, height}`.
+ *
+ * The `null` answer is meaningful — the key being present but nul means "clear
+ * the box", while the key being absent means "leave it alone".
+ */
+function optionalRect(
+  body: Record<string, unknown>,
+  key: string,
+): { x: number; y: number; width: number; height: number } | null | undefined {
+  if (!(key in body) || body[key] === undefined) {
+    return undefined;
+  }
+  const value = body[key];
+  if (value === null) {
+    return null;
+  }
+  const record = asRecord(value);
+  return {
+    x: requiredNumber(record, 'x'),
+    y: requiredNumber(record, 'y'),
+    width: requiredNumber(record, 'width'),
+    height: requiredNumber(record, 'height'),
+  };
 }
 
 /** Read an array-of-strings body field. */

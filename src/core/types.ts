@@ -46,6 +46,8 @@ export interface ScannedCharacter {
   assets: ScannedAsset[];
   /** Uncommitted Drafts, alphabetical. */
   drafts: ScannedDraft[];
+  /** Uncommitted Sequence compositions, alphabetical. */
+  sequenceDrafts: ScannedDraft[];
 }
 
 /** An Export target discovered in the store. */

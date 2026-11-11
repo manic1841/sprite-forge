@@ -79,10 +79,10 @@ async function resolveTarget(
  *
  *   - **blank** — its Canvas is only the provisional placeholder, so it is
  *     replaced outright by the framing this Segment implies (`frameCanvas`),
- *     which may be *smaller* than the placeholder. Expand cannot do that: it
- *     refuses to shrink.
- *   - **drawn on** — only growing is safe, so the expand is offered at the larger
- *     of the current and derived size on each axis, and needs a confirmation.
+ *     which may be *smaller* than the placeholder. Resize cannot do that: the
+ *     content floor refuses to crop what is drawn.
+ *   - **drawn on** — the Canvas resizes to the larger of the current and derived
+ *     size on each axis, and needs a confirmation.
  */
 async function extractDraftInto(
   deps: ExtractDeps,
@@ -110,21 +110,28 @@ async function extractDraftInto(
       // Fall through to the expand offer.
     }
 
-    // Drawn on: grow only, and never below what the Canvas already is.
+    // Drawn on: the Canvas can grow or shrink, but never below what is drawn.
     const derived = await api.deriveAnchor(recordingId, cutId);
     const canvas =
       state.alignment?.canvas ?? (await api.readCharacterAlignment(characterId)).canvas;
     const width = Math.max(canvas.width, derived.canvas.width);
     const height = Math.max(canvas.height, derived.canvas.height);
+    // A box makes the extract a region, not a whole frame, so the offer says which
+    // region rather than leaving only a number to compare against the frame.
+    const segment = state.cutList?.cuts.find((cut) => cut.id === cutId);
+    const region = segment?.rect
+      ? `\n\nOnly the box ${segment.rect.x},${segment.rect.y} ` +
+        `${segment.rect.width}×${segment.rect.height} is extracted.`
+      : '';
     const offered = await confirmAction(
-      `${message}\n\nExpand "${characterId}" to ${width}×${height}` +
+      `${message}${region}\n\nResize "${characterId}" to ${width}×${height}` +
         ` (from ${canvas.width}×${canvas.height}) and extract?`,
-      'Expand and extract',
+      'Resize and extract',
     );
     if (!offered) {
       return null;
     }
-    await api.expandCanvas(characterId, width, height);
+    await api.resizeCanvas(characterId, width, height);
     return await api.extractClipDraft(characterId, { recordingId, cutId });
   }
 }
@@ -134,7 +141,7 @@ export type ExtractApi = Pick<
   WorkbenchApi,
   | 'extractClipDraft'
   | 'frameCanvas'
-  | 'expandCanvas'
+  | 'resizeCanvas'
   | 'deriveAnchor'
   | 'readCharacterAlignment'
 >;

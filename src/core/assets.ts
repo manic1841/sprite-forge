@@ -487,7 +487,12 @@ export async function forkAsset(
     characterId,
     recordingId: parent.provenance.recordingId,
     recordingHash: parent.provenance.recordingHash,
-    segment: { ...parent.provenance.segment },
+    segment: {
+      ...parent.provenance.segment,
+      ...(parent.provenance.segment.rect === undefined
+        ? {}
+        : { rect: { ...parent.provenance.segment.rect } }),
+    },
     background: { ...parent.provenance.background },
     frameCount: parent.meta.frameCount,
     delaysMs: expandDelays(parent.meta.delaysMs, parent.meta.frameCount),
@@ -653,7 +658,10 @@ function buildClipProvenance(
   const provenance: ClipProvenance = {
     recordingId: draft.recordingId,
     recordingHash: draft.recordingHash,
-    segment: { ...draft.segment },
+    segment: {
+      ...draft.segment,
+      ...(draft.segment.rect === undefined ? {} : { rect: { ...draft.segment.rect } }),
+    },
     background: { ...draft.background },
     repair,
     derivedFrom: draft.derivedFrom ?? null,
@@ -759,7 +767,7 @@ async function decodeCanvasFrame(
 }
 
 /** Read and validate a committed Clip's meta and provenance. */
-async function readCommittedClip(
+export async function readCommittedClip(
   root: string,
   characterId: string,
   clipId: string,

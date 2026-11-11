@@ -73,6 +73,25 @@
 
 .wb-shell .align-ghost-image {
   display: block;
+  /* a canvas pixel is a whole block of screen pixels, so the ghost is drawn sharp
+     and a resize reads as a crop rather than as interpolation */
+  image-rendering: pixelated;
+  /* the ghost clips a strip that is deliberately wider than it, so the base
+     `max-width: 100%` reset would squeeze every frame of the sheet into one */
+  max-width: none;
+}
+
+.wb-shell .align-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-shell .align-size-readout {
+  margin: 0;
+  font: 400 11px/1 var(--ui-mono);
+  color: var(--u-soft);
 }
 
 /* the board is fitted to the stage, so centring never clips its edges */
@@ -82,20 +101,25 @@
 }
 
 .wb-shell .align-offsets,
-.wb-shell .align-expand {
+.wb-shell .align-size {
   display: flex;
   gap: 8px;
   margin-bottom: 6px;
 }
 
 .wb-shell .align-offsets .field,
-.wb-shell .align-expand .field {
+.wb-shell .align-size .field {
   flex: 1;
 }
 
 .wb-shell .align-offsets input,
-.wb-shell .align-expand input {
+.wb-shell .align-size input {
   width: 52px;
+}
+
+.wb-shell .align-floor {
+  margin: -2px 0 6px;
+  font: 400 11px/1.45 var(--ui-mono);
 }
 
 .wb-shell .align-clips {

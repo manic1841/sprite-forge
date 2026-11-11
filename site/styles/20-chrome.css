@@ -1,14 +1,27 @@
 /* Split from `workbench.css`; load order is the cascade order (00 → 99). */
 /* ------------------------------------------------------------------ chrome */
 
-/* The header is the shell's: breadcrumb left, faces right. It is a row of its
-   own so a face switch re-lights a button instead of rebuilding the bar. */
+/* The header is the shell's **global** bar: it holds only the faces that outlive
+   the open item (Composition, Export), so a target change never rebuilds it. */
 .wb-shell .context-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
   height: 48px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--u-line);
+  background: var(--u-bg);
+}
+
+/* The target bar sits with the stage: it names what is open, then carries that
+   thing's own faces. Keeping it here is what lets the header stay global. */
+.wb-shell .target-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 38px;
   padding: 0 14px;
   border-bottom: 1px solid var(--u-line);
   background: var(--u-bg);

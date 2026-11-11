@@ -112,6 +112,23 @@ export function repairsDir(characterId: string): string {
   return `${characterDir(characterId)}/repairs`;
 }
 
+/**
+ * Sequence drafts: a Short composition recipe (its ordered Clip ids), kept apart
+ * from the frame Drafts under `drafts/` so the two never collide in one scan.
+ */
+export function sequenceDraftsDir(characterId: string): string {
+  return `${characterDir(characterId)}/sequence-drafts`;
+}
+
+export function sequenceDraftDir(characterId: string, draftId: string): string {
+  return `${sequenceDraftsDir(characterId)}/${draftId}`;
+}
+
+/** A Sequence draft's recipe (`draft.json`); design-local, not a frozen format. */
+export function sequenceDraftPath(characterId: string, draftId: string): string {
+  return `${sequenceDraftDir(characterId, draftId)}/draft.json`;
+}
+
 export function repairPath(characterId: string, clipId: string): string {
   return `${repairsDir(characterId)}/${clipId}/repair.json`;
 }

@@ -40,7 +40,10 @@ The UI is a frame-accurate scrubber over the Recording:
   "hash": "sha256:…",      // content hash of source.gif
   "frameCount": 523,        // frame count of source.gif
   "cuts": [
-    { "id": "walk", "startFrame": 293, "endFrame": 327, "speed": 1 },
+    {
+      "id": "walk", "startFrame": 293, "endFrame": 327, "speed": 1,
+      "rect": { "x": 240, "y": 300, "width": 32, "height": 32 }
+    },
     { "id": "jump", "startFrame": 580, "endFrame": 607, "speed": 1 }
   ]
 }
@@ -49,16 +52,52 @@ The UI is a frame-accurate scrubber over the Recording:
 `speed` is a playback multiplier applied when a Clip is generated; it does **not**
 change the Segment's frame range.
 
+## Boxing a Segment
+
+Sometimes the colour key cannot clear the backdrop — a busy scene, a HUD, a palette
+too close to the subject — and the extract carries colours that are not the sprite.
+A Segment may therefore carry a **box**: one rectangle of the frame, in source
+pixels, that it is confined to.
+
+```
+┌──────────────── 512 × 512 frame ─────────────────┐
+│  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+│  ░░░░░░┌──── 32 × 32 ────┐░░░░░░░░░░░░░░░░░░░░░  │
+│  ░░░░░░│      ▄▄▄        │░░░░░░░░░░░░░░░░░░░░░  │
+│  ░░░░░░│      ███        │░░░░░░░░░░░░░░░░░░░░░  │
+│  ░░░░░░└─────────────────┘░░░░░░░░░░░░░░░░░░░░░  │
+│  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+└──────────────────────────────────────────────────┘
+```
+
+The box is a **window**, not a mask (format-spec Rule 2.3):
+
+- it is applied to the raw frame **before** the key, so nothing outside it is ever
+  measured, keyed, cropped or placed;
+- the key colour is still sampled from the whole frame's corners, because the box
+  exists to exclude what the key cannot reach and must not choose the key itself;
+- the box's size is the **most** the extract can produce. Content is still cropped
+  to what is actually drawn inside it, so a loose box adds no margin;
+- it is **clipped** to the frame rather than validated against the source size;
+- every frame has to show something inside it — a frame with nothing there is a hard
+  error naming that frame, since a fully transparent frame reads as a flicker.
+
+In the workbench: select a Segment, then **drag on the frame** to draw the box.
+*Box content* fills it with what survives the key (a starting point, and a tighten on
+an existing box); *Whole frame* drops it. The box is snapshot into the Clip's
+provenance like the range is, so a committed Clip keeps reproducing the same pixels.
+
 In the workbench the same operations are on the Clip editor's stage: the Recording is
 previewed while it plays, a Segment is added from the fields under the list, renamed,
 deleted, or dragged in the filmstrip, and **Extract** turns it into a Draft on the
-same screen.
+same screen. Picking a Character in the Library while a Segment is selected asks the
+same question and extracts that Segment into the Character, opening the Draft it made.
 
 Extracting needs a Character whose Canvas can hold the Segment, so the stage names the
 target Character above the Segment list. Work is Character-first: pick or create a
 Character in the Library, open a Recording from its page, and cut. With no Character
 yet, Extract offers to create one from the Segment itself; if the Segment is bigger
-than the Character's Canvas it offers the explicit expand instead of failing. A new
+than the Character's Canvas it offers the explicit resize instead of failing. A new
 Character starts blank (see [alignment.md](./alignment.md)), never mid-flow.
 
 ## Overlap is not policed
@@ -90,7 +129,10 @@ A Clip's provenance records:
 {
   "recordingId": "mgba-2026-09",   // assigned at ingest
   "recordingHash": "sha256:…",     // detects a swapped source
-  "segment": { "cutId": "walk", "startFrame": 293, "endFrame": 327, "speed": 1 },
+  "segment": {
+    "cutId": "walk", "startFrame": 293, "endFrame": 327, "speed": 1,
+    "rect": { "x": 240, "y": 300, "width": 32, "height": 32 }
+  },
   "background": { "hex": "#9421ce", "source": "sampled", "tolerance": 24 },
   "repair": "characters/<character-id>/repairs/<clip-id>/repair.json",
   "placementOffset": { "x": 0, "y": 0 },

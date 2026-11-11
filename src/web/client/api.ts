@@ -8,6 +8,7 @@
 
 import type {
   AlignmentState,
+  Bounds,
   Canvas,
   CharacterAlignment,
   ClipDraft,
@@ -16,7 +17,6 @@ import type {
   CreatedCharacter,
   CutList,
   DerivedAnchor,
-  ExpandCanvasResult,
   ExportBindings,
   ExportResult,
   Facing,
@@ -26,6 +26,8 @@ import type {
   RepairOperationInput,
   RepairState,
   ReproducibilityReport,
+  ResizeCanvasResult,
+  SequenceDraft,
   SequenceFork,
   StoreCheckReport,
   StoreScan,
@@ -80,7 +82,7 @@ export interface WorkbenchApi {
   /** Add a Segment (creating a cut). */
   addSegment(
     recordingId: string,
-    segment: { id: string; startFrame: number; endFrame: number; speed?: number },
+    segment: { id: string; startFrame: number; endFrame: number; speed?: number; rect?: Bounds },
   ): Promise<CutList>;
   /** Retarget an existing Segment's frame range (dragging a cut edge). */
   setSegmentRange(
@@ -89,6 +91,10 @@ export interface WorkbenchApi {
     startFrame: number,
     endFrame: number,
   ): Promise<CutList>;
+  /** Set a Segment's source box, or clear it (`null`) back to the whole frame. */
+  setSegmentRect(recordingId: string, cutId: string, rect: Bounds | null): Promise<CutList>;
+  /** The tight box a Segment draws, in source pixels; `null` when it draws nothing. */
+  segmentContentBounds(recordingId: string, cutId: string): Promise<Bounds | null>;
   /** Remove a Segment. */
   removeSegment(recordingId: string, cutId: string): Promise<CutList>;
   /** Read a Draft descriptor plus the store-relative paths of its frames. */
@@ -127,8 +133,10 @@ export interface WorkbenchApi {
     draftId: string,
     offset: PlacementOffset,
   ): Promise<ClipDraft>;
-  /** Grow a Character's Canvas and re-bake its committed Clips. */
-  expandCanvas(characterId: string, width: number, height: number): Promise<ExpandCanvasResult>;
+  /** Resize a Character's Canvas in either direction and re-bake its committed Clips. */
+  resizeCanvas(characterId: string, width: number, height: number): Promise<ResizeCanvasResult>;
+  /** Shrink a Character's Canvas to its content floor. */
+  fitCanvas(characterId: string): Promise<ResizeCanvasResult>;
   /**
    * Frame a blank Character from a Segment: replace its provisional Canvas with the
    * framing the footage implies (grow-only once the Character has work).
@@ -158,11 +166,24 @@ export interface WorkbenchApi {
   forkClip(characterId: string, clipId: string, draftId?: string): Promise<ClipDraft>;
   /** Fork a committed Sequence into its ordered Clip list, to edit and re-commit. */
   forkSequence(characterId: string, sequenceId: string): Promise<SequenceFork>;
-  /** Commit an ordered Clip list as a new Sequence. */
+  /** List a Character's persisted Sequence compositions. */
+  listSequenceDrafts(characterId: string): Promise<{ drafts: string[] }>;
+  /** Read a persisted Sequence composition. */
+  readSequenceDraft(characterId: string, draftId: string): Promise<SequenceDraft>;
+  /** Create or overwrite a Sequence composition. */
+  saveSequenceDraft(
+    characterId: string,
+    request: { draftId?: string; clips: string[]; forkOf?: string | null },
+  ): Promise<SequenceDraft>;
+  /** Throw a Sequence composition away. */
+  discardSequenceDraft(characterId: string, draftId: string): Promise<void>;
+  /** Commit an ordered Clip list as a new Sequence, consuming its draft. */
   commitSequence(
     characterId: string,
     sequenceId: string,
     clips: string[],
+    draftId?: string,
+    forkOf?: string,
   ): Promise<CommittedSequence>;
   /** Throw away a Draft and the Repair script it owns. */
   discardDraft(characterId: string, draftId: string): Promise<void>;
@@ -254,6 +275,13 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
         method: 'PATCH',
         body: JSON.stringify({ startFrame, endFrame }),
       }),
+    setSegmentRect: (recordingId, cutId, rect) =>
+      call<CutList>(`/recordings/${recordingId}/cuts/${cutId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ rect }),
+      }),
+    segmentContentBounds: (recordingId, cutId) =>
+      call<Bounds | null>(`/recordings/${recordingId}/cuts/${cutId}/content`),
     removeSegment: (recordingId, cutId) =>
       call<CutList>(`/recordings/${recordingId}/cuts/${cutId}`, { method: 'DELETE' }),
     readClipDraft: (characterId, draftId) =>
@@ -287,10 +315,14 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
         method: 'POST',
         body: JSON.stringify(offset),
       }),
-    expandCanvas: (characterId, width, height) =>
-      call<ExpandCanvasResult>(`/characters/${characterId}/expand-canvas`, {
+    resizeCanvas: (characterId, width, height) =>
+      call<ResizeCanvasResult>(`/characters/${characterId}/resize-canvas`, {
         method: 'POST',
         body: JSON.stringify({ width, height }),
+      }),
+    fitCanvas: (characterId) =>
+      call<ResizeCanvasResult>(`/characters/${characterId}/fit-canvas`, {
+        method: 'POST',
       }),
     frameCanvas: (characterId, request) =>
       call<Canvas>(`/characters/${characterId}/frame-canvas`, {
@@ -319,11 +351,31 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
         method: 'POST',
         body: JSON.stringify({}),
       }),
-    commitSequence: (characterId, sequenceId, clips) =>
+    commitSequence: (characterId, sequenceId, clips, draftId, forkOf) =>
       call<CommittedSequence>(`/characters/${characterId}/sequences`, {
         method: 'POST',
-        body: JSON.stringify({ name: sequenceId, clips }),
+        body: JSON.stringify({
+          name: sequenceId,
+          clips,
+          ...(draftId === undefined ? {} : { draftId }),
+          ...(forkOf === undefined ? {} : { forkOf }),
+        }),
       }),
+    listSequenceDrafts: (characterId) =>
+      call<{ drafts: string[] }>(`/characters/${characterId}/sequence-drafts`),
+    readSequenceDraft: (characterId, draftId) =>
+      call<SequenceDraft>(`/characters/${characterId}/sequence-drafts/${draftId}`),
+    saveSequenceDraft: (characterId, request) =>
+      call<SequenceDraft>(`/characters/${characterId}/sequence-drafts`, {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }),
+    discardSequenceDraft: async (characterId, draftId) => {
+      await call<{ discarded: string }>(
+        `/characters/${characterId}/sequence-drafts/${draftId}`,
+        { method: 'DELETE' },
+      );
+    },
     discardDraft: async (characterId, draftId) => {
       await call<{ discarded: string }>(`/characters/${characterId}/drafts/${draftId}/discard`, {
         method: 'POST',

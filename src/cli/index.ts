@@ -15,9 +15,9 @@ import {
   commitSequence,
   createCharacter,
   deriveAnchor,
-  expandCanvas,
   exportCharacter,
   extractClipDraft,
+  fitCanvasToContent,
   ForgeError,
   forkAsset,
   ingestRecording,
@@ -25,8 +25,10 @@ import {
   readDraftRepair,
   removeSegment,
   renameSegment,
+  resizeCanvas,
   scan,
   setPlacementOffset,
+  setSegmentRect,
   StoreError,
   undoRepairOperation,
   validateStore,
@@ -54,10 +56,12 @@ Usage:
        --recording <id> [--cut <id>] [--background <#rrggbb>] [--tolerance <n>]
   forge cut              --store <path> --recording <id> --action <add|rename|remove|list> [options]
                                                                      Edit a Recording's Segment cut list.
-       add:    --id <cut-id> --start <n> --end <n> [--speed <n>]
+       add:    --id <cut-id> --start <n> --end <n> [--speed <n>] [--rect x,y,w,h]
        rename: --id <cut-id> --new-id <new-id>
        remove: --id <cut-id>
+       rect:   --id <cut-id> --rect x,y,w,h|none
        list:   (no further options)
+       A rect confines extraction to that source rectangle; "none" clears it.
   forge extract          --store <path> --character <id> --recording <id> --cut <id> [options]
                                                                      Extract a Segment into a Clip Draft.
        --draft <id>          Draft id (defaults to the cut id)
@@ -87,10 +91,11 @@ Usage:
                erase-rect: --x <n> --y <n> --width <n> --height <n>
                brushes:    --points "x,y;x,y" --size <n> [--color <#rrggbb> for paint-brush]
        list/undo: (no further options)
-  forge align            --store <path> --character <id> --action <set-offset|expand> [options]
-                                                                     Set a Draft's placement offset, or expand the Canvas.
+  forge align            --store <path> --character <id> --action <set-offset|resize|fit> [options]
+                                                                     Set a Draft's placement offset, or resize the Canvas.
        set-offset: --draft <id> --x <n> --y <n>
-       expand:     --width <n> --height <n>`;
+       resize:     --width <n> --height <n>   (down to the content floor)
+       fit:        shrink to the content floor`;
 
 /** Run one CLI invocation. Returns the process exit code. */
 export async function runCli(argv: string[]): Promise<number> {
@@ -115,6 +120,7 @@ export async function runCli(argv: string[]): Promise<number> {
   let size: string | undefined;
   let color: string | undefined;
   let newId: string | undefined;
+  let rect: string | undefined;
   let character: string | undefined;
   let cut: string | undefined;
   let draft: string | undefined;
@@ -155,6 +161,7 @@ export async function runCli(argv: string[]): Promise<number> {
         size: { type: 'string' },
         color: { type: 'string' },
         'new-id': { type: 'string' },
+        rect: { type: 'string' },
         character: { type: 'string' },
         cut: { type: 'string' },
         draft: { type: 'string' },
@@ -193,6 +200,7 @@ export async function runCli(argv: string[]): Promise<number> {
     size = values.size;
     color = values.color;
     newId = values['new-id'];
+    rect = values.rect;
     character = values.character;
     cut = values.cut;
     draft = values.draft;
@@ -228,7 +236,7 @@ export async function runCli(argv: string[]): Promise<number> {
     case 'create-character':
       return runCreateCharacter(store, id, width, height, anchorX, anchorY, recording, cut);
     case 'cut':
-      return runCut(store, { recording, action, id, start, end, speed, newId });
+      return runCut(store, { recording, action, id, start, end, speed, newId, rect });
     case 'extract':
       return runExtract(store, {
         character,
@@ -369,6 +377,26 @@ function integerArg(value: string | undefined): number | undefined {
   return Number.isInteger(parsed) ? parsed : undefined;
 }
 
+/**
+ * Parse `--rect x,y,width,height`; `undefined` when absent.
+ *
+ * Returns `null` for the literal `none`, which is how a box is cleared.
+ */
+function rectArg(value: string | undefined): { x: number; y: number; width: number; height: number } | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === 'none') {
+    return null;
+  }
+  const parts = value.split(',').map((part) => integerArg(part.trim()));
+  if (parts.length !== 4 || parts.some((part) => part === undefined)) {
+    return undefined;
+  }
+  const [x, y, width, height] = parts as number[];
+  return { x: x!, y: y!, width: width!, height: height! };
+}
+
 /** Options for the `cut` command, one action per invocation. */
 interface CutArgs {
   recording?: string;
@@ -378,16 +406,20 @@ interface CutArgs {
   end?: string;
   speed?: string;
   newId?: string;
+  rect?: string;
 }
 
 /** `forge cut` — add, rename, remove or list a Recording's Segments. */
 async function runCut(store: string, args: CutArgs): Promise<number> {
-  const { recording, action, id, start, end, speed, newId } = args;
+  const { recording, action, id, start, end, speed, newId, rect } = args;
   if (!recording) {
     return fail('--recording <recording-id> is required for cut');
   }
   if (!action) {
-    return fail('--action <add|rename|remove|list> is required for cut');
+    return fail('--action <add|rename|remove|rect|list> is required for cut');
+  }
+  if (rect !== undefined && rectArg(rect) === undefined) {
+    return fail('--rect must be x,y,width,height or `none`');
   }
 
   try {
@@ -406,13 +438,26 @@ async function runCut(store: string, args: CutArgs): Promise<number> {
           return fail('--start and --end integers are required for cut --action add');
         }
         const speedMultiplier = speed === undefined ? undefined : Number(speed);
+        const box = rectArg(rect);
         cutList = await addSegment(store, {
           recordingId: recording,
           id,
           startFrame,
           endFrame,
           ...(speedMultiplier !== undefined ? { speed: speedMultiplier } : {}),
+          ...(box === undefined || box === null ? {} : { rect: box }),
         });
+        break;
+      }
+      case 'rect': {
+        if (!id) {
+          return fail('--id <cut-id> is required for cut --action rect');
+        }
+        if (rect === undefined) {
+          return fail('--rect x,y,width,height|none is required for cut --action rect');
+        }
+        const box = rectArg(rect) ?? undefined;
+        cutList = await setSegmentRect(store, { recordingId: recording, id, rect: box });
         break;
       }
       case 'rename': {
@@ -814,14 +859,14 @@ interface AlignArgs {
   height?: string;
 }
 
-/** `forge align` — set a Draft's placement offset, or expand the Canvas. */
+/** `forge align` — set a Draft's placement offset, or resize the Canvas. */
 async function runAlign(store: string, args: AlignArgs): Promise<number> {
   const { character, action } = args;
   if (!character) {
     return fail('--character <character-id> is required for align');
   }
   if (!action) {
-    return fail('--action <set-offset|expand> is required for align');
+    return fail('--action <set-offset|resize|fit> is required for align');
   }
   try {
     switch (action) {
@@ -843,13 +888,18 @@ async function runAlign(store: string, args: AlignArgs): Promise<number> {
         process.stdout.write(`${JSON.stringify(updated, null, 2)}\n`);
         return 0;
       }
-      case 'expand': {
+      case 'resize': {
         const width = integerArg(args.width);
         const height = integerArg(args.height);
         if (width === undefined || height === undefined) {
-          return fail('--width and --height integers are required for align --action expand');
+          return fail('--width and --height integers are required for align --action resize');
         }
-        const result = await expandCanvas(store, { characterId: character, width, height });
+        const result = await resizeCanvas(store, { characterId: character, width, height });
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return 0;
+      }
+      case 'fit': {
+        const result = await fitCanvasToContent(store, { characterId: character });
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
         return 0;
       }

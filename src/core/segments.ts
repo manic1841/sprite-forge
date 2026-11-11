@@ -14,9 +14,15 @@
  * Only **identity** is enforced (Rule 2.1): cut ids are unique within a Recording.
  * Overlapping and repeated frame ranges are legitimate and are never policed; a
  * `jump` and a shorter `jump-takeoff` may share frames.
+ *
+ * A Segment may carry a **box**: one rectangle of the source frame it is confined
+ * to, for a source whose background cannot be keyed away (docs/recordings.md).
+ * The box is source coordinates, is clipped rather than validated against the
+ * source size, and is part of what an extraction snapshots.
  */
 
 import { StoreError } from './errors.js';
+import type { Bounds } from './frames.js';
 import { assertValidId } from './ids.js';
 import { cutsPath } from './layout.js';
 import { pathExists, readJsonFile, writeJsonFile } from './store/index.js';
@@ -32,6 +38,11 @@ export interface Segment {
   endFrame: number;
   /** Playback multiplier applied when a Clip is generated. Omitted when `1`. */
   speed?: number;
+  /**
+   * The rectangle of the source frame this Segment is confined to, in source
+   * pixels. Omitted when the whole frame is used.
+   */
+  rect?: Bounds;
 }
 
 /** A Recording's cut list, exactly as stored in `cuts.json`. */
@@ -75,6 +86,8 @@ export interface AddSegmentOptions {
   endFrame: number;
   /** Playback multiplier; omitted from the artifact when `1`. */
   speed?: number;
+  /** The source rectangle to confine the Segment to; the whole frame when omitted. */
+  rect?: Bounds;
 }
 
 /** Add a Segment to a Recording's cut list, returning the updated cut list. */
@@ -98,6 +111,7 @@ function makeSegment(options: {
   startFrame: number;
   endFrame: number;
   speed?: number;
+  rect?: Bounds;
 }): Segment {
   const segment: Segment = {
     id: options.id,
@@ -107,7 +121,31 @@ function makeSegment(options: {
   if (options.speed !== undefined && options.speed !== 1) {
     segment.speed = options.speed;
   }
+  if (options.rect !== undefined) {
+    segment.rect = normaliseRect(options.rect);
+  }
   return segment;
+}
+
+/**
+ * Check a box and copy it to a plain object, so a caller's object cannot be
+ * mutated through the artifact. Coordinates are whole pixels; a box is at least
+ * 1x1. The source size is not known here, so the box is not range-checked
+ * against it — it is clipped to the frame at extraction time.
+ */
+export function normaliseRect(rect: Bounds): Bounds {
+  for (const key of ['x', 'y', 'width', 'height'] as const) {
+    if (!Number.isInteger(rect[key])) {
+      throw new StoreError(`Box ${key} must be an integer; got ${rect[key]}.`);
+    }
+  }
+  if (rect.x < 0 || rect.y < 0) {
+    throw new StoreError(`Box origin must be >= 0; got ${rect.x},${rect.y}.`);
+  }
+  if (rect.width < 1 || rect.height < 1) {
+    throw new StoreError(`Box size must be at least 1x1; got ${rect.width}x${rect.height}.`);
+  }
+  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
 
 /** Inputs for {@link renameSegment}. */
@@ -208,6 +246,50 @@ export async function setSegmentRange(
       ? { ...cut, startFrame: options.startFrame, endFrame: options.endFrame }
       : cut,
   );
+  const next = withCuts(cutList, cuts);
+  await writeCutList(root, options.recordingId, next);
+  return next;
+}
+
+/** Inputs for {@link setSegmentRect}. */
+export interface SetSegmentRectOptions {
+  recordingId: string;
+  /** The cut id whose box is set or cleared. */
+  id: string;
+  /** The source rectangle, or `undefined` to clear it back to the whole frame. */
+  rect?: Bounds | undefined;
+}
+
+/**
+ * Set (or clear) a Segment's box, returning the updated cut list.
+ *
+ * The box is what extraction is confined to, so it is deliberately the
+ * Segment's own field: the time range and the space range are one piece of
+ * footage. Clearing it restores whole-frame extraction.
+ */
+export async function setSegmentRect(
+  root: string,
+  options: SetSegmentRectOptions,
+): Promise<CutList> {
+  assertValidId(options.recordingId, 'recording', 'recordingId');
+  assertValidId(options.id, 'cut', 'cut id');
+
+  const cutList = await readCutList(root, options.recordingId);
+  const index = cutList.cuts.findIndex((cut) => cut.id === options.id);
+  if (index === -1) {
+    throw new StoreError(
+      `No Segment "${options.id}" in Recording "${options.recordingId}".`,
+    );
+  }
+
+  const rect = options.rect === undefined ? undefined : normaliseRect(options.rect);
+  const cuts = cutList.cuts.map((cut, at) => {
+    if (at !== index) {
+      return cut;
+    }
+    const { rect: _old, ...rest } = cut;
+    return rect === undefined ? rest : { ...rest, rect };
+  });
   const next = withCuts(cutList, cuts);
   await writeCutList(root, options.recordingId, next);
   return next;

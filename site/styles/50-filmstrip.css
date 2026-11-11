@@ -36,6 +36,87 @@
   box-shadow: inset 0 0 0 1px var(--u-accent);
 }
 
+/* --------------------------------------------------------- transport bars */
+
+/* The filmstrip and the Draft tools are both transports under a picture, so they
+   share one anatomy: a mono head (label left, actions right) over a flat bar.
+   Nothing here is boxed — the controls read as one row, not a form panel. */
+.wb-shell .transport-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 6px;
+  font: 400 11px/1.4 var(--ui-mono);
+  color: var(--u-muted);
+}
+
+.wb-shell .transport-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-shell .transport-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  color: var(--u-muted);
+}
+
+.wb-shell .transport-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+/* one flat control for both bars: a quiet mono chip that gains the accent when
+   it is the current choice, never a filled button of its own */
+.wb-shell .dock-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--u-muted);
+  font: 400 11px/1.6 var(--ui-mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-shell .dock-btn:hover:not(:disabled) {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+.wb-shell .dock-btn:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.wb-shell .dock-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.wb-shell .dock-btn.on,
+.wb-shell .dock-btn[aria-pressed='true'] {
+  background: var(--u-tint);
+  box-shadow: inset 0 0 0 1px var(--u-accent);
+  color: var(--u-accent-text);
+}
+
 .wb-shell .filmstrip-selection {
   display: flex;
   align-items: center;
@@ -47,38 +128,11 @@
 }
 
 .wb-shell .filmstrip-selection .muted {
-  font: 400 11px/1.6 var(--ui-mono);
   color: var(--u-accent);
-  white-space: nowrap;
 }
 
-.wb-shell .filmstrip-selection .btn {
-  padding: 1px 8px;
-  font: 400 11px/1.6 var(--ui-mono);
-}
-
-.wb-shell .filmstrip-header .ttl {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-shell .filmstrip-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
-  font: 400 11px/1.4 var(--ui-mono);
-  color: var(--u-muted);
-}
-
-/* the how-to sat under the strip; the empty track carries the gesture instead */
-.wb-shell .filmstrip-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
+.wb-shell .filmstrip-play {
+  flex: none;
 }
 
 /* the counter yields first: the play toggle keeps its width */
@@ -86,17 +140,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.wb-shell .filmstrip-play {
-  flex: none;
-  padding: 1px 8px;
-  font: 400 11px/1.6 var(--ui-mono);
-}
-
-.wb-shell .filmstrip-play[aria-pressed='true'] {
-  color: var(--u-ink);
-  border-color: var(--u-line-2);
 }
 
 /* The strip's three views of the frame axis — cells, bands, ruler — scroll as one
@@ -246,74 +289,6 @@
 
 .wb-shell .cut-handle[data-cut-handle='end'] {
   border-radius: 0 1px 1px 0;
-}
-
-/* the repair tools are a segmented control, so they read quieter than the tabs */
-.wb-shell .repair-tools {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--u-line-2);
-  border-radius: 8px;
-}
-
-/* The bar sits under the frame it paints on: tools on the left, brush settings
-   beside them, Undo pushed to the far end where a step-back belongs. */
-.wb-shell .repair-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.wb-shell .repair-bar .repair-tools {
-  margin-bottom: 0;
-}
-
-/* the inspector stacks its fields; across a bar they sit in a row */
-.wb-shell .repair-bar .repair-settings {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 12px;
-}
-
-/* the inspector stacks its fields full width; across a bar they stay compact */
-.wb-shell .repair-bar .field {
-  gap: 6px;
-}
-
-.wb-shell .repair-bar input[type="number"] {
-  width: 52px;
-}
-
-.wb-shell .repair-bar select {
-  width: auto;
-}
-
-.wb-shell .repair-bar [data-repair-undo] {
-  margin-left: auto;
-}
-
-.wb-shell .repair-tools .btn {
-  height: 22px;
-  padding: 0 9px;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--u-muted);
-  font-size: 11.5px;
-}
-
-.wb-shell .repair-tools .btn:hover:not(:disabled) {
-  background: var(--u-fill-2);
-  color: var(--u-ink);
-}
-
-.wb-shell .repair-tools .btn.on {
-  background: var(--u-tint);
-  color: var(--u-accent-text);
-  box-shadow: inset 0 0 0 1px var(--u-accent);
 }
 
 .wb-shell input[type="color"] {

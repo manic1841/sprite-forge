@@ -8,6 +8,9 @@
 export { scan, readStoreTree } from './scan.js';
 export type { CharacterTree, StoreTree } from './scan.js';
 
+/** A pixel rectangle in source coordinates (a Segment's box, a Repair rect). */
+export type { Bounds } from './frames.js';
+
 export { ingestRecording, readRecordingDelays, readRecordingFrame } from './ingest.js';
 export type {
   IngestRecordingOptions,
@@ -24,7 +27,7 @@ export type {
   CreatedCharacter,
 } from './character.js';
 
-export { addSegment, readCutList, removeSegment, renameSegment, setSegmentRange } from './segments.js';
+export { addSegment, readCutList, removeSegment, renameSegment, setSegmentRange, setSegmentRect } from './segments.js';
 export type {
   AddSegmentOptions,
   CutList,
@@ -32,9 +35,17 @@ export type {
   RenameSegmentOptions,
   Segment,
   SetSegmentRangeOptions,
+  SetSegmentRectOptions,
 } from './segments.js';
 
-export { extractClipDraft, readClipDraft, readClipDraftFrame, renderSegmentFrames, deriveAnchor } from './draft.js';
+export {
+  deriveAnchor,
+  extractClipDraft,
+  readClipDraft,
+  readClipDraftFrame,
+  renderSegmentFrames,
+  segmentContentBounds,
+} from './draft.js';
 export type {
   ClipDraft,
   ClipDraftDescriptor,
@@ -48,7 +59,21 @@ export type {
   ReadClipDraftOptions,
   RenderedSegment,
   RenderSegmentFramesOptions,
+  SegmentContentBoundsOptions,
 } from './draft.js';
+
+export {
+  listSequenceDrafts,
+  readSequenceDraft,
+  removeSequenceDraft,
+  saveSequenceDraft,
+} from './sequenceDraft.js';
+export type {
+  SaveSequenceDraftOptions,
+  SequenceDraft,
+  SequenceDraftDescriptor,
+  SequenceDraftRef,
+} from './sequenceDraft.js';
 
 export {
   commitDraft,
@@ -82,10 +107,12 @@ export type {
 } from './assets.js';
 
 export {
-  expandCanvas,
+  contentFloor,
+  fitCanvasToContent,
   frameCanvasFromSegment,
   readCharacterAlignment,
   readDraftAlignment,
+  resizeCanvas,
   setPlacementOffset,
 } from './alignment.js';
 export type {
@@ -94,11 +121,12 @@ export type {
   AlignmentWarningCode,
   CharacterAlignment,
   CharacterScopedOptions,
-  ExpandCanvasOptions,
-  ExpandCanvasResult,
+  ContentFloor,
   FrameCanvasFromSegmentOptions,
   PlacementOffset,
   ReadDraftAlignmentOptions,
+  ResizeCanvasOptions,
+  ResizeCanvasResult,
   SetPlacementOffsetOptions,
 } from './alignment.js';
 

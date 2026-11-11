@@ -19,10 +19,13 @@ import { describe, expect, it } from 'vitest';
 import {
   addSegment,
   createCharacter,
+  deriveAnchor,
   extractClipDraft,
   ingestRecording,
   readClipDraft,
   readClipDraftFrame,
+  segmentContentBounds,
+  setSegmentRect,
   StoreError,
   validateStore,
 } from '../src/core/index.js';
@@ -482,6 +485,182 @@ describe('extractClipDraft failures', () => {
             cutId: CUT_ID,
           }),
         ).rejects.toThrow(/recorded hash/i);
+      });
+    });
+  });
+});
+
+describe('a Segment box', () => {
+  // A box is a **window** on the source: nothing outside it may reach the output,
+  // it is applied before the background key, and it is part of what a extraction
+  // snapshots so the frames can be replayed.
+
+  it('drops every pixel outside the box, on every frame', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        // The subject slides from x 1..2 to x 2..3; this box keeps only x 1..2.
+        await setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: CUT_ID,
+          rect: { x: 1, y: 3, width: 2, height: 2 },
+        });
+
+        const draft = await extractClipDraft(store.root, {
+          characterId: CHARACTER_ID,
+          recordingId: RECORDING_ID,
+          cutId: CUT_ID,
+        });
+        const frames = await Promise.all(draft.frames.map((frame) => decodeFrame(store, frame)));
+
+        // Frame 0 sits wholly inside the box; frame 1's right column is outside it.
+        expect(opaqueBounds(frames[0]!)!.width).toBe(2);
+        expect(opaqueBounds(frames[1]!)!.width).toBe(1);
+        // Nothing reaches the Canvas beyond the box's 2x2.
+        const union = unionOf(frames.map((frame) => opaqueBounds(frame)!));
+        expect(union.width).toBeLessThanOrEqual(2);
+        expect(union.height).toBeLessThanOrEqual(2);
+      });
+    });
+  });
+
+  it('still crops to the content inside the box, so a loose box adds no margin', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        // The whole frame as an explicit box: the union is still the subject's.
+        await setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: CUT_ID,
+          rect: { x: 0, y: 0, width: 8, height: 6 },
+        });
+
+        const draft = await extractClipDraft(store.root, {
+          characterId: CHARACTER_ID,
+          recordingId: RECORDING_ID,
+          cutId: CUT_ID,
+        });
+
+        expect(draft.segment.rect).toEqual({ x: 0, y: 0, width: 8, height: 6 });
+        const frames = await Promise.all(draft.frames.map((frame) => decodeFrame(store, frame)));
+        const union = unionOf(frames.map((frame) => opaqueBounds(frame)!));
+        expect(union).toEqual({ x: 1, y: 4, width: 3, height: 2 });
+      });
+    });
+  });
+
+  it('is a hard error naming the frame that shows nothing inside the box', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        // Covers x 0..1: frame 0 still shows its left column, frame 1 (x 2..3) does not.
+        await setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: CUT_ID,
+          rect: { x: 0, y: 0, width: 2, height: 6 },
+        });
+
+        await expect(
+          extractClipDraft(store.root, {
+            characterId: CHARACTER_ID,
+            recordingId: RECORDING_ID,
+            cutId: CUT_ID,
+          }),
+        ).rejects.toThrow(/Frame 1 has no content inside the box/);
+      });
+    });
+  });
+
+  it('is clamped to the source, so a box saved against a bigger frame still extracts', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        // x runs past the 8px source; the subject is still reachable.
+        await setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: CUT_ID,
+          rect: { x: 0, y: 0, width: 40, height: 40 },
+        });
+
+        const draft = await extractClipDraft(store.root, {
+          characterId: CHARACTER_ID,
+          recordingId: RECORDING_ID,
+          cutId: CUT_ID,
+        });
+        expect(draft.frameCount).toBe(2);
+      });
+    });
+  });
+
+  it('is a hard error when the box lies wholly outside the source', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        await setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: CUT_ID,
+          rect: { x: 40, y: 40, width: 4, height: 4 },
+        });
+
+        await expect(
+          extractClipDraft(store.root, {
+            characterId: CHARACTER_ID,
+            recordingId: RECORDING_ID,
+            cutId: CUT_ID,
+          }),
+        ).rejects.toThrow(/box outside the 8x6 source/);
+      });
+    });
+  });
+
+  it('confines the derived Anchor to the box', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        // Frame 0's subject is x 1..2, y 3..4; boxing it drops everything else.
+        await setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: CUT_ID,
+          rect: { x: 1, y: 3, width: 2, height: 2 },
+        });
+
+        const derived = await deriveAnchor(store.root, {
+          recordingId: RECORDING_ID,
+          cutId: CUT_ID,
+        });
+
+        // A 2x2 subject on the Canvas's bottom-centre, and nothing from the 8x6 frame.
+        expect(derived.bounds).toEqual({ x: 0, y: 0, width: 2, height: 2 });
+        expect(derived.canvas).toEqual({ width: 2, height: 4, anchor: { x: 1, y: 4 } });
+      });
+    });
+  });
+
+  it('reports the content inside the box, in source coordinates', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+
+        // No box: the union of both frames' subjects.
+        expect(
+          await segmentContentBounds(store.root, {
+            recordingId: RECORDING_ID,
+            cutId: CUT_ID,
+          }),
+        ).toEqual({ x: 1, y: 3, width: 3, height: 2 });
+
+        // Boxed: only what is left inside, still in source pixels.
+        await setSegmentRect(store.root, {
+          recordingId: RECORDING_ID,
+          id: CUT_ID,
+          rect: { x: 1, y: 3, width: 2, height: 2 },
+        });
+        expect(
+          await segmentContentBounds(store.root, {
+            recordingId: RECORDING_ID,
+            cutId: CUT_ID,
+          }),
+        ).toEqual({ x: 1, y: 3, width: 2, height: 2 });
       });
     });
   });
