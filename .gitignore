@@ -1,2 +1,26 @@
 # Local-only working notes; not part of this repo.
 discussions/
+
+.vscode/
+
+# Node build artifacts
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local store path; scratch unless deliberately checked in (ADR-0011)
+store/
+/store/
+
+# taste-skill gate run artifacts under the landing page (screenshots, Chrome profiles)
+site/.taste-skill/chrome-*/
+site/.taste-skill/tiles/
+site/.taste-skill/consistency/
+site/.taste-skill/layout/
+site/.taste-skill/gate/
+site/.taste-skill/*.png
+
+# gate and shoot run artifacts kept at the repo root while iterating
+.taste-skill/
+shots/

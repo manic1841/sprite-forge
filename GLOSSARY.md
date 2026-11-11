@@ -7,14 +7,24 @@ depends only on an export.
 
 ## Source material
 
+The Raw capture a Recording is built from. "Source" survives only in that narrow
+sense — a **source file** or **source path** — never as a name for the Recording
+itself.
+
 **Recording**:
 A single screen capture from an emulator, stored as one animated image file.
-_Avoid_: source, take, video
+_Avoid_: take, video, capture file
 
 **Segment**:
 A named cut in a Recording's cut list: a half-open frame range
 (`[startFrame, endFrame)`) covering one action's worth of footage.
 _Avoid_: slice, span, take
+
+**Box**:
+A Segment's optional source rectangle, in source pixels, that its extraction is
+confined to — a window on the frame, for footage whose backdrop the colour key
+cannot clear.
+_Avoid_: crop region, marquee, ROI, mask
 
 **Cut list**:
 A Recording's own record of its Segments, stored beside the Recording.
@@ -70,8 +80,16 @@ its lineage.
 _Avoid_: library item, resource, material
 
 **Asset store**:
-The directory tree that holds every Asset and its provenance.
-_Avoid_: library, catalog, repository
+The directory tree that holds every Asset and its provenance. Its root is chosen by
+`--store`, then `SPRITE_FORGE_STORE`, else defaults to `store/` under the working
+directory.
+_Avoid_: catalog, repository
+
+**Library**:
+The workbench's left rail: the browsable list of what the Asset store currently
+holds (Recordings, Drafts, committed Assets, Exports). It is a view of the store,
+never the store itself.
+_Avoid_: browser, explorer, file list
 
 **Canvas**:
 The frame size shared by every Asset of a Character, so the consumer can swap sheets

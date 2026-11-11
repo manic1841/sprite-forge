@@ -19,9 +19,9 @@ Recording ─▶ (extract Segment) ─▶ Clip ─▶ (concatenate) ─▶ Seque
 | # | Stage | What it does |
 | --- | --- | --- |
 | 1 | **Ingest** | Read a Recording; take frame count and per-frame delays from its metadata; capture the source path (the decode loses it). |
-| 2 | **Extract** | Select a Segment — a half-open frame range — by hand, frame-accurately. |
+| 2 | **Extract** | Select a Segment — a half-open frame range, optionally confined to a source box — by hand, frame-accurately. |
 | 3 | **De-background** | Colour-key the corner-sampled background colour to RGBA. |
-| 4 | **Crop + align** | Crop to the union bounds, then place the frames on the Character's shared Canvas via the Anchor. |
+| 4 | **Crop + align** | Crop to the union bounds (inside the box, if any), then place the frames on the Character's shared Canvas via the Anchor. |
 | 5 | **Repair** | Replay the Clip's Repair script (brush/eyedropper edits). |
 | 6 | **Compose** | Concatenate Clips into a Sequence. |
 | 7 | **Commit** | Promote a Draft into an immutable, named Asset. |
@@ -37,13 +37,20 @@ The store is an **external data root** the tool points at; it is not part of the
 repo. It has no catalog or index file — the tree *is* the truth, discovered by
 scanning. See [ADR-0003](./adr/0003-external-asset-store-discovered-by-scanning.md).
 
+The root is resolved from `--store`, then `SPRITE_FORGE_STORE`, then the default
+`store/` relative to the current working directory. The default is a startup
+convenience for the web UI, not a claim that the store belongs in the repo; the
+resolved absolute path is always shown. See
+[ADR-0011](./adr/0011-store-path-defaults-to-store.md).
+
 ```text
 <store root>/
 ├─ recordings/<recording-id>/   # raw inputs (read-only): source.gif + cuts.json
 ├─ characters/
 │  └─ <character-id>/
 │     ├─ canvas.json            # the shared Canvas / Anchor
-│     ├─ drafts/<draft-id>/     # editable, not-yet-committed work
+│     ├─ drafts/<draft-id>/     # editable, not-yet-committed Clip drafts
+│     ├─ sequence-drafts/<id>/  # ordered-Clip compositions still being edited
 │     ├─ repairs/<clip-id>/     # Repair scripts (input, not asset content)
 │     ├─ clips/<clip-id>/       # committed Clip assets
 │     └─ sequences/<seq-id>/    # committed Sequence assets
@@ -56,7 +63,7 @@ A committed Asset folder holds the **contract artifacts** plus its **provenance*
 clips/<clip-id>/
 ├─ sheet.png        # baked strip, already aligned to the Character's Canvas
 ├─ meta.json        # id, frameCount, delaysMs, loop  (frame size = the Character Canvas)
-└─ provenance.json  # recordingId+hash, segment{cutId,start,end,speed}, background, repair ref, placementOffset, derivedFrom?, toolVersion
+└─ provenance.json  # recordingId+hash, segment{cutId,start,end,speed,rect?}, background, repair ref, placementOffset, derivedFrom?, toolVersion
 ```
 
 A Sequence has the same shape (`sheet.png` + `meta.json` + `provenance.json`) with
@@ -73,6 +80,10 @@ frame size is **never** stored per Asset: it is always the Character's Canvas.
 
 - A **Draft** lives on disk under `characters/<id>/drafts/<draft-id>/`, so it survives
   a reload and both front ends can resume it.
+- A **Sequence composition** is a draft too, but has no frames: it is the ordered
+  Clip list at `characters/<id>/sequence-drafts/<id>/draft.json`, and it belongs to
+  the Character so a composition can start before any Sequence exists. It is
+  consumed on commit.
 - **Commit** bakes the Draft into `clips/<id>/` (or `sequences/<id>/`), writes its
   provenance, requires a name, and removes the Draft. The Asset is then immutable.
 - **Fork** opens an existing Asset as a new Draft. On commit, the new Asset's
@@ -107,21 +118,71 @@ stored, not regenerated. See
 
 The web UI is the primary working surface, and its shape is a **docked
 workbench**, not a wizard: one persistent shell, with a single region swapping per
-task so the working context is never lost.
+task so the working context is never lost. It is served as its own page,
+`/workbench`; the landing page at `/` is a separate marketing document that
+previews the tool and hands off to it, so the app owns the full viewport instead
+of competing with page sections.
 
-- **Rail (left, persistent)** — the Library: Recordings and committed Assets,
-  always present; click one to load it.
-- **Stage (centre)** — the active view, chosen by a **mode** switch: *Clip editor*
-  (the frame, segmentation scrub, and the Repair brush), *Alignment* (Clips ghosted
-  on the shared Canvas against the Anchor), or *Export* (Situation bindings and the
-  resulting Manifest).
-- **Inspector (right, contextual)** — whatever the active mode needs: brush colour /
-  size and the Repair operations in the editor; per-Clip placement offsets in
-  alignment; the live `manifest.json` in export.
+- **Rail (left, persistent)** — the Library region: the Import form at the top of
+  Recordings, then the Recordings, Drafts, committed Assets and Exports that
+  already exist; click an item to load it.
+- **Header (top, persistent)** — the **global** faces only: *Compose* and *Export*.
+  Both are about a whole Character rather than about the open item, so they outlive
+  every target and never move; with no Character in play they are disabled.
+  Composition jumps to the Character when something else is open.
+- **Target bar (above the stage)** — what is open, and the faces that belong to it.
+  A face belongs to its subject: *Cut* (a Recording's preview and segmentation),
+  *Align* (a Draft placed on the shared Canvas against the Anchor), *Clip* (a
+  Draft's frame and Repair brush), *View* (a committed Asset played back). An
+  editable thing and its committed snapshot never share one. A Draft is aligned
+  **before** it is painted: the Canvas is the coordinate space Repair is judged in,
+  and a later Canvas change invalidates Repair geometry while an offset is cheap to
+  nudge. A committed Asset's Align face is read-only and offers a fork instead.
+- **Stage (centre)** — the active view.
+- **Inspector (right, contextual)** — whatever the stage's **target** needs: the
+  Draft's per-frame facts, the Repair controls and Commit; the Recording's facts
+  and cut guidance; a committed Asset's provenance, Fork and Verify; the live
+  `manifest.json` in export.
 - **Filmstrip (bottom, docked)** — the current Segment frame-by-frame, plus the
   Recording's timeline with its draggable cut ranges.
 
-Switching modes swaps only the stage; the rail, inspector and filmstrip stay put.
+Switching modes swaps only the stage; the rail, header, target bar, inspector and
+filmstrip keep their nodes. The **target** — a Recording, a Draft, a Character or
+an Export — is what the stage and inspector follow, not the mode, so going from
+"cut" to "place" to "repair" to "commit" never leaves the screen. Extracting a
+Segment opens the new Draft on Placement; committing it opens the new Clip's
+read-only View.
+
+Composition is its own face on the **Character**, not a panel on a Sequence: a
+composition can be started before any Sequence exists, and it is persisted under
+`sequence-drafts/` so half-built work survives a reload like a Clip Draft. A
+Sequence fork writes a composition and opens it there; committing consumes it.
+
+The client is a shell plus one module per region (`src/web/client/workbench/`:
+`dom`, `state`, `ports`, `library`, `filmstrip`, `stageCut`, `stageClip`,
+`stageView`, `stageCompose`, `inspector`, `stageAlign`, `stageExport`). Rules that a
+region used to own in
+half — a marked range, a Repair gesture — live in a **deep session module**
+instead (`cutSession`, `draftEditor`): the module holds the invariants and the
+state slice it writes, and the regions only build DOM and call its verbs. A view
+receives a narrow port from `ports.ts` and never imports a sibling, so a region
+can be replaced or tested on its own. The inspector is a router over one section
+module per target (`recordingInspector`, `draftInspector`, `assetInspector`,
+`alignInspector`, `exportInspector`).
+
+A session is split from the **inside**, never across: `cutSession` composes
+`cutTargets` (the single Character picker), `cutPlayback` and `extractSegment`,
+and `draftEditor` composes `draftSheet` (the zoom rate and fit) and `repairTools`
+(the gestures). Each sub-module takes a narrow deps interface its session
+satisfies and never imports the session, so the verb set stays the facade and no
+cycle appears.
+
+The app sheet is split the same way it is read: `site/styles/` lines up
+`00-base` → `10-shell` → `20-chrome` → one file per region → `90-errors` →
+`98-responsive` → `99-dialogs`. The numeric prefix is the cascade order and the
+`<link>` list in `workbench.html` repeats it; `.wb-shell` is the scoping prefix
+in every file.
+
 
 This shape was chosen against two alternatives prototyped at equal fidelity — a
 **linear stepper** (one task per screen, heavy Next/Back) and a **timeline-first**

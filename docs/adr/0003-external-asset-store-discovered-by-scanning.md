@@ -19,3 +19,9 @@ its data — one tool can point at any store.
 
 - Opening the store costs a directory scan; acceptable at this scale.
 - There is no single file listing every Asset.
+
+## Later change
+
+[ADR-0011](./0011-store-path-defaults-to-store.md) added a default root (`store/`
+under the working directory) for startup convenience. It does not move the store into
+the repo: pointing at another store remains the normal case.

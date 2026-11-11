@@ -1,0 +1,142 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* ------------------------------------------------------------------ chrome */
+
+/* The header is the shell's **global** bar: it holds only the faces that outlive
+   the open item (Composition, Export), so a target change never rebuilds it. */
+.wb-shell .context-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--u-line);
+  background: var(--u-bg);
+}
+
+/* The target bar sits with the stage: it names what is open, then carries that
+   thing's own faces. Keeping it here is what lets the header stay global. */
+.wb-shell .target-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 38px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--u-line);
+  background: var(--u-bg);
+}
+
+.wb-shell .faces {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* A face that is the only one says where you are without pretending to be a
+   switch, so it is set as type rather than as a button. */
+.wb-shell .face-label {
+  font: 500 12.5px/1 var(--ui-font);
+  color: var(--u-muted);
+  letter-spacing: 0.02em;
+}
+
+.wb-shell .pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+  font: 500 11px/1.4 var(--ui-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ----------------------------------------------------------------- buttons */
+
+.wb-shell .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 0;
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+  font: 500 12.5px/1 var(--ui-font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 160ms var(--u-ease), color 160ms var(--u-ease);
+}
+
+.wb-shell .btn:hover:not(:disabled) {
+  background: var(--u-fill-3);
+}
+
+.wb-shell .btn:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.wb-shell .btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* a ghost is the quiet half of the pair: secondary, cancelling, destructive */
+.wb-shell .btn.ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--u-line-2);
+  color: var(--u-muted);
+}
+
+.wb-shell .btn.ghost:hover:not(:disabled) {
+  background: var(--u-fill-2);
+  color: var(--u-ink);
+}
+
+/* inside the mock the one action of a form is an accent outline, not a second
+   solid: the page's own solid pill stays the only filled button on screen */
+.wb-shell .export-form .btn:last-of-type,
+.wb-shell .commit-row .btn:last-child {
+  border: 1px solid var(--u-accent);
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+  font-weight: 600;
+}
+
+.wb-shell .export-form .btn:last-of-type:hover,
+.wb-shell .commit-row .btn:last-child:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--u-accent) 22%, var(--u-bg));
+}
+
+.wb-shell [data-inspector-section="commit"] [data-commit-run] {
+  margin-top: 10px;
+  border: 1px solid var(--u-accent);
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+  font-weight: 600;
+}
+
+.wb-shell [data-inspector-section="commit"] [data-commit-run]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--u-accent) 22%, var(--u-bg));
+}
+
+.wb-shell .btn.on {
+  background: var(--u-ink);
+  color: var(--u-bg);
+  font-weight: 600;
+  outline: 0;
+}
+
+.wb-shell .btn.small {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 11.5px;
+}

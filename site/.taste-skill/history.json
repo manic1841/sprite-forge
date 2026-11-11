@@ -1,0 +1,20 @@
+{
+ "palettes": [
+  "green-black-bone"
+ ],
+ "types": [
+  "instrument"
+ ],
+ "dealt": [
+  "instrument",
+  "host",
+  "manrope"
+ ],
+ "moments": [
+  {
+   "id": "word-highlight",
+   "at": "2026-11-08T09:01:56.647Z",
+   "seed": "db981ef8"
+  }
+ ]
+}

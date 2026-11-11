@@ -5,7 +5,11 @@
   "description": "A Recording's Segments, stored beside the source at recordings/<recording-id>/cuts.json. See docs/format-spec.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["hash", "frameCount", "cuts"],
+  "required": [
+    "hash",
+    "frameCount",
+    "cuts"
+  ],
   "properties": {
     "hash": {
       "description": "Content hash of source.gif; detects a swapped source.",
@@ -19,7 +23,9 @@
     },
     "cuts": {
       "type": "array",
-      "items": { "$ref": "#/$defs/cut" }
+      "items": {
+        "$ref": "#/$defs/cut"
+      }
     }
   },
   "$defs": {
@@ -30,13 +36,20 @@
     "cut": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "startFrame", "endFrame"],
+      "required": [
+        "id",
+        "startFrame",
+        "endFrame"
+      ],
       "properties": {
         "id": {
           "description": "Cut id; unique within this Recording.",
           "$ref": "#/$defs/id"
         },
-        "startFrame": { "type": "integer", "minimum": 0 },
+        "startFrame": {
+          "type": "integer",
+          "minimum": 0
+        },
         "endFrame": {
           "description": "Exclusive; the range is half-open [startFrame, endFrame).",
           "type": "integer",
@@ -46,6 +59,38 @@
           "description": "Playback multiplier applied when generating a Clip; does not change the range. Omitted when 1.",
           "type": "number",
           "exclusiveMinimum": 0
+        },
+        "rect": {
+          "description": "Source rectangle the Segment is confined to, in source pixels. Clipped to the frame on use. Omitted when the whole frame is used.",
+          "$ref": "#/$defs/rect"
+        }
+      }
+    },
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

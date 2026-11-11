@@ -1,0 +1,575 @@
+{
+ "start": "2026-11-08T09:01:41.769Z",
+ "round": 6,
+ "idle": 0,
+ "errors": 0,
+ "status": "open",
+ "history": [
+  {
+   "at": "2026-11-08T13:16:52.121Z",
+   "mode": "manual",
+   "status": "fail",
+   "fails": 9,
+   "round": 1,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-08T13:24:16.945Z",
+   "mode": "manual",
+   "status": "fail",
+   "fails": 7,
+   "round": 2,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-08T13:28:51.310Z",
+   "mode": "manual",
+   "status": "open",
+   "fails": 3,
+   "round": 3,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-08T13:32:12.430Z",
+   "mode": "manual",
+   "status": "open",
+   "fails": 1,
+   "round": 3,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-08T13:42:27.298Z",
+   "mode": "manual",
+   "status": "pass",
+   "fails": 0,
+   "round": 3,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-08T15:38:39.510Z",
+   "mode": "manual",
+   "status": "open",
+   "fails": 1,
+   "round": 4,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-08T15:53:21.168Z",
+   "mode": "manual",
+   "status": "pass",
+   "fails": 0,
+   "round": 4,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-09T13:29:33.170Z",
+   "mode": "manual",
+   "status": "open",
+   "fails": 1,
+   "round": 5,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-09T14:22:39.116Z",
+   "mode": "done",
+   "status": "done",
+   "reason": "不繼續跑，我已經說不跑手機畫面了，收尾寫報告",
+   "round": 5
+  },
+  {
+   "at": "2026-11-10T01:01:59.496Z",
+   "mode": "manual",
+   "status": "open",
+   "fails": 6,
+   "round": 6,
+   "reused": false,
+   "stopHookActive": false
+  },
+  {
+   "at": "2026-11-10T01:13:19.346Z",
+   "mode": "manual",
+   "status": "open",
+   "fails": 4,
+   "round": 6,
+   "reused": false,
+   "stopHookActive": false
+  }
+ ],
+ "max": 3,
+ "marker": {
+  "page": "index.html",
+  "dir": "/workspace/sprite-forge.worktrees/feature-implement-tool/site",
+  "kind": "software",
+  "start": "2026-11-08T09:01:41.769Z",
+  "by": "start.mjs",
+  "url": null,
+  "category": "pixel animation tool",
+  "primary": "Run the workbench"
+ },
+ "manual": true,
+ "roundKey": "28baeb1194cf2c9d:7d0e034c",
+ "roundFree": false,
+ "idleFree": false,
+ "blockKey": null,
+ "fp": "93cb29b20ec6e945",
+ "page": "index.html",
+ "found": {
+  "fails": [
+   {
+    "check": "one-section",
+    "where": "section#workbench > div.wrap > div.wb-shell.ui \"The workbench mounts here. It reads the \"",
+    "msg": "a band: a box 89% of the section wide on a ground of its own that holds only text: the section's own ground is the band (SR-4)",
+    "fix": "put every block of <main> in a <section>, and give a band its own section instead of a ground inside one",
+    "widths": [
+     1440
+    ],
+    "from": "consistency",
+    "ids": [
+     "one-section"
+    ],
+    "wheres": [
+     "section#workbench > div.wrap > div.wb-shell.ui \"The workbench mounts here. It reads the \""
+    ]
+   },
+   {
+    "check": "contrast",
+    "where": "div.span-2.footer__col:nth-of-type(2) > ul > li:nth-of-type(1) > a \"Pipeline\"",
+    "msg": "body text over a effect reads at 1.4:1 at its worst tenth (needs 4.5:1), on a busy ground (and 1 more like it: \"Clip\")",
+    "fix": "put the text on a calm part of the picture, or on a solid panel",
+    "widths": [
+     390
+    ],
+    "from": "consistency",
+    "ids": [
+     "contrast"
+    ],
+    "wheres": [
+     "div.span-2.footer__col:nth-of-type(2) > ul > li:nth-of-type(1) > a \"Pipeline\""
+    ]
+   },
+   {
+    "check": "sparse",
+    "where": "#workbench section.section \"Cut a Recording in the workbench\"",
+    "msg": "its content fills 47% of its screen; merge it or give it its visual (0.55 is the aim)",
+    "fix": "fill the section or make it a screen shorter",
+    "widths": [
+     1440
+    ],
+    "from": "layout",
+    "ids": [
+     "sparse"
+    ],
+    "wheres": [
+     "#workbench section.section \"Cut a Recording in the workbench\""
+    ]
+   },
+   {
+    "check": "screen-height",
+    "where": "#workbench section.section \"Cut a Recording in the workbench\"",
+    "msg": "983px, 1.16 screens; a section is exactly one or two (--h), or on a phone at least one that its content fills",
+    "fix": "make the section exactly one or two screens (--h: 1 or 2)",
+    "widths": [
+     390
+    ],
+    "from": "layout",
+    "ids": [
+     "screen-height"
+    ],
+    "wheres": [
+     "#workbench section.section \"Cut a Recording in the workbench\""
+    ]
+   }
+  ],
+  "warns": [
+   {
+    "check": "assets",
+    "where": "(the page)",
+    "msg": "the data file http://127.0.0.1:5202/api/store did not load (404)",
+    "fix": "fix the path, or remove the reference",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "cut-text",
+    "where": "div.ui-term__screen > div.ui-term__track > div.ui-term__ln.ui-term__log:nth-of-type(3) > span.ui-term__path \"Cloning into 'sprite-forge'...\"",
+    "msg": "shortened with an ellipsis (and 2 more like it: \"Local: http://localhost:\", \"recordings\")",
+    "fix": "give the text room: no overflow clipping a line, no line past its box",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "scroll-reveal",
+    "where": "section#reproduce > div.wrap > p.mo-wh__text \"Every Clip carries its Recording hash, i\"",
+    "msg": "starts \"color\" (0.2 s) the moment it is scrolled into view (an IntersectionObserver) on span.mo-w:nth-of-type(8) (inside a dealt moment's section, [data-moment]: an enter moment is expected on every kind; its still is judged under reduced motion)",
+    "fix": "show it at rest: no fade, rise or unmask when it is scrolled into view",
+    "widths": [
+     1440,
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "card-layout",
+    "where": "section#pipeline > div.wrap > div.group:nth-of-type(2) > div.grid \"Ingest the recording into the store The \"",
+    "msg": "4 cards with 1 placement of their UI (vary them: rise, corner, a low stack, right)",
+    "fix": "vary the cards of a group: at least three placements, and the ground in its own light on each",
+    "widths": [
+     1440,
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "same-action",
+    "where": "div.grid > div.span-5.stack-4 > p:nth-of-type(2) > a.link \"Run the workbench\"",
+    "msg": "\"Run the workbench\" is a button in one place and a text link in another: one action in two looks",
+    "fix": "show one action one way: the same button wherever it repeats, or a text link everywhere",
+    "widths": [
+     1440,
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "copy-buttons",
+    "where": "header.nav.nav--centre > div.wrap.nav__bar > div.nav__actions > a.btn.btn--primary \"Run the workbench\"",
+    "msg": "\"Run the workbench\" does not start with a verb (book, buy, try, start, get, see...)",
+    "fix": "label buttons with a verb and what the visitor gets (\"Book a room\", \"Start free trial\")",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "text-contrast",
+    "where": "div.frame.frame--hero > ol.flow > li.flow__node:nth-of-type(1) > span \"12 frames\"",
+    "msg": "5 lines of text in drawn mocks read under 4.5:1 (1 colour pair), the worst \"12 frames\" in #535b51 on #232a27 at 2.08:1",
+    "fix": "lift the mocks' muted text (labels, meta, initials) to 4.5:1 on their own panel, or set it larger",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "section-gaps",
+    "where": "section#questions / footer#contact",
+    "msg": "uneven space at the edge of a band: 72px outside its edge, 117px inside it (the space on either side of a change of ground reads as one gap only when the two match)",
+    "fix": "use one gap between sections (all within 25% of each other)",
+    "widths": [
+     1440,
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "links",
+    "where": "div.span-2.footer__col:nth-of-type(5) > ul > li:nth-of-type(2) > a \"Contact\"",
+    "msg": "\"Contact\" goes to #contact, the block it already sits in",
+    "fix": "point every link at a real section, page or file",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "photo-set",
+    "where": "div.grid > div.step.s4 > div.panel.p-b > img \"frame-3-l.png\"",
+    "msg": "4 photographs in more than one look: lightness from 0.27 to 0.80; the odd one out is frame-3-l.png",
+    "fix": "grade the photographs to one look (light, colour, warmth), or replace the odd one out",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "nav-labels",
+    "where": "header.nav.nav--centre > div.wrap.nav__bar > a.nav__logo \"sprite-forge\"",
+    "msg": "\"sprite-forge\" opens a section headed \"Pixel-animation tool for game teams\"",
+    "fix": "name each nav link after the heading of the section it opens",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "nav-labels",
+    "where": "div.wrap.nav__bar > nav.nav__links > div.nav__item:nth-of-type(1) > a.nav__link \"Pipeline\"",
+    "msg": "\"Pipeline\" opens a section headed \"One Recording becomes a Clip in four store steps.\"",
+    "fix": "name each nav link after the heading of the section it opens",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "nav-labels",
+    "where": "div.nav__menu > div.wrap.grid > div.menu-col.span-3:nth-of-type(1) > a:nth-of-type(2) \"SegmentA frame range on the cut list\"",
+    "msg": "\"SegmentA frame range on the cut list\" opens a section headed \"One Recording becomes a Clip in four store steps.\"",
+    "fix": "name each nav link after the heading of the section it opens",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "nav-labels",
+    "where": "div.nav__menu > div.wrap.grid > div.menu-col.span-3:nth-of-type(2) > a:nth-of-type(2) \"SequenceClips played in order\"",
+    "msg": "\"SequenceClips played in order\" opens a section headed \"Four store controls stand between a frame and a sh\"",
+    "fix": "name each nav link after the heading of the section it opens",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "nav-labels",
+    "where": "div.nav__menu > div.wrap.grid > div.menu-col.span-3:nth-of-type(2) > a:nth-of-type(1) \"ClipDe-backgrounded, aligned f\"",
+    "msg": "3 entries of one menu go to the same place (#controls): \"ClipDe-backgrounded, aligned f\", \"SequenceClips played in order\", \"Four store checks What a Commi\"",
+    "fix": "give each menu entry its own target (its section, its tab, its page), or show fewer entries",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "label-centre",
+    "where": "header.nav.nav--centre > div.wrap.nav__bar > div.nav__actions > a.btn.btn--primary \"Run the workbench\"",
+    "msg": "its label sits 18px off-centre (25px of room at the left, 43px at the right) (and 1 more like it: \"Run the workbench\")",
+    "fix": "centre the label in its button, or fill the empty side with an icon",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "copy-length",
+    "where": "section#questions \"Questions\"",
+    "msg": "1 section over 90 words a screen outside the UI mocks (\"Questions\" 123); 57 words a screen across the page (510 words in 9 screens): a tech page says it in about 80 or fewer",
+    "fix": "cut every section to its heading, one line and the product UI: the UI says the rest; no second paragraph, no list of feature sentences",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "nav-current",
+    "where": "header.nav.nav--centre",
+    "msg": "the nav stays on screen with 4 links to the page's sections, but never marks the one you are in (no link changes as the page scrolls)",
+    "fix": "mark the link of the section on screen (a colour, a weight or a line under it) as the visitor scrolls",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "button-contrast",
+    "where": "div.hero-text > div.hero__c > div.btn-row > a.btn.btn--secondary \"See the pipeline\"",
+    "msg": "the button \"See the pipeline\" (#232927) stands only 1.17:1 off the ground around it: it reads as part of the ground, or as switched off",
+    "fix": "give the button a fill that stands at least 1.5:1 off what is around it, or an outline in the ink",
+    "widths": [
+     1440,
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "effect-kind",
+    "where": "(the page)",
+    "msg": "the page creates 9 WebGL contexts in all (released ones count too): the browser's limit is about 16",
+    "fix": "reuse one context per effect instead of making a new one each time it mounts",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "action-repeat",
+    "where": "header.nav.nav--centre > div.wrap.nav__bar > div.nav__actions > a.btn.btn--primary \"run the workbench\"",
+    "msg": "\"run the workbench\" shows 2 times on the first screen at 1440px (nav, hero): the nav's button and the hero's; nothing else on the screen may repeat it",
+    "fix": "show the action once a screen besides the nav's button: the hero's, the close's or the phone bar's, never all at once",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "section-air",
+    "where": "section#workbench / section#pipeline",
+    "msg": "505px of air between the content of these two sections: 128-480px (64-600px WARN) (SR-3)",
+    "fix": "keep 128-480px of air between the content of neighbouring sections (112-420px on a phone): the sections' padding (--padt, --padb)",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "section-air",
+    "where": "section#pipeline \"One Recording becomes a Clip in four sto\"",
+    "msg": "screen group 1 of this two-screen section fills 38.6% of a screen: 40% or more (25% WARN) (SR-3)",
+    "fix": "fill the section to 55%: more content, a picture or a background layer, or merge it into the section above as its last block",
+    "widths": [
+     1440
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "cut-text",
+    "where": "div.ui-term__screen > div.ui-term__track > div.ui-term__ln.ui-term__cmd:nth-of-type(1) > span.ui-term__typed \"gh repo clone manic1841/sprite-forge\"",
+    "msg": "shortened with an ellipsis (and 3 more like it: \"Cloning into 'sprite-for\", \"Local: http://localhost:\", \"recordings\")",
+    "fix": "give the text room: no overflow clipping a line, no line past its box",
+    "widths": [
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "cta",
+    "where": "section#run \"Run the workbench in three steps\"",
+    "msg": "a section over 1.5 screens long with no link or button in it",
+    "fix": "add the action: a button in the hero, one on every priced item, one in the closing section",
+    "widths": [
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "text-contrast",
+    "where": "ul.ui-toggles__list > li.ui-tg:nth-of-type(4) > span.ui-tg__text > span.ui-tg__label \"Snap delays to 10 ms\"",
+    "msg": "8 lines of text in drawn mocks read under 4.5:1 (3 colour pairs), the worst \"Snap delays to 10 ms\" in #e3e2da on #cdd6c6 at 1.15:1",
+    "fix": "lift the mocks' muted text (labels, meta, initials) to 4.5:1 on their own panel, or set it larger",
+    "widths": [
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "section-gaps",
+    "where": "main#top > section.hero.hero--centred / section#workbench",
+    "msg": "111px between these sections, -30% against the median 159px",
+    "fix": "use one gap between sections (all within 25% of each other)",
+    "widths": [
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "section-gaps",
+    "where": "section#controls / section#run",
+    "msg": "210px between these sections, +32% against the median 159px",
+    "fix": "use one gap between sections (all within 25% of each other)",
+    "widths": [
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "photo-set",
+    "where": "div.grid > div.step.s1 > div.panel.p-a > img \"frame-0-l.png\"",
+    "msg": "4 photographs in more than one look: lightness from 0.30 to 0.77; the odd one out is frame-0-l.png",
+    "fix": "grade the photographs to one look (light, colour, warmth), or replace the odd one out",
+    "widths": [
+     390
+    ],
+    "from": "consistency"
+   },
+   {
+    "check": "empty-area",
+    "where": "footer#contact \"Run the workbench on a store\"",
+    "msg": "44% of the section is empty: 656px of empty rows between its content, in its 1491px of rows (WARN over 35%, FAIL over 50%)",
+    "fix": "fill the section: a picture or a second column beside the words, or more of its own content; the section stays one or two screens tall (T-height)",
+    "widths": [
+     390
+    ],
+    "from": "consistency"
+   }
+  ],
+  "crashed": [],
+  "seconds": {
+   "consistency": 148,
+   "layout": 4
+  }
+ },
+ "open": [
+  {
+   "check": "one-section",
+   "where": "section#workbench > div.wrap > div.wb-shell.ui \"The workbench mounts here. It reads the \"",
+   "msg": "a band: a box 89% of the section wide on a ground of its own that holds only text: the section's own ground is the band (SR-4)",
+   "fix": "put every block of <main> in a <section>, and give a band its own section instead of a ground inside one",
+   "widths": [
+    1440
+   ],
+   "from": "consistency",
+   "ids": [
+    "one-section"
+   ],
+   "wheres": [
+    "section#workbench > div.wrap > div.wb-shell.ui \"The workbench mounts here. It reads the \""
+   ]
+  },
+  {
+   "check": "contrast",
+   "where": "div.span-2.footer__col:nth-of-type(2) > ul > li:nth-of-type(1) > a \"Pipeline\"",
+   "msg": "body text over a effect reads at 1.4:1 at its worst tenth (needs 4.5:1), on a busy ground (and 1 more like it: \"Clip\")",
+   "fix": "put the text on a calm part of the picture, or on a solid panel",
+   "widths": [
+    390
+   ],
+   "from": "consistency",
+   "ids": [
+    "contrast"
+   ],
+   "wheres": [
+    "div.span-2.footer__col:nth-of-type(2) > ul > li:nth-of-type(1) > a \"Pipeline\""
+   ]
+  },
+  {
+   "check": "sparse",
+   "where": "#workbench section.section \"Cut a Recording in the workbench\"",
+   "msg": "its content fills 47% of its screen; merge it or give it its visual (0.55 is the aim)",
+   "fix": "fill the section or make it a screen shorter",
+   "widths": [
+    1440
+   ],
+   "from": "layout",
+   "ids": [
+    "sparse"
+   ],
+   "wheres": [
+    "#workbench section.section \"Cut a Recording in the workbench\""
+   ]
+  },
+  {
+   "check": "screen-height",
+   "where": "#workbench section.section \"Cut a Recording in the workbench\"",
+   "msg": "983px, 1.16 screens; a section is exactly one or two (--h), or on a phone at least one that its content fills",
+   "fix": "make the section exactly one or two screens (--h: 1 or 2)",
+   "widths": [
+    390
+   ],
+   "from": "layout",
+   "ids": [
+    "screen-height"
+   ],
+   "wheres": [
+    "#workbench section.section \"Cut a Recording in the workbench\""
+   ]
+  }
+ ],
+ "waived": [],
+ "warnCount": 30,
+ "at": "2026-11-10T01:13:19.346Z",
+ "openTold": true,
+ "doneReason": "不繼續跑，我已經說不跑手機畫面了，收尾寫報告"
+}

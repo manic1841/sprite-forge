@@ -1,0 +1,200 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* --------------------------------------------------------------- narrow */
+
+@media (max-width: 1279px) {
+  .wb-shell .rail {
+    width: 200px;
+  }
+
+  .wb-shell .inspector {
+    width: 250px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .wb-shell .rail {
+    width: 168px;
+  }
+
+  .wb-shell .inspector {
+    width: 214px;
+  }
+
+  .wb-shell .draft-frame,
+  .wb-shell .recording-frame {
+    /* the frame is sized by the stage height now, so a narrow window only caps it */
+    max-width: 100%;
+  }
+}
+
+/* under 860px the shell stacks: the stage first, then the two rails as fixed
+   strips, because three columns cannot share a phone */
+@media (max-width: 859px) {
+  .wb-shell {
+    flex: none;
+  }
+
+  .wb-shell .workbench {
+    flex-direction: column;
+  }
+
+  .wb-shell .shell-body {
+    flex-direction: column;
+  }
+
+  .wb-shell .rail,
+  .wb-shell .inspector {
+    /* a strip's own height on a phone: the page scrolls, so no row is sliced */
+    flex: none;
+    width: auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    border-top: 1px solid var(--u-line-2);
+    /* the shell is full bleed, so the page line is the strip's own pad here */
+    padding-inline: 16px;
+  }
+
+  /* a strip this short cannot scroll a panel's two zones apart: the panel
+     shows whole instead, so a fact row is never sliced by the boundary */
+  .wb-shell .inspector {
+    display: block;
+  }
+
+  /* on the stacked strip the row box sits on the panel's own 16px line (the
+     desktop negative margin would put its edge 9px outside it and off the
+     section's grid), so it needs no lead-in pad either: the name keeps that
+     line and the border rides with it */
+  .wb-shell .rail .asset {
+    width: 100%;
+    margin-inline: 0;
+    padding-inline: 0 9px;
+  }
+
+  .wb-shell .inspector-actions {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .wb-shell .inspector-info {
+    overflow: visible;
+    padding-bottom: 14px;
+  }
+
+  /* the strip's own 16px is the page line here, so the zones add none: their
+     headings and rows start where the rail's do */
+  .wb-shell :is(.inspector-actions, .inspector-info) {
+    padding-inline: 0;
+  }
+
+  .wb-shell .centre {
+    order: -1;
+    flex: none;
+    min-height: 0;
+  }
+
+  .wb-shell .stage {
+    /* the shell is full bleed, so the stage carries the page line itself */
+    padding: 16px;
+    /* a stacked strip is too short to fit picture plus panels: it scrolls */
+    overflow: auto;
+    /* the picture is the point of the screen: keep it the section's main shape
+       even once the panels are stacked below it */
+    min-height: 44svh;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* the transport docked under the stage bleeds through the stage's own pad to
+     meet the window edges, the way the filmstrip does */
+  .wb-shell .draft-transport {
+    margin: 0 -16px -16px;
+    padding: 9px 16px 0;
+  }
+
+  .wb-shell .draft-frame,
+  .wb-shell .recording-frame {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 639px) {
+  /* a thumb, not a pointer: the rail's two add buttons keep 44px of height so
+     they are not twin targets 18px apart */
+  .wb-shell .rail-add {
+    min-width: 24px;
+    min-height: 44px;
+  }
+
+  /* the transport head is one mono line on a desktop; on a phone the title and
+     its controls take a row each rather than share one */
+  .wb-shell .transport-head {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .wb-shell .transport-actions {
+    margin-left: 0;
+  }
+
+  .wb-shell .pill {
+    display: none;
+  }
+
+  .wb-shell .faces {
+    overflow: hidden;
+  }
+
+  /* the centre runs to the window edge now, so its bars carry the page's 16px
+     line themselves; stacked, what is open sits over its faces on that one edge
+     instead of the faces drifting right */
+  .wb-shell :is(.context-bar, .target-bar) {
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 8px 16px;
+  }
+
+  /* same for the transport docked under the stage */
+  .wb-shell .filmstrip {
+    padding: 9px 16px 12px;
+  }
+
+  /* a thumb, not a cursor: the dock's chips and the frame cells need a real
+     target, so the strip scrolls rather than packing frames to a hairline */
+  .wb-shell :is(.dock-btn, .transport-actions .btn) {
+    height: 32px;
+  }
+
+  .wb-shell .film {
+    height: 32px;
+  }
+
+  .wb-shell .cell {
+    min-width: 24px;
+  }
+
+  .wb-shell :is(.context-bar, .target-bar) .faces {
+    margin-left: 0;
+  }
+
+  .wb-shell :is(.context-bar, .target-bar) .ttl.sub {
+    margin: 0;
+  }
+
+  /* With the breadcrumb gone the targets bar has nothing left to say, so it
+     folds away rather than leaving an empty rule above the stage. */
+  .wb-shell .target-bar:not(:has(.btn)) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .wb-shell .btn,
+  .wb-shell .asset {
+    transition: none;
+  }
+}

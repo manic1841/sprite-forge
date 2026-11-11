@@ -1,0 +1,124 @@
+consistency  http://127.0.0.1:8123/index.html
+
+1440x900  12 screens  0 FAIL  22 WARN
+  WARN cut-text        div.ui-term__screen > div.ui-term__track > div.ui-term__ln.ui-term__log:nth-of-type(3) > span.ui-term__path  "Cloning into 'sprite-forge'..."
+       shortened with an ellipsis (and 2 more like it: "Local: http://localhost:", "recordings")  [1440-11-cut-text.jpg]
+       fix: give the text room: no overflow clipping a line, no line past its box
+  WARN scroll-linked   section#reproduce > div.wrap > p.mo-wh__text > span.mo-w:nth-of-type(1)  "Every"
+       its colour changes with the scroll and changes back when the scroll goes back (colour), with 1 part inside it, eased after the scroll stops; 27 more parts of this section change with the scroll too (span.mo-w:nth-of-type(2), span.mo-w:nth-of-type(3), span.mo-w:nth-of-type(4), span.mo-w:nth-of-type(5), ...) (inside a dealt moment's section, [data-moment]: expected on every kind, two moments at most, house rule; its still is judged under reduced motion)  [1440-12-scroll-linked.jpg]
+       fix: remove the scroll-driven motion; motion lives inside a visual as a small loop
+  WARN scroll-reveal   section#reproduce > div.wrap > p.mo-wh__text  "Every Clip carries its Recording hash, i"
+       starts "color" (0.2 s) the moment it is scrolled into view (an IntersectionObserver) on span.mo-w:nth-of-type(1) (inside a dealt moment's section, [data-moment]: an enter moment is expected on every kind; its still is judged under reduced motion)  [1440-13-scroll-reveal.jpg]
+       fix: show it at rest: no fade, rise or unmask when it is scrolled into view
+  WARN card-layout     section#pipeline > div.wrap > div.group:nth-of-type(2) > div.grid  "Ingest the recording into the store The "
+       4 cards with 1 placement of their UI (vary them: rise, corner, a low stack, right)  [1440-09-card-layout.jpg]
+       fix: vary the cards of a group: at least three placements, and the ground in its own light on each
+  WARN same-action     div.grid > div.span-5.stack-4 > p:nth-of-type(2) > a.link  "Run the workbench"
+       "Run the workbench" is a button in one place and a text link in another: one action in two looks  [1440-14-same-action.jpg]
+       fix: show one action one way: the same button wherever it repeats, or a text link everywhere
+  WARN copy-buttons    header.nav.nav--centre > div.wrap.nav__bar > div.nav__actions > a.btn.btn--primary  "Run the workbench"
+       "Run the workbench" does not start with a verb (book, buy, try, start, get, see...)  [1440-01-copy-buttons.jpg]
+       fix: label buttons with a verb and what the visitor gets ("Book a room", "Start free trial")
+  WARN text-contrast   div.ui-win__main > ul.ui-win__rows > li.ui-win__row:nth-of-type(5) > span.ui-avatar  "WK"
+       6 lines of text in drawn mocks read under 4.5:1 (5 colour pairs), the worst "WK" in #aa7875 on #524340 at 2.53:1  [1440-06-text-contrast.jpg]
+       fix: lift the mocks' muted text (labels, meta, initials) to 4.5:1 on their own panel, or set it larger
+  WARN section-gaps    section#questions / footer#contact
+       uneven space at the edge of a band: 72px outside its edge, 117px inside it (the space on either side of a change of ground reads as one gap only when the two match)  [1440-16-section-gaps.jpg]
+       fix: use one gap between sections (all within 25% of each other)
+  WARN links           div.span-2.footer__col:nth-of-type(5) > ul > li:nth-of-type(2) > a  "Contact"
+       "Contact" goes to #contact, the block it already sits in  [1440-17-links.jpg]
+       fix: point every link at a real section, page or file
+  WARN photo-set       div.grid > div.step.s4 > div.panel.p-b > img  "frame-3-l.png"
+       4 photographs in more than one look: lightness from 0.27 to 0.80; the odd one out is frame-3-l.png  [1440-10-photo-set.jpg]
+       fix: grade the photographs to one look (light, colour, warmth), or replace the odd one out
+  WARN nav-labels      header.nav.nav--centre > div.wrap.nav__bar > a.nav__logo  "sprite-forge"
+       "sprite-forge" opens a section headed "Pixel-animation tool for game teams"  [1440-02-nav-labels.jpg]
+       fix: name each nav link after the heading of the section it opens
+  WARN nav-labels      div.wrap.nav__bar > nav.nav__links > div.nav__item:nth-of-type(1) > a.nav__link  "Pipeline"
+       "Pipeline" opens a section headed "One Recording becomes a Clip in four store steps."  [1440-03-nav-labels.jpg]
+       fix: name each nav link after the heading of the section it opens
+  WARN nav-labels      div.nav__menu > div.wrap.grid > div.menu-col.span-3:nth-of-type(1) > a:nth-of-type(2)  "SegmentA frame range on the cut list"
+       "SegmentA frame range on the cut list" opens a section headed "One Recording becomes a Clip in four store steps."
+       fix: name each nav link after the heading of the section it opens
+  WARN nav-labels      div.nav__menu > div.wrap.grid > div.menu-col.span-3:nth-of-type(2) > a:nth-of-type(2)  "SequenceClips played in order"
+       "SequenceClips played in order" opens a section headed "Four store controls stand between a frame and a sh"
+       fix: name each nav link after the heading of the section it opens
+  WARN nav-labels      div.nav__menu > div.wrap.grid > div.menu-col.span-3:nth-of-type(2) > a:nth-of-type(1)  "ClipDe-backgrounded, aligned f"
+       3 entries of one menu go to the same place (#controls): "ClipDe-backgrounded, aligned f", "SequenceClips played in order", "Four store checks What a Commi"
+       fix: give each menu entry its own target (its section, its tab, its page), or show fewer entries
+  WARN label-centre    header.nav.nav--centre > div.wrap.nav__bar > div.nav__actions > a.btn.btn--primary  "Run the workbench"
+       its label sits 18px off-centre (25px of room at the left, 43px at the right) (and 1 more like it: "Run the workbench")  [1440-04-label-centre.jpg]
+       fix: centre the label in its button, or fill the empty side with an icon
+  WARN copy-length     section#questions  "Questions"
+       1 section over 90 words a screen outside the UI mocks ("Questions" 123); 58 words a screen across the page (518 words in 9 screens): a tech page says it in about 80 or fewer  [1440-15-copy-length.jpg]
+       fix: cut every section to its heading, one line and the product UI: the UI says the rest; no second paragraph, no list of feature sentences
+  WARN nav-current     header.nav.nav--centre
+       the nav stays on screen with 4 links to the page's sections, but never marks the one you are in (no link changes as the page scrolls)  [1440-07-nav-current.jpg]
+       fix: mark the link of the section on screen (a colour, a weight or a line under it) as the visitor scrolls
+  WARN button-contrast div.hero-text > div.hero__c > div.btn-row > a.btn.btn--secondary  "See the pipeline"
+       the button "See the pipeline" (#232927) stands only 1.17:1 off the ground around it: it reads as part of the ground, or as switched off  [1440-05-button-contrast.jpg]
+       fix: give the button a fill that stands at least 1.5:1 off what is around it, or an outline in the ink
+  WARN effect-kind     (the page)
+       the page creates 9 WebGL contexts in all (released ones count too): the browser's limit is about 16
+       fix: reuse one context per effect instead of making a new one each time it mounts
+  WARN loop-cycle      div.wrap > div.ui.app > div.app__pane.app__pane--list > div.ui.ui-panel
+       a fragment loop of 0.8 s: under the 2.5-4 s cycle, it reads as blinking  [1440-08-loop-cycle.jpg]
+       fix: set the loop's cycle to 2.5-4 s (--m-cycle) with every keyframe on it, repeating
+  WARN action-repeat   header.nav.nav--centre > div.wrap.nav__bar > div.nav__actions > a.btn.btn--primary  "run the workbench"
+       "run the workbench" shows 2 times on the first screen at 1440px (nav, hero): the nav's button and the hero's; nothing else on the screen may repeat it  [1440-18-action-repeat.jpg]
+       fix: show the action once a screen besides the nav's button: the hero's, the close's or the phone bar's, never all at once
+
+first screen at 1280, 1152, 1024, 896, 768  0 FAIL  0 WARN
+
+checks
+  PASS assets                 PASS shader-lint            PASS gl-fallback            
+  PASS empty-visual           PASS hero-fill              PASS flush                  
+  PASS placeholder            PASS sample-label           PASS caption                
+  PASS credit-wall            PASS nav                    PASS nav-covers             
+  PASS spill                  SKIP off-viewport           PASS fold-card              
+  PASS hover-spill            PASS overlap-text           SKIP collide                
+  SKIP tap-size               PASS row-gap                WARN cut-text               
+  PASS fold-cut               PASS marquee                WARN scroll-linked          
+  WARN scroll-reveal          PASS pinned                 PASS loop-pause             
+  PASS reduced-motion         PASS hidden-content         PASS webgl                  
+  PASS no-visual              PASS text-only              PASS card-visual            
+  PASS hidden-visual          PASS card-family            WARN card-layout            
+  PASS nesting                PASS effect-repeat          PASS ui-fit                 
+  PASS ui-centre              PASS dark-ground            PASS button-styles          
+  PASS button-shape           WARN same-action            PASS button-picture         
+  PASS cta                    PASS pricing-tiers          PASS copy-headline          
+  PASS copy-fact              PASS copy-headings          WARN copy-buttons           
+  PASS copy-actions           PASS heading-scale          PASS stagger                
+  PASS top-stagger            PASS off-grid               PASS col-edge               
+  PASS right-edge             PASS centre-axis            PASS tilt                   
+  PASS contrast               WARN text-contrast          PASS body-size              
+  PASS busy-ground            WARN section-gaps           PASS proximity              
+  PASS hole                   WARN links                  PASS forms                  
+  PASS photo-upscale          WARN photo-set              PASS photo-credit           
+  PASS nav-family             WARN nav-labels             PASS link-styles            
+  PASS heading-align          WARN label-centre           PASS fake-button            
+  PASS stranded-action        PASS orphan                 PASS unit-break             
+  PASS tab-wrap               PASS effects-fit            PASS fade-cut               
+  PASS photo-weight           WARN copy-length            WARN nav-current            
+  PASS progress-bar           PASS photo-repeat           WARN button-contrast        
+  PASS photo-print            PASS grounds                PASS split-align            
+  PASS fact-agree             PASS fold-action            PASS action-count           
+  PASS one-screen             PASS hover                  PASS hover-move             
+  PASS product-shown          PASS same-object            PASS font-load              
+  PASS visual-caption         PASS visual-empty           WARN effect-kind            
+  PASS hero-enter             PASS moment-none            PASS street-number          
+  PASS postcode               PASS coordinates            PASS company-number         
+  PASS phone-number           PASS hero-screen            PASS section-height         
+  PASS section-air            PASS one-section            PASS one-heading            
+  PASS container-edges        PASS row-lines              PASS split-pair             
+  PASS motion-layer           PASS count-text             WARN loop-cycle             
+  PASS section-tile           PASS empty-area             PASS a11y-name              
+  PASS img-alt                PASS field-label            PASS heading-order          
+  PASS tabindex               PASS focus-ring             PASS focus-visible          
+  PASS focus-hidden           PASS skip-link              PASS menu-toggle            
+  PASS lang                   PASS page-meta              PASS share-meta             
+  WARN action-repeat          PASS map-link               PASS open-now               
+  PASS assumed                PASS run-on                 PASS form-fields            
+  PASS form-send              
+
+total  0 FAIL  22 WARN  (crops and report.json in /tmp/taste-skill-consistency/127.0.0.1-8123-index.html)

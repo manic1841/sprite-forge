@@ -1,0 +1,411 @@
+/**
+ * The workbench's mutable state, in one place.
+ *
+ * The shape is deliberately flat and dumpable: a view module reads only the
+ * slice it draws, and the shell decides when to re-render. Nothing here talks to
+ * the network — see `./context.ts` for that.
+ */
+
+import type {
+  AlignmentState,
+  AlignmentWarning,
+  CharacterAlignment,
+  ClipDraft,
+  CommittedAsset,
+  CommittedSequence,
+  CutList,
+  ExportResult,
+  RepairState,
+  ReproducibilityReport,
+  SequenceDraft,
+  StoreCheckReport,
+  StoreScan,
+} from '../types.js';
+
+/**
+ * The faces of the stage: which *view of the active thing* is on screen.
+ *
+ * A face belongs to what is open, not to a fixed toolbar — Cutting only means
+ * something for a Recording, and Alignment only for something with a Canvas — so
+ * the mode bar offers just the faces the current target has.
+ *
+ * `view` and `clip` are deliberately separate: a committed Asset is a snapshot
+ * and gets a read-only View, while `clip` is the editable Draft editor. Sharing
+ * one face for both made the same controls mean two different things.
+ */
+export const WORKBENCH_MODES = ['cut', 'clip', 'align', 'view', 'compose', 'export'] as const;
+export type WorkbenchMode = (typeof WORKBENCH_MODES)[number];
+
+/**
+ * The Repair tool the pointer currently carries.
+ *
+ * Distinct from the core `RepairTool`, which names the *operation* a gesture
+ * becomes (`paint-brush`, `erase-rect`, …). This is what the user picked.
+ */
+export type UiTool = 'paint' | 'erase' | 'rect' | 'eyedropper';
+
+/**
+ * What the workbench currently has open.
+ *
+ * The target decides which faces exist and which one opens: it is the single
+ * subject of the whole workspace, so nothing else has to be inferred from a mode.
+ */
+export type Target =
+  | { kind: 'none' }
+  | { kind: 'recording'; recordingId: string }
+  | { kind: 'draft'; characterId: string; draftId: string }
+  | { kind: 'asset'; characterId: string; assetKind: 'clip' | 'sequence'; assetId: string }
+  | { kind: 'character'; characterId: string }
+  | { kind: 'export'; target: string };
+
+/** A Sequence being composed: see the core `SequenceDraft` recipe. */
+export type { SequenceDraft };
+
+/** The Export form's uncommitted input, kept across re-renders. */
+export interface ExportForm {
+  target: string;
+  animations: string[];
+  situations: string;
+  flipsFacing: string[];
+  authoredFacing: 'right' | 'left';
+  bindings: string;
+}
+
+/**
+ * The shell's own slice: what is open, which face is up, and the last scan.
+ *
+ * Written by the shell alone. Views read it; only a load or a face switch moves
+ * it.
+ */
+export interface ShellState {
+  mode: WorkbenchMode;
+  target: Target;
+  scan: StoreScan | null;
+  /** The message of the last failed load, shown until a load succeeds again. */
+  loadError: string | null;
+  /** The message of the last failed **action** (expand, offset, repair, ...). */
+  actionError: string | null;
+  /** The Import form's uncommitted input. */
+  pendingFile: File | null;
+  pendingImportId: string;
+  importIdTouched: boolean;
+  importNotice: string | null;
+  /**
+   * Which Recording's Segments the rail has open, if any.
+   *
+   * Opening a Recording in the stage does not unfold its branch: the rail only
+   * expands what was asked for on the rail, so a page arrives with the cut list
+   * folded away and a focused Recording does not quietly take a third of the rail.
+   */
+  railOpenRecording: string | null;
+  /**
+   * Which of the rail's create forms is open, if any.
+   *
+   * The rail lists what exists; the two forms that *add* to it only open when
+   * asked for, so the scan path is never interrupted by empty inputs.
+   */
+  railForm: 'none' | 'import' | 'character';
+  /** The last store validation report. */
+  validation: StoreCheckReport | null;
+}
+
+/**
+ * The Cutting slice: one loaded Recording, its playhead, its mark and its cut.
+ *
+ * Written by the cut session (`./cutSession.ts`) alone, so the range invariants
+ * have exactly one owner.
+ */
+export interface CutState {
+  /** The loaded Recording and its cut list (also feeds the filmstrip). */
+  recordingId: string | null;
+  cutList: CutList | null;
+  frame: number;
+  /**
+   * The open Recording's per-frame delays, in ms.
+   *
+   * Read from the source rather than stored, so playback honours the capture's
+   * own timing instead of an invented frame rate. Empty until it has loaded.
+   */
+  recordingDelaysMs: number[];
+  /** Whether the filmstrip is currently playing the Recording back. */
+  playing: boolean;
+  /**
+   * How far the strip's time axis is zoomed in, as a multiple of one frame cell.
+   *
+   * `1` fits the whole Recording; anything above it scrolls. Held on state, not in
+   * the DOM, so a re-render (a scrub, a cut, a save) keeps the magnification the
+   * reader chose. Ctrl + wheel over the strip is the only control.
+   */
+  trackZoom: number;
+  /**
+   * A frame range picked on the filmstrip, before it is written as a Segment.
+   *
+   * The strip is where a cut is *made*: dragging marks the range, Play confirms
+   * it, and only then is it saved. Half-open, like the stored Segment it becomes.
+   */
+  selection: { startFrame: number; endFrame: number } | null;
+  /**
+   * The Segment the inspector is editing, if one is selected.
+   *
+   * Segments are edited in the inspector against a selection made on the
+   * filmstrip, so the stage stays pixels only and no list of buttons is repeated
+   * for every cut.
+   */
+  selectedCut: string | null;
+  /**
+   * The Character a cut Segment is extracted *into*.
+   *
+   * Kept on state, not read off the select on every click, so it survives a
+   * re-render and so a Recording can be worked against one Character throughout.
+   */
+  extractCharacterId: string | null;
+}
+
+/**
+ * The Draft-editing slice: frames, zoom, brush settings and the Repair log.
+ *
+ * Written by the draft editor (`./draftEditor.ts`) alone.
+ */
+export interface DraftState {
+  /** The loaded Draft. */
+  draftDescriptor: ClipDraft | null;
+  draftFrame: number;
+  /**
+   * Screen pixels per image pixel on the Clip-editor frame; `null` fits the stage.
+   *
+   * Repair works in image pixels, so the view must be able to show them: at 1× one
+   * image pixel is one screen pixel, and above that the grid is visible and a brush
+   * of any size lands where its footprint says. Whole numbers only, or the footprint
+   * would straddle the pixels it claims to cover.
+   */
+  draftZoom: number | null;
+  repair: RepairState | null;
+  repairRevision: number;
+  tool: UiTool;
+  brushColor: string;
+  brushSize: number;
+  scope: 'frame' | 'clip';
+}
+
+/**
+ * The Alignment slice: the open Character, its Canvas and its placements.
+ *
+ * Written by the alignment inspector and both alignment faces alone.
+ */
+export interface AlignState {
+  /** The Character the Alignment face is showing. */
+  activeCharacterId: string | null;
+  alignment: CharacterAlignment | null;
+  alignmentWarnings: AlignmentWarning[];
+  /**
+   * Screen pixels per Canvas pixel on the Alignment board; `null` fits the stage.
+   *
+   * Held rather than recomputed每 render: refitting would blow a shrunken board
+   * back up to the stage, and a crop would then read as the pixels having been
+   * scaled instead. A window resize clears it to refit.
+   */
+  alignScale: number | null;
+  resizeWidth: number;
+  resizeHeight: number;
+}
+
+/**
+ * The committed-Asset slice: the open Asset, its playback and a Sequence being
+ * composed.
+ *
+ * Written by the asset inspector, the View stage and the Compose stage.
+ */
+export interface AssetState {
+  /** The loaded committed Asset (its meta and provenance), or `null`. */
+  asset: CommittedAsset | CommittedSequence | null;
+  /** The frame index shown while playing a baked sheet. */
+  assetFrame: number;
+  /** A Sequence being composed, if any. */
+  sequenceDraft: SequenceDraft | null;
+  /** The last reproducibility check for the open Asset. */
+  reproducible: ReproducibilityReport | null;
+}
+
+/**
+ * The Export slice: one loaded Manifest and the form that produces the next one.
+ *
+ * Written by the export stage and inspector alone.
+ */
+export interface ExportState {
+  /** The loaded Export. */
+  manifest: ExportResult | null;
+  /** The Export form's values, so a re-render never wipes half-typed input. */
+  exportForm: ExportForm;
+}
+
+/**
+ * Everything the workbench remembers between renders.
+ *
+ * Composed of named slices so each one has an owning writer; a view reads the
+ * slice it draws rather than being handed a bag it may write anywhere.
+ */
+export type WorkbenchState = ShellState &
+  CutState &
+  DraftState &
+  AlignState &
+  AssetState &
+  ExportState;
+
+
+/** A fresh state: nothing open, defaults on the tools. */
+export function createState(): WorkbenchState {
+  return {
+    mode: 'clip',
+    target: { kind: 'none' },
+    scan: null,
+    recordingId: null,
+    cutList: null,
+    frame: 0,
+    recordingDelaysMs: [],
+    playing: false,
+    trackZoom: 1,
+    selection: null,
+    selectedCut: null,
+    extractCharacterId: null,
+    draftDescriptor: null,
+    draftFrame: 0,
+    draftZoom: null,
+    repair: null,
+    repairRevision: 0,
+    tool: 'paint',
+    brushColor: '#ff0000',
+    brushSize: 1,
+    scope: 'frame',
+    activeCharacterId: null,
+    alignment: null,
+    alignmentWarnings: [],
+    alignScale: null,
+    resizeWidth: 0,
+    resizeHeight: 0,
+    manifest: null,
+    asset: null,
+    assetFrame: 0,
+    sequenceDraft: null,
+    exportForm: {
+      target: '',
+      animations: [],
+      situations: '',
+      flipsFacing: [],
+      authoredFacing: 'right',
+      bindings: '{ "idle": [] }',
+    },
+    validation: null,
+    reproducible: null,
+    loadError: null,
+    actionError: null,
+    pendingFile: null,
+    pendingImportId: '',
+    importIdTouched: false,
+    importNotice: null,
+    railOpenRecording: null,
+    railForm: 'none',
+  };
+}
+
+/** The active Draft as `{characterId, draftId}`, or `null`. */
+export function activeDraft(
+  state: WorkbenchState,
+): { characterId: string; draftId: string } | null {
+  return state.target.kind === 'draft'
+    ? { characterId: state.target.characterId, draftId: state.target.draftId }
+    : null;
+}
+
+/** The open committed Asset as `{characterId, assetKind, assetId}`, or `null`. */
+export function activeAsset(
+  state: WorkbenchState,
+): { characterId: string; assetKind: 'clip' | 'sequence'; assetId: string } | null {
+  return state.target.kind === 'asset'
+    ? {
+        characterId: state.target.characterId,
+        assetKind: state.target.assetKind,
+        assetId: state.target.assetId,
+      }
+    : null;
+}
+
+/**
+ * The faces the **shell header** offers: they belong to the Character, not to
+ * what is open, so they outlive every target. Composition and Export are about a
+ * whole Character; a Recording, a Draft and an Asset all come and go beneath them.
+ */
+export const GLOBAL_FACES = ['compose', 'export'] as const;
+export type GlobalFace = (typeof GLOBAL_FACES)[number];
+
+/**
+ * The faces each kind of target has, default face first.
+ *
+ * The bar shows exactly this list, so an irrelevant face is never offered: a
+ * Recording cannot be aligned, a Character has no pixels to repair, and an
+ * Export has nothing to cut. Order is by the work's own progression — cutting is
+ * where a Recording starts; a Draft is **placed first, then painted**, because a
+ * later Canvas change invalidates Repair geometry while an offset is cheap to
+ * nudge. A committed Asset opens on its read-only View and only shows Placement
+ * as a reference.
+ *
+ * `compose` and `export` are not here: they are {@link GLOBAL_FACES}, offered by
+ * the header whatever is open.
+ */
+const FACES: Record<Target['kind'], readonly WorkbenchMode[]> = {
+  none: ['clip'],
+  recording: ['cut'],
+  draft: ['align', 'clip'],
+  asset: ['view', 'align'],
+  character: ['align'],
+  export: ['export'],
+};
+
+/** The faces the current target offers, default first. */
+export function facesFor(target: Target): readonly WorkbenchMode[] {
+  return FACES[target.kind];
+}
+
+/** The face a target opens on. */
+export function defaultFace(target: Target): WorkbenchMode {
+  return FACES[target.kind][0]!;
+}
+
+/**
+ * The Character whose work is open, or `null`.
+ *
+ * Anything hanging off a Character — a Draft, an Asset, the Alignment face — makes
+ * that Character the one in play, which is what the rail expands and what the
+ * Alignment face falls back to. A Recording belongs to no Character, so it keeps
+ * pointing at whichever Character was last worked on.
+ */
+export function activeCharacter(state: WorkbenchState): string | null {
+  if (
+    state.target.kind === 'draft' ||
+    state.target.kind === 'asset' ||
+    state.target.kind === 'character'
+  ) {
+    return state.target.characterId;
+  }
+  return state.activeCharacterId;
+}
+
+/** The loaded Export target, or `null`. */
+export function activeExport(state: WorkbenchState): string | null {
+  return state.target.kind === 'export' ? state.target.target : null;
+}
+
+/**
+ * Derive a legal id from a filename: lowercase, non-alphanumerics collapsed to a
+ * single hyphen, never starting with a digit or hyphen.
+ */
+export function slugifyId(filename: string): string {
+  const stem = filename.replace(/\.[^.]*$/, '');
+  const slug = stem
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (slug.length === 0) {
+    return 'recording';
+  }
+  return /^[a-z]/.test(slug) ? slug : `rec-${slug}`;
+}

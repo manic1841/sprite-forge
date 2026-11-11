@@ -24,6 +24,8 @@ the shared `Canvas` / `Anchor`, and `Draft → commit → Asset` (edit by `fork`
 - TypeScript on Node with `sharp`.
 - Web UI is the primary working surface; a CLI re-runs from the on-disk store; the
   store is the single source of truth, and UI and CLI share one core.
+- The store root comes from `--store`, then `SPRITE_FORGE_STORE`, else defaults to
+  `store/` under the working directory (shown when resolved; see ADR-0011).
 - Sequences only (no layers); the tool bakes action chaining; the consumer holds no
   transition graph — it reads an Export `Manifest` and its `Bindings`.
 - Action segmentation is manual and frame-accurate.

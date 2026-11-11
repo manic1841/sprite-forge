@@ -5,7 +5,13 @@
   "description": "How a committed Clip was made, at characters/<character-id>/clips/<clip-id>/provenance.json. See docs/format-spec.md and docs/recordings.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["recordingId", "recordingHash", "segment", "background", "spriteForgeVersion"],
+  "required": [
+    "recordingId",
+    "recordingHash",
+    "segment",
+    "background",
+    "spriteForgeVersion"
+  ],
   "properties": {
     "recordingId": {
       "description": "The Recording this Clip was cut from; assigned at ingest.",
@@ -19,27 +25,69 @@
       "description": "A snapshot of the resolved cut at Clip time; later re-cutting does not change it.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["cutId", "startFrame", "endFrame", "speed"],
+      "required": [
+        "cutId",
+        "startFrame",
+        "endFrame",
+        "speed"
+      ],
       "properties": {
-        "cutId": { "$ref": "#/$defs/id" },
-        "startFrame": { "type": "integer", "minimum": 0 },
-        "endFrame": { "type": "integer", "minimum": 1 },
-        "speed": { "type": "number", "exclusiveMinimum": 0 }
+        "cutId": {
+          "$ref": "#/$defs/id"
+        },
+        "startFrame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endFrame": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "speed": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rect": {
+          "description": "The Segment's source rectangle, when it had one. Omitted for a whole-frame Segment.",
+          "$ref": "#/$defs/rect"
+        }
       }
     },
     "background": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["hex", "source", "tolerance"],
+      "required": [
+        "hex",
+        "source",
+        "tolerance"
+      ],
       "properties": {
-        "hex": { "$ref": "#/$defs/hexColor" },
-        "source": { "enum": ["sampled", "override"] },
-        "tolerance": { "type": "integer", "minimum": 0, "maximum": 255 }
+        "hex": {
+          "$ref": "#/$defs/hexColor"
+        },
+        "source": {
+          "enum": [
+            "sampled",
+            "override"
+          ]
+        },
+        "tolerance": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        }
       }
     },
     "repair": {
       "description": "Path to this Clip's Repair script, relative to the store root. Omit (or null) when there is no Repair.",
-      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/relPath" }]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/relPath"
+        }
+      ]
     },
     "placementOffset": {
       "description": "Manual placement on top of the automatic Anchor. Omitted when {0,0}.",
@@ -47,9 +95,18 @@
     },
     "derivedFrom": {
       "description": "The Asset this Clip was forked from; null when not a fork.",
-      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/assetRef" }]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/assetRef"
+        }
+      ]
     },
-    "spriteForgeVersion": { "type": "string" }
+    "spriteForgeVersion": {
+      "type": "string"
+    }
   },
   "$defs": {
     "id": {
@@ -67,19 +124,64 @@
     "offset": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["x", "y"],
+      "required": [
+        "x",
+        "y"
+      ],
       "properties": {
-        "x": { "type": "integer" },
-        "y": { "type": "integer" }
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        }
+      }
+    },
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "assetRef": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "id"],
+      "required": [
+        "kind",
+        "id"
+      ],
       "properties": {
-        "kind": { "enum": ["clip", "sequence"] },
-        "id": { "$ref": "#/$defs/id" }
+        "kind": {
+          "enum": [
+            "clip",
+            "sequence"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
       }
     }
   }
