@@ -21,6 +21,7 @@ import {
   ForgeError,
   forkAsset,
   ingestRecording,
+  migrateStore,
   readCutList,
   readDraftRepair,
   removeSegment,
@@ -68,6 +69,9 @@ Usage:
        --background <#rrggbb>  Explicit background override (default: corner-sampled)
        --tolerance <n>       Per-channel key tolerance (default: 24)
        --no-loop             Do not loop the Draft
+       --keep-timing         Keep the source's per-frame cadence (default: flatten to one rate)
+  forge migrate          --store <path> [--dry-run]
+                                                                     Rewrite artifacts to the current format (one-time, on a breaking change).
   forge commit           --store <path> --character <id> --draft <id> --name <asset-id> [--kind <clip>]
                                                                      Commit a Draft into an immutable Clip.
   forge commit           --store <path> --character <id> --name <sequence-id> --kind sequence --clips <a,b,c> [--fork-from <seq-id>]
@@ -127,6 +131,8 @@ export async function runCli(argv: string[]): Promise<number> {
   let background: string | undefined;
   let tolerance: string | undefined;
   let noLoop: boolean | undefined;
+  let keepTiming: boolean | undefined;
+  let dryRun: boolean | undefined;
   let name: string | undefined;
   let kind: string | undefined;
   let clips: string | undefined;
@@ -168,6 +174,8 @@ export async function runCli(argv: string[]): Promise<number> {
         background: { type: 'string' },
         tolerance: { type: 'string' },
         'no-loop': { type: 'boolean', default: false },
+        'keep-timing': { type: 'boolean', default: false },
+        'dry-run': { type: 'boolean', default: false },
         name: { type: 'string' },
         kind: { type: 'string' },
         clips: { type: 'string' },
@@ -207,6 +215,8 @@ export async function runCli(argv: string[]): Promise<number> {
     background = values.background;
     tolerance = values.tolerance;
     noLoop = values['no-loop'];
+    keepTiming = values['keep-timing'];
+    dryRun = values['dry-run'];
     name = values.name;
     kind = values.kind;
     clips = values.clips;
@@ -246,7 +256,10 @@ export async function runCli(argv: string[]): Promise<number> {
         background,
         tolerance,
         noLoop: noLoop === true,
+        keepTiming: keepTiming === true,
       });
+    case 'migrate':
+      return runMigrate(store, { dryRun: dryRun === true });
     case 'commit':
       return runCommit(store, { character, draft, name, kind, clips, forkFrom });
     case 'fork':
@@ -279,6 +292,23 @@ async function runScan(store: string): Promise<number> {
   try {
     const tree = await scan(store);
     process.stdout.write(`${JSON.stringify(tree, null, 2)}\n`);
+    return 0;
+  } catch (error) {
+    return failForgeError(error);
+  }
+}
+
+async function runMigrate(store: string, args: { dryRun: boolean }): Promise<number> {
+  try {
+    const report = await migrateStore(store, { dryRun: args.dryRun });
+    const prefix = args.dryRun ? 'would migrate' : 'migrated';
+    for (const entry of report.migrated) {
+      process.stdout.write(`${prefix} ${entry.artifact}: ${entry.change}\n`);
+    }
+    process.stdout.write(
+      `${report.migrated.length} artifact(s) ${args.dryRun ? 'to migrate' : 'migrated'}, ` +
+        `${report.skipped.length} already current\n`,
+    );
     return 0;
   } catch (error) {
     return failForgeError(error);
@@ -496,11 +526,12 @@ interface ExtractArgs {
   background?: string;
   tolerance?: string;
   noLoop: boolean;
+  keepTiming: boolean;
 }
 
 /** `forge extract` — turn a Segment into a Clip Draft. */
 async function runExtract(store: string, args: ExtractArgs): Promise<number> {
-  const { character, recording, cut, draft, background, tolerance, noLoop } = args;
+  const { character, recording, cut, draft, background, tolerance, noLoop, keepTiming } = args;
   if (!character) {
     return fail('--character <character-id> is required for extract');
   }
@@ -524,6 +555,7 @@ async function runExtract(store: string, args: ExtractArgs): Promise<number> {
       ...(background !== undefined ? { background } : {}),
       ...(toleranceValue !== undefined ? { tolerance: toleranceValue } : {}),
       loop: !noLoop,
+      keepTiming,
     });
     process.stdout.write(`${JSON.stringify(created, null, 2)}\n`);
     return 0;

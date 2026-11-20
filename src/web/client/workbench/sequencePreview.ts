@@ -19,6 +19,7 @@
 
 import type { WorkbenchApi } from '../api.js';
 import type { PreviewSlot, SequenceDraft, WorkbenchState } from './state.js';
+import { expandTiming } from '../../../core/timing.js';
 
 /** How far a small frame is blown up, in screen px per Canvas px. */
 const PREVIEW_SCALE_MAX = 12;
@@ -128,11 +129,10 @@ export function createSequencePreview(deps: PreviewDeps): SequencePreview {
           }
           const clip = await api.readClip(draft.characterId, clipId);
           const count = clip.meta.frameCount;
-          const delays = clip.meta.delaysMs;
           return {
             clipId,
             frameCount: count,
-            delaysMs: delays.length === 1 ? Array<number>(count).fill(delays[0]!) : [...delays],
+            delaysMs: expandTiming(clip.meta.timing, count),
             missing: false,
             draftId: null,
           };

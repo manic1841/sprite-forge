@@ -223,6 +223,15 @@
   margin: 8px 0 10px;
 }
 
+/* The frame rate readout sits beside the ms input it is derived from: same row,
+   same baseline, quieter than the field it answers. */
+.wb-shell .timing-fps {
+  align-self: flex-end;
+  padding-bottom: 6px;
+  color: var(--muted, #8a8a8a);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Which Clip of the composition is in hand. The chips sit under the note that
    explains the re-align, because picking the target comes before moving it. */
 .wb-shell .align-targets {

@@ -4,7 +4,7 @@
  *
  * The consumer reads one **Manifest** and nothing else (`docs/export-contract.md`).
  * The Manifest is **canvas-level** (ADR-0008): the shared `canvas` and `anchor`
- * appear once and each animation carries only `{sheet, frameCount, delaysMs, loop,
+ * appear once and each animation carries only `{sheet, frameCount, timing, loop,
  * flipsFacing?}` — no hitbox, no per-animation mirror flag. Direction is the
  * consumer's **Facing** (ADR-0009); a `flipsFacing` animation flips it on
  * completion.
@@ -18,6 +18,7 @@
  */
 
 import type { AssetMeta } from './assets.js';
+import { copyTiming, type AssetTiming } from './timing.js';
 import type { Canvas } from './character.js';
 import { StoreError } from './errors.js';
 import { assertValidId, isValidId } from './ids.js';
@@ -50,8 +51,11 @@ import { SPRITE_FORGE_VERSION } from './version.js';
  * The semver of the Export contract (Rule 9.1). This is the **only** versioned
  * artifact in the whole contract; a major bump is a breaking change for the
  * consumer.
+ *
+ * 2.0.0: `animations[].delaysMs` (an array) became `animations[].timing` (a base
+ * `frameMs` plus a sparse `overrideMs`), so a uniform rate is one number.
  */
-export const EXPORT_FORMAT_VERSION = '1.0.0';
+export const EXPORT_FORMAT_VERSION = '2.0.0';
 
 /** The direction art was drawn in; the consumer mirrors against it (ADR-0009). */
 export type Facing = 'right' | 'left';
@@ -65,8 +69,8 @@ export interface ManifestAnimation {
   sheet: string;
   /** Number of frames (each is `canvas.width × canvas.height`). */
   frameCount: number;
-  /** Per-frame duration in ms; one value means uniform. */
-  delaysMs: number[];
+  /** Frame timing: a base duration plus the frames that deviate (Rule 5.1). */
+  timing: AssetTiming;
   /** Whether this animation loops when shown. */
   loop: boolean;
   /** When true, the animation flips the consumer's Facing on completion. */
@@ -184,7 +188,7 @@ export async function buildExport(
     animations[id] = {
       sheet: `clips/${id}.png`,
       frameCount: asset.meta.frameCount,
-      delaysMs: [...asset.meta.delaysMs],
+      timing: copyTiming(asset.meta.timing),
       loop: asset.meta.loop,
       ...(flips.has(id) ? { flipsFacing: true } : {}),
     };

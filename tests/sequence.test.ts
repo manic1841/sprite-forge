@@ -76,7 +76,12 @@ async function seedClips(
   ] as const) {
     await ingestRecording(store.root, { recordingId, sourcePath: gif.path });
     await addSegment(store.root, { recordingId, id: cutId, startFrame: 0, endFrame: 2 });
-    await extractClipDraft(store.root, { characterId: CHARACTER_ID, recordingId, cutId });
+    await extractClipDraft(store.root, {
+      characterId: CHARACTER_ID,
+      recordingId,
+      cutId,
+      keepTiming: true,
+    });
     await commitDraft(store.root, {
       characterId: CHARACTER_ID,
       draftId: cutId,
@@ -198,7 +203,9 @@ describe('commitSequence', () => {
           ).toEqual({
             id: SEQUENCE_ID,
             frameCount: 4,
-            delaysMs: [50, 60, 30, 70],
+            // No delay repeats across the four frames, so the mode is the smallest
+            // one (30) and every other frame is an override (Rule 7.2).
+            timing: { frameMs: 30, overrideMs: { 0: 50, 1: 60, 3: 70 } },
             loop: true,
           });
         });
@@ -215,7 +222,7 @@ describe('commitSequence', () => {
           store.writeJson(`characters/${CHARACTER_ID}/clips/${RED_CLIP}/meta.json`, {
             id: RED_CLIP,
             frameCount: 2,
-            delaysMs: [50],
+            timing: { frameMs: 50 },
             loop: true,
           });
           await commitSequence(store.root, {
@@ -226,9 +233,9 @@ describe('commitSequence', () => {
 
           expect(
             (store.readJson(`characters/${CHARACTER_ID}/sequences/${SEQUENCE_ID}/meta.json`) as {
-              delaysMs: number[];
-            }).delaysMs,
-          ).toEqual([50, 50, 30, 70]);
+              timing: { frameMs: number; overrideMs?: Record<string, number> };
+            }).timing,
+          ).toEqual({ frameMs: 50, overrideMs: { 2: 30, 3: 70 } });
         });
       });
     });
@@ -247,7 +254,7 @@ describe('commitSequence', () => {
 
           expect(
             store.readJson(`characters/${CHARACTER_ID}/sequences/${SEQUENCE_ID}/meta.json`),
-          ).toEqual({ id: SEQUENCE_ID, frameCount: 4, delaysMs: [50], loop: true });
+          ).toEqual({ id: SEQUENCE_ID, frameCount: 4, timing: { frameMs: 50 }, loop: true });
         });
       });
     });

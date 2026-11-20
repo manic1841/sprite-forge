@@ -128,6 +128,12 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     readDraftAlignment: async () => EMPTY_ALIGNMENT,
     setPlacementOffset: async () => DRAFT,
     setFlipX: async () => DRAFT,
+    setDraftFrameMs: async (_characterId, _draftId, frameMs) => ({
+      ...DRAFT,
+      delaysMs: [frameMs, frameMs, frameMs],
+      uniformDelayMs: frameMs,
+    }),
+    restoreDraftTiming: async () => DRAFT,
     resizeCanvas: async () => ({
       canvas: ALIGNMENT.canvas,
       rebakedClips: [],
@@ -199,13 +205,13 @@ const EXPORT_RESULT: ExportResult = {
   manifestPath: 'exports/pixel-pet/manifest.json',
   sheetPaths: ['exports/pixel-pet/clips/walk.png'],
   manifest: {
-    formatVersion: '1.0.0',
+    formatVersion: '2.0.0',
     target: 'pixel-pet',
     character: 'hero',
     authoredFacing: 'right',
     canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
     animations: {
-      walk: { sheet: 'clips/walk.png', frameCount: 3, delaysMs: [50], loop: true },
+      walk: { sheet: 'clips/walk.png', frameCount: 3, timing: { frameMs: 50 }, loop: true },
     },
     bindings: { idle: ['walk'] },
     lock: { spriteForgeVersion: '0.1.0', exportedAt: '2026-10-08T00:00:00.000Z' },
@@ -219,7 +225,7 @@ const CLIP: CommittedAsset = {
   kind: 'clip',
   id: 'walk',
   dir: 'characters/hero/clips/walk',
-  meta: { id: 'walk', frameCount: 3, delaysMs: [50], loop: true },
+  meta: { id: 'walk', frameCount: 3, timing: { frameMs: 50 }, loop: true },
   provenance: {
     recordingId: 'idle',
     recordingHash: `sha256:${'a'.repeat(64)}`,
@@ -236,7 +242,7 @@ const SEQUENCE: CommittedSequence = {
   kind: 'sequence',
   id: 'walk-jump',
   dir: 'characters/hero/sequences/walk-jump',
-  meta: { id: 'walk-jump', frameCount: 6, delaysMs: [50], loop: false },
+  meta: { id: 'walk-jump', frameCount: 6, timing: { frameMs: 50 }, loop: false },
   provenance: { clips: ['walk', 'greeting'], derivedFrom: null, spriteForgeVersion: '0.1.0' },
 };
 
@@ -1992,7 +1998,7 @@ describe('the Export stage', () => {
     expect(manifest).not.toBeNull();
     expect(manifest.dataset.manifestTarget).toBe('pixel-pet');
     // The inspector renders the manifest JSON the consumer would read.
-    expect(manifest.textContent).toContain('"formatVersion": "1.0.0"');
+    expect(manifest.textContent).toContain('"formatVersion": "2.0.0"');
     expect(manifest.textContent).toContain('"clips/walk.png"');
 
     expect(wb.activeExport).toBe('pixel-pet');
@@ -3149,9 +3155,9 @@ describe('sequence composition', () => {
 });
 
 describe('composition preview', () => {
-  /** A clip with its own frame count and per-frame delays. */
+  /** A clip pinned to one frame duration. */
   function clip(id: string, frameCount: number, delaysMs: number[]): CommittedAsset {
-    return { ...CLIP, id, meta: { id, frameCount, delaysMs, loop: true } };
+    return { ...CLIP, id, meta: { id, frameCount, timing: { frameMs: delaysMs[0]! }, loop: true } };
   }
 
   /** A scan holding `a` and `b` as committed Clips of `hero`. */

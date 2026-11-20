@@ -342,7 +342,9 @@ describe('forge CLI', () => {
           id: 'walk',
           characterId: 'hero',
           frameCount: 2,
-          delaysMs: [50, 60],
+          // Normalized to the source's mode; `--keep-timing` would keep 50/60.
+          delaysMs: [50, 50],
+          uniformDelayMs: 50,
           background: { hex: '#9421ce', source: 'sampled', tolerance: 24 },
         });
 
@@ -350,6 +352,80 @@ describe('forge CLI', () => {
         expect(store.listFiles()).toContain('characters/hero/drafts/walk/draft.json');
         const validated = await forge(['validate', '--store', store.root]);
         expect(validated.code).toBe(0);
+      });
+    });
+  });
+
+  it('extract --keep-timing keeps the source cadence', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
+      await withStore(async (store) => {
+        await forge([
+          'ingest', '--store', store.root, '--recording-file', source.path, '--id', 'mgba-2026-09',
+        ]);
+        await forge([
+          'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+          '--action', 'add', '--id', 'walk', '--start', '0', '--end', '2',
+        ]);
+        await forge([
+          'create-character', '--store', store.root, '--id', 'hero',
+          '--width', '4', '--height', '6', '--anchor-x', '2', '--anchor-y', '6',
+        ]);
+
+        const extracted = await forge([
+          'extract', '--store', store.root, '--character', 'hero',
+          '--recording', 'mgba-2026-09', '--cut', 'walk', '--keep-timing',
+        ]);
+
+        expect(extracted.code, extracted.stderr).toBe(0);
+        const descriptor = JSON.parse(extracted.stdout);
+        expect(descriptor.delaysMs).toEqual([50, 60]);
+        expect(descriptor.uniformDelayMs).toBeUndefined();
+      });
+    });
+  });
+
+  it('migrate rewrites a 1.x meta to the timing shape, and is idempotent', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (source) => {
+      await withStore(async (store) => {
+        await forge([
+          'ingest', '--store', store.root, '--recording-file', source.path, '--id', 'mgba-2026-09',
+        ]);
+        await forge([
+          'cut', '--store', store.root, '--recording', 'mgba-2026-09',
+          '--action', 'add', '--id', 'walk', '--start', '0', '--end', '2',
+        ]);
+        await forge([
+          'create-character', '--store', store.root, '--id', 'hero',
+          '--width', '4', '--height', '6', '--anchor-x', '2', '--anchor-y', '6',
+        ]);
+        await forge([
+          'extract', '--store', store.root, '--character', 'hero',
+          '--recording', 'mgba-2026-09', '--cut', 'walk',
+        ]);
+        await forge([
+          'commit', '--store', store.root, '--character', 'hero', '--draft', 'walk', '--name', 'walk',
+        ]);
+
+        // Roll the artifact back to the 1.x shape by hand.
+        const metaPath = 'characters/hero/clips/walk/meta.json';
+        store.writeJson(metaPath, { id: 'walk', frameCount: 2, delaysMs: [50], loop: true });
+
+        const dry = await forge(['migrate', '--store', store.root, '--dry-run']);
+        expect(dry.code).toBe(0);
+        expect(JSON.parse(JSON.stringify(store.readJson(metaPath)))).toHaveProperty('delaysMs');
+
+        const migrated = await forge(['migrate', '--store', store.root]);
+        expect(migrated.code).toBe(0);
+        expect(store.readJson(metaPath)).toEqual({
+          id: 'walk',
+          frameCount: 2,
+          timing: { frameMs: 50 },
+          loop: true,
+        });
+        expect((await forge(['validate', '--store', store.root])).code).toBe(0);
+
+        const again = await forge(['migrate', '--store', store.root]);
+        expect(again.stdout).toMatch(/0 artifact\(s\) migrated/);
       });
     });
   });

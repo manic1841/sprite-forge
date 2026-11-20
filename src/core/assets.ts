@@ -55,6 +55,12 @@ import {
 } from './store/index.js';
 import type { AssetKind, AssetRef } from './types.js';
 import { validateArtifact } from './validate.js';
+import {
+  copyTiming,
+  expandTiming,
+  timingFromDelays,
+  type AssetTiming,
+} from './timing.js';
 import { SPRITE_FORGE_VERSION } from './version.js';
 import {
   applyRepairScriptToFrame,
@@ -71,8 +77,8 @@ export interface AssetMeta {
   id: string;
   /** Number of frames in the sheet. */
   frameCount: number;
-  /** Per-frame delays in ms; one (uniform) or exactly `frameCount` values. */
-  delaysMs: number[];
+  /** Frame timing: a base duration plus the frames that deviate (Rule 5.1). */
+  timing: AssetTiming;
   /** Whether the Asset loops. */
   loop: boolean;
 }
@@ -217,7 +223,7 @@ export async function commitDraft(
   const meta: AssetMeta = {
     id: assetId,
     frameCount: draft.frameCount,
-    delaysMs: [...draft.delaysMs],
+    timing: timingFromDelays(draft.delaysMs),
     loop: draft.loop,
   };
   const provenance = buildClipProvenance(characterId, draft, repairRel);
@@ -506,7 +512,7 @@ export async function forkAsset(
     },
     background: { ...parent.provenance.background },
     frameCount: parent.meta.frameCount,
-    delaysMs: expandDelays(parent.meta.delaysMs, parent.meta.frameCount),
+    delaysMs: expandTiming(parent.meta.timing, parent.meta.frameCount),
     loop: parent.meta.loop,
     spriteForgeVersion: SPRITE_FORGE_VERSION,
     derivedFrom: { kind: 'clip', id },
@@ -853,12 +859,13 @@ async function sliceSheet(
   return frames;
 }
 
-/** Expand a uniform `delaysMs` to one value per frame; pass a per-frame list through. */
-function expandDelays(delaysMs: number[], frameCount: number): number[] {
-  if (delaysMs.length === 1) {
-    return Array.from({ length: frameCount }, () => delaysMs[0]!);
-  }
-  return [...delaysMs];
+/** Derive a Sequence's meta (§5) from its source Clips: sum frames, concat timing. */
+function deriveSequenceMeta(id: string, clipMetas: AssetMeta[]): AssetMeta {
+  const frameCount = clipMetas.reduce((total, meta) => total + meta.frameCount, 0);
+  // Each source's per-frame durations, concatenated, then collapsed back onto one
+  // base plus the frames that deviate (Rule 5.1 / Rule 7.2).
+  const delaysMs = clipMetas.flatMap((meta) => expandTiming(meta.timing, meta.frameCount));
+  return { id, frameCount, timing: timingFromDelays(delaysMs), loop: true };
 }
 
 /** Refuse a commit whose id is already taken by a committed Clip or Sequence. */
@@ -887,16 +894,6 @@ function assertDraftKind(kind: AssetKind): void {
         `commitSequence (a Sequence has no frame Draft).`,
     );
   }
-}
-
-/** Derive a Sequence's meta (§5) from its source Clips: sum frames, concat delays. */
-function deriveSequenceMeta(id: string, clipMetas: AssetMeta[]): AssetMeta {
-  const frameCount = clipMetas.reduce((total, meta) => total + meta.frameCount, 0);
-  // Each source's per-frame delays (expanding a uniform-1 value first, Rule 5.1),
-  // concatenated, so the result is exactly frameCount long.
-  const delaysMs = clipMetas.flatMap((meta) => expandDelays(meta.delaysMs, meta.frameCount));
-  const uniform = delaysMs.every((delay) => delay === delaysMs[0]);
-  return { id, frameCount, delaysMs: uniform ? [delaysMs[0]!] : delaysMs, loop: true };
 }
 
 /** Tile the source Clips' baked strips end to end into one canvas-tall PNG strip. */

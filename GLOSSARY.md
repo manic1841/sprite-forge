@@ -66,8 +66,14 @@ _Avoid_: actor, entity, subject
 
 **Clip**:
 The atomic reusable animation: a run of de-backgrounded, cropped, aligned frames
-with per-frame delays.
+with a timing.
 _Avoid_: action, motion, sprite
+
+**Timing**:
+An Asset's frame durations: one base `frameMs` for every frame, plus a sparse
+`overrideMs` map for the frames that differ. Uniform by default, so the common case
+is one number.
+_Avoid_: delay list, frame rate, fps, speed
 
 **Sequence**:
 An ordered concatenation of Clips that plays as a single animation.

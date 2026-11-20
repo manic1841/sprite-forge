@@ -135,6 +135,10 @@ export interface WorkbenchApi {
   ): Promise<ClipDraft>;
   /** Mirror a Draft left to right, or clear the mirror. */
   setFlipX(characterId: string, draftId: string, flipX: boolean): Promise<ClipDraft>;
+  /** Pin every frame of a Draft to one duration in ms. */
+  setDraftFrameMs(characterId: string, draftId: string, frameMs: number): Promise<ClipDraft>;
+  /** Drop a pinned duration and take the source's own cadence back. */
+  restoreDraftTiming(characterId: string, draftId: string): Promise<ClipDraft>;
   /** Resize a Character's Canvas in either direction and re-bake its committed Clips. */
   resizeCanvas(characterId: string, width: number, height: number): Promise<ResizeCanvasResult>;
   /** Shrink a Character's Canvas to its content floor. */
@@ -347,6 +351,16 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
       call<ClipDraft>(`/characters/${characterId}/drafts/${draftId}/alignment/flip`, {
         method: 'POST',
         body: JSON.stringify({ flipX }),
+      }),
+    setDraftFrameMs: (characterId, draftId, frameMs) =>
+      call<ClipDraft>(`/characters/${characterId}/drafts/${draftId}/timing/frame`, {
+        method: 'POST',
+        body: JSON.stringify({ frameMs }),
+      }),
+    restoreDraftTiming: (characterId, draftId) =>
+      call<ClipDraft>(`/characters/${characterId}/drafts/${draftId}/timing/restore`, {
+        method: 'POST',
+        body: '{}',
       }),
     resizeCanvas: async (characterId, width, height) => {
       const resized = await call<ResizeCanvasResult>(

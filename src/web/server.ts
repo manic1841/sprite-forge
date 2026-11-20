@@ -50,11 +50,13 @@ import {
   removeSequenceDraft,
   renameSegment,
   resizeCanvas,
+  restoreDraftTiming,
   sampleDraftRepairColor,
   saveSequenceDraft,
   scan,
   segmentContentBounds,
   setFlipX,
+  setDraftFrameMs,
   setPlacementOffset,
   setSegmentRange,
   setSegmentRect,
@@ -324,6 +326,23 @@ export async function handleApiRequest(
               flipX: requiredBoolean(body, 'flipX'),
             }),
           );
+        }
+      }
+
+      // /api/characters/<c>/drafts/<d>/timing[/restore]
+      if (segments[5] === 'timing' && segments.length <= 7) {
+        if (method === 'POST' && segments[6] === 'frame' && segments.length === 7) {
+          const body = asRecord(request.body);
+          return ok(
+            await setDraftFrameMs(storeRoot, {
+              characterId,
+              draftId,
+              frameMs: requiredNumber(body, 'frameMs'),
+            }),
+          );
+        }
+        if (method === 'POST' && segments[6] === 'restore' && segments.length === 7) {
+          return ok(await restoreDraftTiming(storeRoot, { characterId, draftId }));
         }
       }
 

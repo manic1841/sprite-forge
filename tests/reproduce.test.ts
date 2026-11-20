@@ -187,7 +187,7 @@ describe('verifyReproducible — a committed Clip', () => {
     );
   });
 
-  it('derives frameCount and delaysMs from provenance, and treats loop as stored', async () => {
+  it('derives frameCount and timing from provenance, and treats loop as stored', async () => {
     await withSyntheticGif(
       { frames: 2, width: 8, height: 6, delaysMs: [50, 60], foreground: '#ff0000' },
       async (gif) => {
@@ -201,13 +201,13 @@ describe('verifyReproducible — a committed Clip', () => {
             id: CLIP_ID,
           });
           expect(report.artifacts).toContain(`${metaRel}#frameCount`);
-          expect(report.artifacts).toContain(`${metaRel}#delaysMs`);
+          expect(report.artifacts).toContain(`${metaRel}#timing`);
           // `loop` is a stored choice with no provenance to re-derive it from.
           expect(report.excluded).toContain(`${metaRel}#loop`);
 
-          // A tampered delaysMs no longer agrees with the Recording + Segment.
-          const meta = store.readJson(metaRel) as { delaysMs: number[] };
-          meta.delaysMs = [50, 99];
+          // A tampered timing no longer agrees with the Recording + Segment.
+          const meta = store.readJson(metaRel) as { timing: { frameMs: number } };
+          meta.timing = { frameMs: 99 };
           store.writeJson(metaRel, meta);
 
           const tampered = await verifyReproducible(store.root, {
@@ -217,7 +217,7 @@ describe('verifyReproducible — a committed Clip', () => {
           });
           expect(tampered.reproducible).toBe(false);
           expect(tampered.mismatches.map((mismatch) => mismatch.artifact)).toContain(
-            `${metaRel}#delaysMs`,
+            `${metaRel}#timing`,
           );
         });
       },

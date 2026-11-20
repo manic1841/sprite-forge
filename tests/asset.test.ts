@@ -110,7 +110,8 @@ describe('commitDraft', () => {
         expect(store.readJson(`characters/${CHARACTER_ID}/clips/${ASSET_ID}/meta.json`)).toEqual({
           id: ASSET_ID,
           frameCount: 2,
-          delaysMs: [50, 60],
+          // Extract normalizes the fixture's 50/60 cadence to its mode.
+          timing: { frameMs: 50 },
           loop: true,
         });
         await expect(validateStore(store.root)).resolves.toBeDefined();
@@ -333,7 +334,8 @@ describe('forkAsset', () => {
           characterId: CHARACTER_ID,
           recordingId: RECORDING_ID,
           frameCount: 2,
-          delaysMs: [50, 60],
+          // A fork re-expands the committed timing into one delay per frame.
+          delaysMs: [50, 50],
           loop: true,
           segment: { cutId: CUT_ID, startFrame: 0, endFrame: 2, speed: 1 },
           derivedFrom: { kind: 'clip', id: ASSET_ID },

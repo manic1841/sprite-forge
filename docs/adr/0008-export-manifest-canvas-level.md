@@ -1,7 +1,7 @@
 # The export Manifest is canvas-level, with array bindings
 
 The Export Manifest carries the shared `canvas` (size + `anchor`) **once** at the top
-level, and each animation carries only `{sheet, frameCount, delaysMs, loop,
+level, and each animation carries only `{sheet, frameCount, timing, loop,
 flipsFacing?}`. This follows from the shared, per-Character Canvas (ADR-0006): since
 every sheet is the same size, per-animation geometry would be repetition — and the
 consumer should never infer geometry from the image.

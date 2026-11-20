@@ -73,21 +73,38 @@
         "y": { "type": "integer", "minimum": 0 }
       }
     },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frameMs"],
+      "properties": {
+        "frameMs": {
+          "description": "Base frame duration in ms; every frame without an override uses this.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "overrideMs": {
+          "description": "Frame index -> duration for the frames that deviate from frameMs. Omitted when every frame is uniform.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^(0|[1-9][0-9]*)$" },
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
     "animation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sheet", "frameCount", "delaysMs", "loop"],
+      "required": ["sheet", "frameCount", "timing", "loop"],
       "properties": {
         "sheet": {
           "description": "Path to the strip, relative to the manifest.",
           "$ref": "#/$defs/relPath"
         },
         "frameCount": { "type": "integer", "minimum": 1 },
-        "delaysMs": {
-          "description": "Per-frame duration in ms; one value means uniform.",
-          "type": "array",
-          "minItems": 1,
-          "items": { "type": "integer", "minimum": 1 }
+        "timing": {
+          "description": "Frame timing: one base duration, plus the frames that deviate from it. See docs/format-spec.md Rule 5.1.",
+          "$ref": "#/$defs/timing"
         },
         "loop": { "type": "boolean" },
         "flipsFacing": {

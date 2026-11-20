@@ -44,7 +44,9 @@ export {
   readClipDraft,
   readClipDraftFrame,
   renderSegmentFrames,
+  restoreDraftTiming,
   segmentContentBounds,
+  setDraftFrameMs,
 } from './draft.js';
 export type {
   ClipDraft,
@@ -59,7 +61,9 @@ export type {
   ReadClipDraftOptions,
   RenderedSegment,
   RenderSegmentFramesOptions,
+  RestoreDraftTimingOptions,
   SegmentContentBoundsOptions,
+  SetDraftFrameMsOptions,
 } from './draft.js';
 
 export {
@@ -168,6 +172,19 @@ export type {
 
 export { ID_PATTERN, isValidId } from './ids.js';
 
+export {
+  copyTiming,
+  expandTiming,
+  frameDelayMs,
+  isUniform,
+  normalizeDelays,
+  overrideCount,
+  scaleTiming,
+  timingFromDelays,
+  timingIssues,
+} from './timing.js';
+export type { AssetTiming } from './timing.js';
+
 export { EXPORT_FORMAT_VERSION, exportCharacter, readExportManifest } from './export.js';
 export type {
   ExportBindings,
@@ -177,6 +194,9 @@ export type {
   Facing,
   ManifestAnimation,
 } from './export.js';
+
+export { migrateStore } from './migrate.js';
+export type { MigrateStoreOptions, MigratedArtifact, MigrationReport } from './migrate.js';
 
 export { verifyReproducible } from './reproduce.js';
 export type {

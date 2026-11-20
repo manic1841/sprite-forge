@@ -34,7 +34,12 @@ export function assetInspector(
   addRow(list, 'id', asset.id);
   addRow(list, 'frames', String(asset.meta.frameCount));
   addRow(list, 'loop', String(asset.meta.loop));
-  addRow(list, 'delay', `${asset.meta.delaysMs[0] ?? 0} ms`);
+  const overrides = Object.keys(asset.meta.timing.overrideMs ?? {}).length;
+  addRow(
+    list,
+    'timing',
+    `${asset.meta.timing.frameMs} ms${overrides === 0 ? '' : ` (${overrides} frame(s) differ)`}`,
+  );
   // `CommittedAsset.kind` is the open `AssetKind`, so the provenance shape is what
   // actually distinguishes a Sequence from a Clip here.
   if ('clips' in asset.provenance) {

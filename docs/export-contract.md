@@ -17,14 +17,14 @@ exports/<target>/
 
 ```jsonc
 {
-  "formatVersion": "1.0.0",
+  "formatVersion": "2.0.0",
   "target": "pixel-pet",
   "character": "kirby",
   "authoredFacing": "right",
   "canvas": { "width": 60, "height": 84, "anchor": { "x": 30, "y": 76 } },
   "animations": {
-    "idle": { "sheet": "clips/idle.png", "frameCount": 34, "delaysMs": [50], "loop": true },
-    "turn": { "sheet": "clips/turn.png", "frameCount": 14, "delaysMs": [50], "loop": false, "flipsFacing": true }
+    "idle": { "sheet": "clips/idle.png", "frameCount": 34, "timing": { "frameMs": 50 }, "loop": true },
+    "turn": { "sheet": "clips/turn.png", "frameCount": 14, "timing": { "frameMs": 50 }, "loop": false, "flipsFacing": true }
   },
   "bindings": { "idle": ["idle"], "happy": ["award"], "nod": ["sleep"], "alert": ["call-out"] },
   "lock": { "spriteForgeVersion": "0.1.0", "exportedAt": "2026-10-08T00:00:00Z" }
@@ -35,7 +35,7 @@ exports/<target>/
 
 | Field | Meaning |
 | --- | --- |
-| `formatVersion` | semver of this contract |
+| `formatVersion` | semver of this contract (**2.0.0**; 2.0.0 replaced the per-frame `delaysMs` array with `timing`) |
 | `target` | the consumer this Export is for |
 | `character` | the Character exported |
 | `authoredFacing` | the direction the art was drawn in (`right`); see Facing |
@@ -50,13 +50,31 @@ exports/<target>/
 | --- | --- |
 | `sheet` | path to the strip, relative to the manifest |
 | `frameCount` | number of frames (frames are `canvas.width` × `canvas.height`) |
-| `delaysMs` | per-frame duration; a single value means uniform |
+| `timing` | frame `i` lasts `timing.overrideMs[i] ?? timing.frameMs` ms; `overrideMs` is omitted when uniform |
 | `loop` | whether this animation loops when shown |
 | `flipsFacing` | optional; when true, the animation flips the consumer's Facing on completion |
 
 `sheet` fully determines the layout: the sheet is a strip of `frameCount` frames of
 `canvas.width × canvas.height`, laid out along the **x axis** (left to right). The
 frame size is **never inferred from the image** — it is `canvas`.
+
+### Timing
+
+Timing is **uniform by default**: one `frameMs`, and an `overrideMs` map only for
+the frames that deviate. A capture that dropped a frame keeps that frame's longer
+duration without the bundle carrying an array of a hundred identical numbers.
+
+```jsonc
+// twelve dropped frames in a 138-frame animation
+"timing": { "frameMs": 50, "overrideMs": { "21": 60, "65": 60 } }
+```
+
+- A consumer schedules frame `i` for `overrideMs[i] ?? frameMs` ms.
+- The total duration is `frameMs × frameCount + Σ overrides`; no expansion needed
+  to lay out or preload the strip.
+- Overrides are sparse and unordered in JSON: keys are decimal frame indices, and
+  every key is less than `frameCount`.
+- Tuning the rate is a one-value edit; the overrides survive it.
 
 ## Facing
 
@@ -109,7 +127,7 @@ Not implemented in this map; the contract requires that the consumer:
 
 1. reads the Manifest instead of inferring frame size and count from the image, and
    stops assuming a fixed 48 px;
-2. renders at `canvas` size and drives timing from `delaysMs` (no fixed frame delay);
+2. renders at `canvas` size and drives timing from `timing` (no fixed frame delay);
 3. owns **Facing**, mirrors by it, and flips it when a `flipsFacing` animation ends;
 4. picks a random binding on entering a Situation;
 5. keeps **frame 0 as the resting pose**, so a reduced-motion rule can settle on it.

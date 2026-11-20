@@ -62,7 +62,7 @@ A committed Asset folder holds the **contract artifacts** plus its **provenance*
 ```text
 clips/<clip-id>/
 ├─ sheet.png        # baked strip, already aligned to the Character's Canvas
-├─ meta.json        # id, frameCount, delaysMs, loop  (frame size = the Character Canvas)
+├─ meta.json        # id, frameCount, timing, loop  (frame size = the Character Canvas)
 └─ provenance.json  # recordingId+hash, segment{cutId,start,end,speed,rect?}, background, repair ref, placementOffset, derivedFrom?, toolVersion
 ```
 

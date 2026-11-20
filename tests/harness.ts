@@ -120,7 +120,7 @@ export function validCuts(): Record<string, unknown> {
 }
 
 export function validAssetMeta(id: string, frameCount = 4): Record<string, unknown> {
-  return { id, frameCount, delaysMs: [50], loop: true };
+  return { id, frameCount, timing: { frameMs: 50 }, loop: true };
 }
 
 export function validClipProvenance(): Record<string, unknown> {

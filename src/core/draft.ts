@@ -42,6 +42,7 @@ import type { Canvas, CanvasAnchor } from './character.js';
 import { StoreError, ValidationError, type ValidationIssue } from './errors.js';
 import { clampBounds, contentBounds, cropTo, placeOnCanvas, unionBounds, type Bounds } from './frames.js';
 import { assertValidId, isValidId } from './ids.js';
+import { readRecordingDelays } from './ingest.js';
 import {
   canvasPath,
   draftDir,
@@ -61,6 +62,7 @@ import {
   writeJsonFile,
 } from './store/index.js';
 import { validateArtifact } from './validate.js';
+import { normalizeDelays, timingFromDelays } from './timing.js';
 import { SPRITE_FORGE_VERSION } from './version.js';
 
 /** A snapshot of the resolved cut this Draft came from (Rule 6.1). */
@@ -105,6 +107,13 @@ export interface ClipDraftDescriptor {
   frameCount: number;
   /** Per-frame delays in ms, read from the source. */
   delaysMs: number[];
+  /**
+   * Set when the timing was deliberately flattened to one rate at extract: every
+   * `delaysMs` entry equals this. Absent when the source's own cadence is kept.
+   * Design-local (format-spec §11); the committed Asset only ever stores the
+   * collapsed `timing` (§5 Rule 5.1).
+   */
+  uniformDelayMs?: number;
   /** Whether the Clip should loop. */
   loop: boolean;
   /** The tool version that produced the Draft. */
@@ -175,6 +184,13 @@ export interface ExtractClipDraftOptions {
   tolerance?: number;
   /** Whether the Draft loops; defaults to `true`. */
   loop?: boolean;
+  /**
+   * Keep the source's own per-frame cadence instead of flattening it to one rate.
+   * Default `false`: the timing is normalized to the capture's dominant delay, so
+   * an emulator hiccup does not become a 100-number array in every artifact
+   * (docs/research/mgba-gif-ingestion.md).
+   */
+  keepTiming?: boolean;
 }
 
 /** Inputs for {@link readClipDraft}. */
@@ -246,6 +262,19 @@ export async function extractClipDraft(
     framePaths.push(relPath);
   }
 
+  // Timing is normalized to the capture's dominant delay unless the caller asked to
+  // keep the source cadence — a re-extract of a played-back Draft keeps the pin it
+  // already had, so an interrupted re-cut does not quietly start drifting again.
+  const keepTiming = options.keepTiming ?? preserved.uniformDelayMs !== undefined;
+  const uniformDelayMs = keepTiming ? undefined : (timingFromDelays(rendered.delaysMs).frameMs);
+  const delaysMs =
+    uniformDelayMs === undefined
+      ? rendered.delaysMs
+      : normalizeDelays(rendered.delaysMs);
+  if (uniformDelayMs === undefined) {
+    delete preserved.uniformDelayMs;
+  }
+
   const descriptor: ClipDraftDescriptor = {
     id: draftId,
     characterId,
@@ -260,10 +289,11 @@ export async function extractClipDraft(
     },
     background: rendered.background,
     frameCount: rendered.frames.length,
-    delaysMs: rendered.delaysMs,
+    delaysMs,
     loop: options.loop ?? true,
     spriteForgeVersion: SPRITE_FORGE_VERSION,
     ...preserved,
+    ...(uniformDelayMs === undefined ? {} : { uniformDelayMs }),
   };
 
   validateDraftDescriptor(descriptor, draftPath(characterId, draftId), draftId);
@@ -620,6 +650,7 @@ export async function segmentContentBounds(
   const value = (await readJsonFile(root, artifactPath)) as ClipDraftDescriptor;
   const preserved: Partial<ClipDraftDescriptor> = {};
   if (value.derivedFrom !== undefined) preserved.derivedFrom = value.derivedFrom;
+  if (value.uniformDelayMs !== undefined) preserved.uniformDelayMs = value.uniformDelayMs;
   if (value.placementOffset) preserved.placementOffset = value.placementOffset;
   if (value.placementFraming) preserved.placementFraming = value.placementFraming;
   if (value.flipX) preserved.flipX = value.flipX;
@@ -640,8 +671,84 @@ export async function writeClipDraft(root: string, descriptor: ClipDraftDescript
   await writeJsonFile(root, artifactPath, descriptor);
 }
 
-/** Read a Draft back from the store — the reload path both front ends resume from. */
-export async function readClipDraft(
+/** Inputs for {@link setDraftFrameMs}. */
+export interface SetDraftFrameMsOptions {
+  /** The Character that owns the Draft. */
+  characterId: string;
+  /** The Draft id. */
+  draftId: string;
+  /** The duration every frame gets, in ms. */
+  frameMs: number;
+}
+
+/**
+ * Pin every frame of a Draft to one duration.
+ *
+ * This is the author-facing lever: "play at 20 fps" is `frameMs: 50`. It is recorded
+ * as `uniformDelayMs` so the Draft remembers the cadence was chosen rather than
+ * inherited, and the frames themselves are untouched — timing never re-bakes pixels.
+ */
+export async function setDraftFrameMs(
+  root: string,
+  options: SetDraftFrameMsOptions,
+): Promise<ClipDraft> {
+  const { characterId, draftId, frameMs } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(draftId, 'draft', 'draftId');
+  if (!Number.isInteger(frameMs) || frameMs < 1) {
+    throw new StoreError(`frameMs must be an integer >= 1; got ${String(frameMs)}.`);
+  }
+
+  const draft = await readClipDraft(root, { characterId, draftId });
+  const { dir: _dir, frames: _frames, ...descriptor } = draft;
+  descriptor.delaysMs = Array.from({ length: draft.frameCount }, () => frameMs);
+  descriptor.uniformDelayMs = frameMs;
+  await writeClipDraft(root, descriptor);
+  return readClipDraft(root, { characterId, draftId });
+}
+
+/** Inputs for {@link restoreDraftTiming}. */
+export interface RestoreDraftTimingOptions {
+  /** The Character that owns the Draft. */
+  characterId: string;
+  /** The Draft id. */
+  draftId: string;
+}
+
+/**
+ * Drop a pin set by {@link setDraftFrameMs} and take the source's own cadence back.
+ *
+ * The delays are re-read from the Recording through the Draft's stashed Segment (so
+ * the frame range and `speed` still apply); only the timing is replaced, so a Repair
+ * script authored on the frames survives.
+ */
+export async function restoreDraftTiming(
+  root: string,
+  options: RestoreDraftTimingOptions,
+): Promise<ClipDraft> {
+  const { characterId, draftId } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(draftId, 'draft', 'draftId');
+
+  const draft = await readClipDraft(root, { characterId, draftId });
+  const { delaysMs } = await readRecordingDelays(root, draft.recordingId);
+  const { startFrame, endFrame, speed = 1 } = draft.segment;
+  const sliced = applySpeed(delaysMs.slice(startFrame, endFrame), speed);
+  if (sliced.length !== draft.frameCount) {
+    throw new StoreError(
+      `Draft "${draftId}" has ${draft.frameCount} frames but its Segment yields ` +
+        `${sliced.length} source delays.`,
+    );
+  }
+
+  const { dir: _dir, frames: _frames, ...descriptor } = draft;
+  descriptor.delaysMs = sliced;
+  delete descriptor.uniformDelayMs;
+  await writeClipDraft(root, descriptor);
+  return readClipDraft(root, { characterId, draftId });
+}
+
+/** Read a Draft back from the store — the reload path both front ends resume from. */export async function readClipDraft(
   root: string,
   options: ReadClipDraftOptions,
 ): Promise<ClipDraft> {
@@ -886,6 +993,7 @@ const DRAFT_KEYS = [
 /** Optional Draft fields added by the fork seam (#24); absent on a fresh extract. */
 const DRAFT_OPTIONAL_KEYS = [
   'derivedFrom',
+  'uniformDelayMs',
   'placementOffset',
   'placementFraming',
   'flipX',
@@ -1003,6 +1111,21 @@ function validateDraftDescriptor(value: unknown, artifact: string, draftId: stri
     });
     if (isNumber(frameCount) && delaysMs.length !== 1 && delaysMs.length !== frameCount) {
       issue('/delaysMs', `must have 1 (uniform) or frameCount (${frameCount}) values`);
+    }
+  }
+  // A normalized timing pins every frame to one rate, so it must agree with the
+  // frame count exactly (it is only ever written as one value per frame here).
+  const uniformDelayMs = value.uniformDelayMs;
+  if (uniformDelayMs !== undefined) {
+    if (!isInteger(uniformDelayMs) || (uniformDelayMs as number) < 1) {
+      issue('/uniformDelayMs', 'must be an integer >= 1');
+    } else if (isNumber(frameCount) && Array.isArray(delaysMs)) {
+      for (let frame = 0; frame < (frameCount as number); frame += 1) {
+        if (delaysMs[frame] !== uniformDelayMs) {
+          issue('/delaysMs', `must all equal uniformDelayMs (${uniformDelayMs}) when set`);
+          break;
+        }
+      }
     }
   }
   if (typeof value.loop !== 'boolean') {
