@@ -158,17 +158,45 @@ composition can be started before any Sequence exists, and it is persisted under
 `sequence-drafts/` so half-built work survives a reload like a Clip Draft. A
 Sequence fork writes a composition and opens it there; committing consumes it.
 
+A composition exists to join footage cut apart — often two Clips from two
+Recordings — so the face **plays the composition back**. A Sequence is pure
+concatenation, so the source Clips' own sheets are the frames commit will tile;
+nothing is baked first. The preview's subject is the **seam**: it is reachable as
+its own control, from either side, and playback loops through it like the commit
+will. Placement is baked into a committed Clip, so adjusting it forks that Clip —
+and the fork plays **in the slot**, with its pending offset and mirror applied, so
+the seam is judged against what the commit will actually bake. The fork is never a
+trip to another face: committing returns the slot to the new Clip, discarding puts
+the old one back. A composition is read seam by seam, so the Clip in hand is chosen
+from the preview, a row, or the panel itself; switching drops the fork in flight
+(one Draft at a time, never an `-align` left behind). Because the seam is the
+subject, the stage carries **only** the preview: the Clips, their order, the name
+and the commit are the panel's, so the picture is not squeezed by the form that
+edits it.
+
 The client is a shell plus one module per region (`src/web/client/workbench/`:
 `dom`, `state`, `ports`, `library`, `filmstrip`, `stageCut`, `stageClip`,
-`stageView`, `stageCompose`, `inspector`, `stageAlign`, `stageExport`). Rules that a
+`stageView`, `stageCompose`, `composeInspector`, `inspector`, `stageAlign`,
+`stageExport`). Rules that a
 region used to own in
-half — a marked range, a Repair gesture — live in a **deep session module**
-instead (`cutSession`, `draftEditor`): the module holds the invariants and the
+half — a marked range, a Repair gesture, a composition's playhead — live in a
+**deep session module** instead (`cutSession`, `draftEditor`, `sequencePreview`):
+the module holds the invariants and the
 state slice it writes, and the regions only build DOM and call its verbs. A view
 receives a narrow port from `ports.ts` and never imports a sibling, so a region
 can be replaced or tested on its own. The inspector is a router over one section
 module per target (`recordingInspector`, `draftInspector`, `assetInspector`,
-`alignInspector`, `exportInspector`).
+`alignInspector`, `composeInspector`, `exportInspector`).
+
+A region is also split by **what is pixels and what is a decision**. The Compose
+stage is only the preview — a composition is judged at its seam, so the seam gets
+the whole pane — and every control (the Clip list and its order, the Clip being
+added, the name, commit and its exits) is a section the panel builds
+(`composeInspector`). Retargeting a fork, committing it and dropping the
+composition are therefore all in one column, next to the picture instead of under
+it, and both are mounted for the same face: `inspector` mounts
+`composeInspector` on Compose always, and the placement section above it while a
+re-align is open.
 
 A session is split from the **inside**, never across: `cutSession` composes
 `cutTargets` (the single Character picker), `cutPlayback` and `extractSegment`,
@@ -184,6 +212,13 @@ The app sheet is split the same way it is read: `site/styles/` lines up
 `98-responsive` → `99-dialogs`. The numeric prefix is the cascade order and the
 `<link>` list in `workbench.html` repeats it; `.wb-shell` is the scoping prefix
 in every file.
+
+The frame is **exactly one screen**: the shell, its wrapper and the app body are
+pinned to the viewport and every pane scrolls inside itself, so a long panel can
+never push the stage's transport off the window. The site kit sizes a
+`main > section` as *at least* one screen tall and re-bases its children, so the
+app answers that with higher specificity in `workbench.html` rather than by
+out-growing it.
 
 
 This shape was chosen against two alternatives prototyped at equal fidelity — a

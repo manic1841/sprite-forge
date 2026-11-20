@@ -82,6 +82,17 @@ There is no per-animation mirror flag and no baked left-facing art.
 
 Bindings live only in the Export; app vocabulary never enters an Asset.
 
+The workbench edits this as **one row per Situation** — the name, and a chip per
+animation being exported — so a Situation cannot be declared without a binding and
+a binding cannot name something outside the Export. The `situations` list and the
+`bindings` map are both derived from those rows; the JSON is shown read-only for the
+CLI's sake (`--bindings s=id[,id][;...]`).
+
+A store can carry far more animations than a window holds, so the workbench Export
+form is its own scroll pane with the submit pinned at its foot, and a wide stage is
+spent on two columns (what goes into the bundle, and what may play it) instead of a
+narrow ribbon.
+
 ## Hitbox
 
 Not part of the contract. The consumer decides what area is clickable; the tool does

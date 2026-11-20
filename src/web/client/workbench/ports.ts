@@ -9,6 +9,7 @@
 import type { WorkbenchApi } from '../api.js';
 import type { CutSession, CutSessionDeps } from './cutSession.js';
 import type { DraftEditor } from './draftEditor.js';
+import type { SequencePreview } from './sequencePreview.js';
 import type { WorkbenchState, WorkbenchMode } from './state.js';
 import type { Regions } from './context.js';
 
@@ -71,13 +72,30 @@ export interface DraftInspectorPort extends BasePort {
   readonly draft: DraftEditor;
 }
 
-/** The inspector router mounts every face's section, so it carries both sessions. */
-export interface InspectorPort extends RecordingInspectorPort, DraftInspectorPort {}
+/** The inspector router mounts every face's section, so it carries every session. */
+export interface InspectorPort extends RecordingInspectorPort, DraftInspectorPort, ComposeStagePort {}
+
+/** The Compose stage: a Character's composition, previewed. */
+export interface ComposeStagePort extends BasePort {
+  readonly preview: SequencePreview;
+}
+
+/** The Compose inspector: the Clip list, the name and the exits. */
+export interface ComposeInspectorPort extends ComposeStagePort {}
+
+/**
+ * Alignment: placement of a Draft, or of a composition's slot.
+ *
+ * It carries the preview because a re-align is retargeted from here — which Clip
+ * the offset applies to is the first thing the panel has to let you say.
+ */
+export interface AlignInspectorPort extends BasePort {
+  readonly preview: SequencePreview;
+}
 
 /** All the remaining inspectors only need the base capabilities. */
 export type AssetViewStagePort = BasePort;
 export type AssetInspectorPort = BasePort;
-export type AlignInspectorPort = BasePort;
 export type CharacterInspectorPort = BasePort;
 export type ExportInspectorPort = BasePort;
 export type AlignStagePort = BasePort;

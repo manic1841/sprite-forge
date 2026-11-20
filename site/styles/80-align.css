@@ -223,6 +223,33 @@
   margin: 8px 0 10px;
 }
 
+/* Which Clip of the composition is in hand. The chips sit under the note that
+   explains the re-align, because picking the target comes before moving it. */
+.wb-shell .align-targets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.wb-shell .align-targets .k {
+  margin-right: 2px;
+}
+
+.wb-shell .align-target {
+  font-family: var(--ui-mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 6px;
+}
+
+.wb-shell .align-target[data-active] {
+  border-color: var(--u-accent);
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+}
+
 .wb-shell .align-floor {
   margin: -2px 0 6px;
   font: 400 11px/1.45 var(--ui-mono);

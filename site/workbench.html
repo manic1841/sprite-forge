@@ -24,6 +24,7 @@
     <link rel="stylesheet" href="/styles/20-chrome.css">
     <link rel="stylesheet" href="/styles/30-rail.css">
     <link rel="stylesheet" href="/styles/40-stage.css">
+    <link rel="stylesheet" href="/styles/45-stage-compose.css">
     <link rel="stylesheet" href="/styles/50-filmstrip.css">
     <link rel="stylesheet" href="/styles/60-inspector.css">
     <link rel="stylesheet" href="/styles/61-inspector-cut.css">
@@ -186,14 +187,31 @@
             box-shadow: none;
         }
 
+        /* the kit sizes every `main > section` as at least one screen tall, which
+           on a pane that must not scroll means the content can push it past the
+           window and the window clips the foot of every panel. The app frame is
+           exactly one screen instead, so its regions scroll and the shell does
+           not. `main >` puts this ahead of that section rule. */
+        main>.wb-shell.ui {
+            height: 100svh;
+            min-height: 0;
+        }
+
         /* the app is full bleed: it runs to the window on both sides rather than
            standing in the site's gutters, so the kit container's width and centring
-           go (the `.wrap` stays for the checker's one-child structure) */
-        .wb-shell .wrap {
+           go (the `.wrap` stays for the checker's one-child structure). The kit's
+           `.ui` makes the shell a flex column, so the wrapper has to be a *zero
+           basis* item: grown from its content it would let the panels below decide
+           the page height, and the window would clip them instead of the panels
+           scrolling. It is selected by id because the kit re-bases it with
+           `flex: 1 0 auto` on `main > section > .wrap`. */
+        .wb-shell #app {
             width: 100%;
             max-width: none;
             margin-inline: 0;
             height: 100%;
+            flex: 1 1 0;
+            min-height: 0;
         }
 
         @media (max-width: 639px) {

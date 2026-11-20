@@ -23,10 +23,23 @@ import type { Canvas, ContentFloor, PlacementOffset } from '../types.js';
  */
 let offsetTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * What this face's placement wants from the section.
+ *
+ * The Canvas is the Character's, not the Clip's, so a face that is about one Clip
+ * relative to another (a composition's seam) leaves the resize behind rather than
+ * filling the panel with a decision that belongs to the Character.
+ */
+export interface AlignSectionOptions {
+  /** Render the Canvas size controls. Defaults to on. */
+  canvas?: boolean;
+}
+
 export function alignInspector(
   ctx: AlignInspectorPort,
   actions: HTMLElement,
   info: HTMLElement,
+  options: AlignSectionOptions = {},
 ): void {
   const { state } = ctx;
   const section = make('section', 'inspector-section');
@@ -47,6 +60,21 @@ export function alignInspector(
   if (assetTarget) {
     showAssetPlacement(ctx, section, assetTarget.characterId, assetTarget.assetKind, assetTarget.assetId);
   } else if (draft && draft.characterId === state.activeCharacterId) {
+    // A fork taken from a composition preview is here for one reason — its seam —
+    // and committing it puts it back in that slot rather than leaving it as an
+    // Asset of its own.
+    const realign = state.realign;
+    if (realign && realign.forkDraftId === draft.draftId) {
+      const note = make(
+        'p',
+        'muted',
+        `Re-aligning "${realign.clipId}" for the composition. Commit this Draft and ` +
+          'its slot takes the new Clip.',
+      );
+      note.dataset.alignForComposition = '';
+      section.appendChild(note);
+      section.appendChild(targetPicker(ctx, realign.slot));
+    }
     const offset = currentDraftOffset(ctx);
     const x = numberInput(offset.x, 'x', () => scheduleOffset(ctx));
     x.dataset.alignOffsetX = '';
@@ -87,7 +115,7 @@ export function alignInspector(
     );
   }
 
-  if (!assetTarget) {
+  if (!assetTarget && options.canvas !== false) {
     const floor = state.alignment.contentFloor;
     const canvas = state.alignment.canvas;
     const resizeRow = make('div', 'align-size');
@@ -225,6 +253,38 @@ export function alignInspector(
   }
   readout.appendChild(thumbs);
   info.appendChild(readout);
+}
+
+/**
+ * Which Clip of the composition the offset applies to.
+ *
+ * A re-align is judged at a seam, and a composition is usually read seam by seam,
+ * so the panel — not just the stage — has to be able to say "adjust *that* one".
+ * Switching drops the fork in flight; taking the Clip already in hand just walks
+ * the preview back to its seam.
+ */
+function targetPicker(ctx: AlignInspectorPort, activeSlot: number): HTMLElement {
+  const composition = ctx.state.sequenceDraft;
+  const wrap = make('div', 'align-targets');
+  wrap.dataset.alignTargets = '';
+  if (!composition) {
+    return wrap;
+  }
+  wrap.appendChild(make('span', 'k', 'Clip'));
+  composition.clips.forEach((clipId, index) => {
+    const chip = make('button', 'btn small ghost align-target', clipId) as HTMLButtonElement;
+    chip.dataset.alignTarget = String(index);
+    if (index === activeSlot) {
+      chip.dataset.active = '';
+      chip.setAttribute('aria-current', 'true');
+      chip.title = `Back to the seam before ${clipId}`;
+    } else {
+      chip.title = `Adjust ${clipId} instead — the fork in flight is dropped`;
+    }
+    chip.addEventListener('click', () => ctx.preview.realign(index));
+    wrap.appendChild(chip);
+  });
+  return wrap;
 }
 
 /**
@@ -442,7 +502,18 @@ function discardDraftSection(
       ctx.state.target = { kind: 'character', characterId };
       ctx.state.draftDescriptor = null;
       ctx.state.repair = null;
+      // Dropping a re-align fork drops the re-align: the composition is still open
+      // and its slot keeps the old Clip.
+      if (ctx.state.realign?.forkDraftId === draftId) {
+        ctx.state.realign = null;
+      }
       await ctx.rescan();
+      if (ctx.state.sequenceDraft !== null) {
+        ctx.state.target = { kind: 'character', characterId };
+        ctx.setMode('compose');
+        await ctx.loadAlignment(characterId);
+        return;
+      }
       ctx.setMode('align');
       await ctx.loadAlignment(characterId);
     });

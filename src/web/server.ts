@@ -624,7 +624,9 @@ export async function handleApiRequest(
             characterId,
             draftId: requiredOptionalString(body, 'draftId'),
             clips: requiredStringArray(body, 'clips'),
-            forkOf: requiredOptionalString(body, 'forkOf') ?? null,
+            // `forkOf` is optional but nullable: an explicit `null` (a plain
+            // composition, as the client sends) means the same as omitting it.
+            forkOf: optionalNullableString(body, 'forkOf'),
           }),
         };
       }
@@ -841,6 +843,19 @@ function requiredOptionalString(
     throw new ForgeError(`"${key}" must be a string.`);
   }
   return value;
+}
+
+/**
+ * Read an optional body field that is either a string, `null`, or absent.
+ *
+ * `null` is meaningful where the store accepts it as "cleared" (a composition's
+ * `forkOf`), so it is passed through rather than rejected as a non-string.
+ */
+function optionalNullableString(
+  body: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  return body[key] === null ? null : requiredOptionalString(body, key);
 }
 
 function optionalNumber(body: Record<string, unknown>, key: string): number | undefined {

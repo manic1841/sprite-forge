@@ -281,6 +281,18 @@ function answerDialog(accept = true, value?: string): void {
 }
 
 /**
+ * Type into a field the way a person does.
+ *
+ * Setting `.value` alone is invisible to a listener that only answers `input`, so
+ * this sets the value and dispatches a **bubbling** event — the same one typing
+ * raises, which the row and the form both wait on for their derived state.
+ */
+function typeInto(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/**
  * Answer an ask the action only reaches after a microtask hop (one that follows an
  * awaited step, such as Extract asking for the target before the Draft name).
  *
@@ -3028,6 +3040,38 @@ describe('sequence composition', () => {
     expect(saves.at(-1)).toEqual({ characterId: 'hero', clips: ['walk'] });
   });
 
+  it('omits forkOf when the composition is not forked', async () => {
+    const requests: Array<{ draftId?: string; clips: string[]; forkOf?: string | null }> = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        saveSequenceDraft: async (characterId, request) => {
+          requests.push(request);
+          return {
+            id: request.draftId ?? 'composition',
+            characterId,
+            clips: [...request.clips],
+            forkOf: request.forkOf ?? null,
+            spriteForgeVersion: '0.1.0',
+            dir: `characters/${characterId}/sequence-drafts/composition`,
+          };
+        },
+      }),
+    });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+    wb.setMode('compose');
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-new]')!.click();
+    await wb.settled();
+    wb.root.querySelector<HTMLElement>('[data-sequence-add-run]')!.click();
+    await wb.settled();
+
+    // Every save carries the Clip list; none carries a `forkOf` key at all.
+    expect(requests.every((request) => !('forkOf' in request))).toBe(true);
+    expect(wb.root.querySelectorAll('[data-sequence-clip]')).toHaveLength(1);
+    expect(wb.root.querySelector('[data-action-error]')).toBeNull();
+  });
+
   it('reorders and commits the composition, consuming its draft', async () => {
     const commits: Array<{ name: string; clips: string[]; draftId?: string }> = [];
     const wb = mountWorkbench(container, {
@@ -3104,6 +3148,363 @@ describe('sequence composition', () => {
   });
 });
 
+describe('composition preview', () => {
+  /** A clip with its own frame count and per-frame delays. */
+  function clip(id: string, frameCount: number, delaysMs: number[]): CommittedAsset {
+    return { ...CLIP, id, meta: { id, frameCount, delaysMs, loop: true } };
+  }
+
+  /** A scan holding `a` and `b` as committed Clips of `hero`. */
+  function twoClipScan(): StoreScan {
+    return {
+      ...SCAN,
+      characters: [
+        {
+          ...SCAN.characters[0]!,
+          assets: [
+            { kind: 'clip', id: 'a', dir: 'characters/hero/clips/a' },
+            { kind: 'clip', id: 'b', dir: 'characters/hero/clips/b' },
+          ],
+          sequenceDrafts: [
+            { id: 'composition', dir: 'characters/hero/sequence-drafts/composition' },
+          ],
+        },
+      ],
+    };
+  }
+
+  /** Mount with an empty composition already open, holding `a` then `b`. */
+  async function composing(
+    api: Parameters<typeof fakeApi>[0] = {},
+  ): Promise<ReturnType<typeof mountWorkbench>> {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        scan: async () => twoClipScan(),
+        readClip: async (_characterId, clipId) =>
+          clipId === 'b' ? clip('b', 2, [30]) : clip('a', 3, [50]),
+        readSequenceDraft: async (characterId, draftId) => ({
+          id: draftId,
+          characterId,
+          clips: ['a', 'b'],
+          forkOf: null,
+          spriteForgeVersion: '0.1.0',
+          dir: `characters/${characterId}/sequence-drafts/${draftId}`,
+        }),
+        ...api,
+      }),
+    });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+    wb.setMode('compose');
+    wb.root.querySelector<HTMLElement>('[data-sequence-draft-open]')!.click();
+    // The preview reads its sources from the render, so it settles a hop behind
+    // the load that opened the composition.
+    for (let hop = 0; hop < 5 && wb.previewSlots.length !== 2; hop += 1) {
+      await wb.settled();
+    }
+    return wb;
+  }
+
+  function counter(wb: ReturnType<typeof mountWorkbench>): string {
+    return wb.root.querySelector('[data-sequence-counter]')!.textContent ?? '';
+  }
+
+  /**
+   * Let the preview finish whatever the last action started.
+   *
+   * A save re-renders, the render re-reads the slots, and that read is a hop behind
+   * the save; awaiting `settled` once only covers the save.
+   */
+  async function settlePreview(
+    wb: ReturnType<typeof mountWorkbench>,
+    until: () => boolean,
+  ): Promise<void> {
+    for (let hop = 0; hop < 8 && !until(); hop += 1) {
+      await wb.settled();
+    }
+  }
+
+  it('plays both Clips in order, each at its own delay, across the seam', async () => {
+    vi.useFakeTimers();
+    const wb = await composing();
+    expect(counter(wb)).toContain('a · 1/3');
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-play]')!.click();
+    await wb.settled();
+    // `a` has 3 frames at 50 ms: two ticks reach its last frame, still inside `a`.
+    vi.advanceTimersByTime(50);
+    vi.advanceTimersByTime(50);
+    expect(counter(wb)).toContain('a · 3/3');
+    // The next tick crosses the seam, and `b` runs at its own 30 ms.
+    vi.advanceTimersByTime(50);
+    expect(counter(wb)).toContain('b · 1/2');
+    // The last frame of `b` is the end of the strip.
+    vi.advanceTimersByTime(30);
+    expect(
+      wb.root.querySelector<HTMLButtonElement>('[data-sequence-next]')!.disabled,
+    ).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('wraps from the last frame back to the first', async () => {
+    vi.useFakeTimers();
+    const wb = await composing();
+    wb.root.querySelector<HTMLElement>('[data-sequence-play]')!.click();
+    await wb.settled();
+    // 3×50 + 2×30 = 210 ms runs the whole composition out.
+    vi.advanceTimersByTime(210);
+    expect(counter(wb)).toContain('a · 1/3');
+    vi.useRealTimers();
+  });
+
+  it('marks the seam and stands on the frame before it', async () => {
+    const wb = await composing();
+
+    // One join between the two Clips, drawn as its own control.
+    const seam = wb.root.querySelector<HTMLElement>('[data-sequence-seam="1"]')!;
+    expect(seam).not.toBeNull();
+    seam.click();
+    await wb.settled();
+    // The frame before the join is `a`'s last, so ▶ is the Clip change itself.
+    expect(counter(wb)).toContain('a · 3/3');
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-next]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('b · 1/2');
+  });
+
+  it('jumps from the transport when the playhead is not near the seam', async () => {
+    const wb = await composing();
+    wb.root.querySelector<HTMLElement>('[data-sequence-seek="1"]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('b · 1/2');
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-seam-before]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('a · 3/3');
+  });
+
+  it('stands in for a Clip whose sheet cannot be read', async () => {
+    const wb = await composing({
+      readClip: async (_characterId, clipId) => {
+        if (clipId === 'b') {
+          throw new Error('broken provenance');
+        }
+        return clip('a', 3, [50]);
+      },
+    });
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-seek="1"]')!.click();
+    await wb.settled();
+    expect(wb.root.querySelector('[data-sequence-missing="b"]')).not.toBeNull();
+    expect(wb.root.querySelector('[data-action-error]')).toBeNull();
+  });
+
+  it('clamps the playhead when the Clip under it is removed', async () => {
+    const wb = await composing();
+    wb.root.querySelector<HTMLElement>('[data-sequence-seek="1"]')!.click();
+    await wb.settled();
+
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-remove]')[1]!.click();
+    await settlePreview(wb, () => wb.previewSlots.length === 1);
+    expect(counter(wb)).toContain('a · 3/3');
+  });
+
+  it('forks a Clip to align it and puts its commit back in the slot', async () => {
+    const forks: Array<{ clipId: string; draftId?: string }> = [];
+    const saves: string[][] = [];
+    const commits: string[] = [];
+    const wb = await composing({
+      forkClip: async (_characterId, clipId, draftId) => {
+        forks.push({ clipId, ...(draftId === undefined ? {} : { draftId }) });
+        return { ...DRAFT, id: draftId ?? 'fork' };
+      },
+      commitDraft: async (characterId, _draftId, name) => {
+        commits.push(name);
+        return { kind: 'clip', id: name, dir: `characters/${characterId}/clips/${name}` } as
+          unknown as CommittedAsset;
+      },
+      saveSequenceDraft: async (characterId, request) => {
+        saves.push(request.clips);
+        return {
+          id: request.draftId ?? 'composition',
+          characterId,
+          clips: [...request.clips],
+          forkOf: request.forkOf ?? null,
+          spriteForgeVersion: '0.1.0',
+          dir: `characters/${characterId}/sequence-drafts/composition`,
+        };
+      },
+    });
+
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-align-row]')[1]!.click();
+    await settlePreview(wb, () => wb.root.querySelector('[data-sequence-draft-frame]') !== null);
+
+    expect(forks).toEqual([{ clipId: 'b', draftId: 'b-align' }]);
+    // The composition stays on screen — the seam is the reason for the fork — and
+    // the playhead is parked on the frame before it, so ▶ is the join itself.
+    expect(wb.mode).toBe('compose');
+    expect(wb.realign).toMatchObject({ slot: 1, clipId: 'b' });
+    expect(counter(wb)).toContain('a · 3/3');
+    // The slot plays the fork's own frame, not the still-placed committed Clip.
+    expect(
+      wb.root.querySelector('[data-sequence-draft-frame="b-align"]'),
+    ).not.toBeNull();
+    expect(wb.root.querySelector('[data-align-for-composition]')?.textContent).toContain(
+      'b',
+    );
+
+    // Stepping forward is the Clip change; the fork's own first frame is what shows.
+    wb.root.querySelector<HTMLElement>('[data-sequence-next]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('b · 1/3');
+
+    // The commit is in the panel, and it takes the slot.
+    wb.root.querySelector<HTMLElement>('[data-commit-run]')!.click();
+    await settlePreview(wb, () =>
+      [...wb.root.querySelectorAll<HTMLElement>('[data-sequence-clip]')].some(
+        (item) => item.dataset.sequenceClip === 'b-align',
+      ),
+    );
+
+    expect(commits).toEqual(['b-align']);
+    // The slot took the new Clip rather than the composition pointing at the old.
+    expect(saves.at(-1)).toEqual(['a', 'b-align']);
+    expect(wb.mode).toBe('compose');
+    expect(wb.realign).toBeNull();
+    const items = wb.root.querySelectorAll<HTMLElement>('[data-sequence-clip]');
+    expect([...items].map((item) => item.dataset.sequenceClip)).toEqual(['a', 'b-align']);
+  });
+
+  it('places the fork by its pending offset and mirror, and drops it on discard', async () => {
+    let flip = false;
+    const wb = await composing({
+      forkClip: async (_characterId, _clipId, draftId) => ({ ...DRAFT, id: draftId ?? 'fork' }),
+      setFlipX: async (_characterId, draftId, next) => {
+        flip = next;
+        return { ...DRAFT, id: draftId, flipX: next };
+      },
+      readCharacterAlignment: async () => ({
+        ...ALIGNMENT,
+        drafts: [{ id: 'b-align', placementOffset: { x: 3, y: -2 }, flipX: flip }],
+      }),
+      discardDraft: async () => undefined,
+    });
+
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-align-row]')[1]!.click();
+    await settlePreview(wb, () => wb.root.querySelector('[data-sequence-draft-frame]') !== null);
+
+    // The fork's pending placement is on the frame it is placed with, so the seam
+    // can be judged against what the commit will bake.
+    const frame = wb.root.querySelector<HTMLElement>('[data-sequence-draft-frame]')!;
+    expect(frame.dataset.offsetX).toBe('3');
+    expect(frame.dataset.offsetY).toBe('-2');
+    expect(frame.dataset.flip).toBe('false');
+
+    const mirror = wb.root.querySelector<HTMLInputElement>('[data-align-flip]')!;
+    mirror.checked = true;
+    mirror.dispatchEvent(new Event('change'));
+    await settlePreview(
+      wb,
+      () => wb.root.querySelector<HTMLElement>('[data-sequence-draft-frame]')?.dataset.flip === 'true',
+    );
+    expect(wb.root.querySelector<HTMLElement>('[data-sequence-draft-frame]')!.dataset.flip).toBe(
+      'true',
+    );
+
+    // Dropping the fork leaves the composition alone and puts the old Clip back.
+    wb.root.querySelector<HTMLElement>('[data-discard-draft]')!.click();
+    answerDialog();
+    await settlePreview(wb, () => wb.realign === null);
+    expect(wb.mode).toBe('compose');
+    expect(wb.root.querySelector('[data-sequence-draft-frame]')).toBeNull();
+    expect(counter(wb)).toContain('a · 3/3 · frame 3/5');
+  });
+
+  it('moves the adjustment to another Clip from the panel or its row', async () => {
+    const forks: string[] = [];
+    const dropped: string[] = [];
+    const wb = await composing({
+      forkClip: async (_characterId, clipId, draftId) => {
+        forks.push(draftId ?? clipId);
+        return { ...DRAFT, id: draftId ?? 'fork' };
+      },
+      discardDraft: async (_characterId, draftId) => {
+        dropped.push(draftId);
+      },
+    });
+
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-align-row]')[0]!.click();
+    await settlePreview(wb, () => wb.realign !== null);
+    expect(wb.realign).toMatchObject({ slot: 0, forkDraftId: 'a-align' });
+    // The Clip in hand says so, and the other one offers the switch.
+    expect(wb.root.querySelector<HTMLElement>('[data-align-target="0"]')!.dataset.active).toBe('');
+    expect(wb.root.querySelector<HTMLElement>('[data-align-target="1"]')!.dataset.active).toBe(
+      undefined,
+    );
+
+    // The panel retargets to the second Clip by itself.
+    wb.root.querySelector<HTMLElement>('[data-align-target="1"]')!.click();
+    await settlePreview(
+      wb,
+      () => wb.root.querySelector('[data-sequence-draft-frame="b-align"]') !== null,
+    );
+
+    expect(forks).toEqual(['a-align', 'b-align']);
+    // The abandoned fork was never committed, so switching takes it back.
+    expect(dropped).toEqual(['a-align']);
+    expect(wb.realign).toMatchObject({ slot: 1, forkDraftId: 'b-align' });
+    expect(wb.mode).toBe('compose');
+    // The playhead is parked on the seam of the new one, and it is the clip whose
+    // offset the panel edits.
+    expect(counter(wb)).toContain('a · 3/3');
+    expect(wb.root.querySelector('[data-sequence-draft-frame="b-align"]')).not.toBeNull();
+    expect(wb.root.querySelector('[data-align-offset-y]')).not.toBeNull();
+
+    // Pressing the Clip already in hand only walks back to its seam.
+    wb.root.querySelector<HTMLElement>('[data-sequence-next]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('b · 1/3');
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-align-row]')[1]!.click();
+    await settlePreview(wb, () => counter(wb).includes('a · 3/3'));
+    expect(dropped).toEqual(['a-align']);
+    expect(forks).toEqual(['a-align', 'b-align']);
+  });
+
+  it('leaves an unrelated commit alone', async () => {
+    const saves: string[][] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        saveSequenceDraft: async (characterId, request) => {
+          saves.push(request.clips);
+          return {
+            id: request.draftId ?? 'composition',
+            characterId,
+            clips: [...request.clips],
+            forkOf: request.forkOf ?? null,
+            spriteForgeVersion: '0.1.0',
+            dir: `characters/${characterId}/sequence-drafts/composition`,
+          };
+        },
+      }),
+    });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+    // Open a composition, then go and commit a Draft that has nothing to do with it.
+    wb.setMode('compose');
+    wb.root.querySelector<HTMLElement>('[data-sequence-new]')!.click();
+    await wb.settled();
+    const savesBefore = saves.length;
+
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.root.querySelector<HTMLElement>('[data-commit-run]')!.click();
+    await wb.settled();
+
+    expect(saves).toHaveLength(savesBefore);
+    expect(wb.mode).toBe('view');
+  });
+});
+
 describe('export contract fields', () => {
   it('sends the animation subset, situations, flips and facing', async () => {
     const requests: unknown[] = [];
@@ -3123,7 +3524,18 @@ describe('export contract fields', () => {
     (stage.querySelector('[data-export-target-input]') as HTMLInputElement).value = 'pixel-pet';
     stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
     stage.querySelector<HTMLInputElement>('[data-export-flip="walk"]')!.click();
-    (stage.querySelector('[data-export-situations]') as HTMLInputElement).value = 'idle, happy';
+    // The first Situation is there to fill; bind it, then declare a second one.
+    typeInto(
+      stage.querySelector<HTMLInputElement>('[data-export-situation-name]')!,
+      'idle',
+    );
+    stage.querySelector<HTMLElement>('[data-export-situation-bind="walk"]')!.click();
+    stage.querySelector<HTMLElement>('[data-export-situation-add]')!.click();
+    typeInto(
+      stage.querySelectorAll<HTMLInputElement>('[data-export-situation-name]')[1]!,
+      'happy',
+    );
+    stage.querySelectorAll<HTMLElement>('[data-export-situation-bind="walk"]')[1]!.click();
     (stage.querySelector('[data-export-facing]') as HTMLSelectElement).value = 'left';
     stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
     await wb.settled();
@@ -3131,13 +3543,100 @@ describe('export contract fields', () => {
     expect(requests).toEqual([
       {
         target: 'pixel-pet',
-        bindings: { idle: [] },
+        bindings: { idle: ['walk'], happy: ['walk'] },
         animations: ['walk'],
         situations: ['idle', 'happy'],
         flipsFacing: ['walk'],
         authoredFacing: 'left',
       },
     ]);
+  });
+
+  it('offers only the ticked animations as bindings', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadCharacter('hero');
+    wb.setMode('export');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    const bindables = (): string[] =>
+      [...stage.querySelectorAll<HTMLElement>('[data-export-situation-bind]')].map(
+        (chip) => chip.dataset.exportSituationBind!,
+      );
+    // Nothing ticked: a row has nothing to bind to and says so.
+    expect(bindables()).toEqual([]);
+    expect(stage.textContent).toContain('tick an animation to bind it');
+
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    expect(bindables()).toEqual(['walk']);
+  });
+
+  it('keeps a binding whose animation was unticked, and blocks the export until it is back', async () => {
+    const requests: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        exportCharacter: async (_characterId, target, request) => {
+          requests.push({ target, ...request });
+          return EXPORT_RESULT;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadCharacter('hero');
+    wb.setMode('export');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    (stage.querySelector('[data-export-target-input]') as HTMLInputElement).value = 'pixel-pet';
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    stage.querySelector<HTMLElement>('[data-export-situation-bind="walk"]')!.click();
+    // Unticking leaves the reference in place (marked), rather than silently
+    // binding a Situation to nothing.
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    const stale = stage.querySelector<HTMLElement>('[data-export-situation-bind="walk"][data-stale]');
+    expect(stale).not.toBeNull();
+    expect(stage.querySelector('[data-export-situation-problem]')?.textContent).toContain(
+      'not exported',
+    );
+
+    stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
+    await wb.settled();
+    expect(requests).toEqual([]);
+
+    // Ticking it again clears the objection and the export goes through.
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
+    await wb.settled();
+    expect(requests).toHaveLength(1);
+  });
+
+  it('catches a duplicated or unbound Situation before the server sees it', async () => {
+    const requests: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        exportCharacter: async (_characterId, target, request) => {
+          requests.push({ target, ...request });
+          return EXPORT_RESULT;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadCharacter('hero');
+    wb.setMode('export');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    (stage.querySelector('[data-export-target-input]') as HTMLInputElement).value = 'pixel-pet';
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    stage.querySelector<HTMLElement>('[data-export-situation-bind="walk"]')!.click();
+
+    stage.querySelector<HTMLElement>('[data-export-situation-add]')!.click();
+    typeInto(stage.querySelectorAll<HTMLInputElement>('[data-export-situation-name]')[1]!, 'idle');
+    expect(stage.querySelector('[data-export-situation-problem]')?.textContent).toContain(
+      'declared twice',
+    );
+
+    stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
+    await wb.settled();
+    expect(requests).toEqual([]);
   });
 
   it('keeps the half-typed form across a re-render', async () => {

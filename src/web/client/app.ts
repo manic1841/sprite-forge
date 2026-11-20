@@ -26,6 +26,7 @@ import type { WorkbenchContext } from './workbench/context.js';
 import type { CutSession, CutSessionDeps } from './workbench/cutSession.js';
 import { createCutSession } from './workbench/cutSession.js';
 import { createDraftEditor } from './workbench/draftEditor.js';
+import { createSequencePreview } from './workbench/sequencePreview.js';
 import { make } from './workbench/dom.js';
 import { renderInspector as inspectorView } from './workbench/inspector.js';
 import { renderLibrary as libraryView } from './workbench/library.js';
@@ -89,6 +90,12 @@ export interface WorkbenchHandle {
   readonly activeExport: string | null;
   /** The live Export Manifest (Export stage), or `null`. */
   readonly manifest: WorkbenchState['manifest'];
+  /** The composition preview's playhead. */
+  readonly previewFrame: number;
+  /** The composition preview's resolved source Clips. */
+  readonly previewSlots: WorkbenchState['previewSlots'];
+  /** A slot waiting for a re-aligned Clip, or `null`. */
+  readonly realign: WorkbenchState['realign'];
   /** Switch mode; swaps the stage and re-renders the contextual inspector. */
   setMode(mode: WorkbenchMode): void;
   /** Load a Recording: read its cut list and show it in the filmstrip. */
@@ -213,6 +220,21 @@ export function mountWorkbench(
     setMode,
     loadAsset: openAsset,
     loadAlignment: openAlignment,
+    loadCharacter,
+    rescan,
+  });
+
+  const preview = createSequencePreview({
+    api,
+    state,
+    regions: { stage },
+    renderStage,
+    renderInspector,
+    renderContext,
+    run,
+    loadDraft: openDraft,
+    loadAlignment: openAlignment,
+    setMode,
     rescan,
   });
 
@@ -224,6 +246,7 @@ export function mountWorkbench(
     cut,
     cutDeps,
     draft,
+    preview,
 
     render() {
       renderLibrary();
@@ -483,6 +506,11 @@ export function mountWorkbench(
     // of a blank one.
     state.mode = availableFaces().includes(mode) ? mode : defaultFace(state.target);
     root.dataset.mode = state.mode;
+    // The composition preview plays in the stage it belongs to; leaving the face
+    // stops it rather than letting a hidden timer run on.
+    if (from === 'compose' && state.mode !== 'compose') {
+      preview.stop();
+    }
     renderModes();
     renderStage();
     renderFilmstrip();
@@ -782,6 +810,15 @@ export function mountWorkbench(
     },
     get manifest() {
       return state.manifest;
+    },
+    get previewFrame() {
+      return state.previewFrame;
+    },
+    get previewSlots() {
+      return state.previewSlots;
+    },
+    get realign() {
+      return state.realign;
     },
     setMode,
     loadRecording: openRecording,

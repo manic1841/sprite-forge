@@ -1,0 +1,168 @@
+/* Split from `workbench.css`; load order is the cascade order (00 → 99). */
+/* ------------------------------------------------------- composition preview */
+
+/* The composition is judged at its seam, so the preview is the stage's main
+   picture and the Clip list sits under it. It keeps its own height budget and
+   never widens the stage from a zoomed frame. */
+.wb-shell .seq-preview {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  /* The picture deserves a real share of the stage; the Clip list scrolls instead. */
+  min-height: 180px;
+  /* The counter, the seam track and the transport are below the frame and never
+     give way, so the row may not grow past this box. */
+  overflow: hidden;
+}
+
+.wb-shell .seq-preview .draft-stage {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-shell .seq-preview .seq-counter,
+.wb-shell .seq-preview .seq-track,
+.wb-shell .seq-preview .seq-transport {
+  flex: none;
+}
+
+/* The box is the crop window over a strip, exactly like the View face, so the
+   frame fills it and the strip slides under it. */
+.wb-shell .seq-frame-box {
+  position: relative;
+}
+
+.wb-shell .seq-frame-stack {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.wb-shell .seq-frame-stack .sheet,
+.wb-shell .seq-frame-stack .seq-frame-missing {
+  display: block;
+  max-width: none;
+}
+
+.wb-shell .seq-frame-stack [hidden] {
+  display: none;
+}
+
+/* A re-aligned Clip plays the fork's raw frame here: one PNG per frame, placed in
+   the box by its pending offset and mirror, so the seam can be judged before the
+   placement is baked. */
+.wb-shell .seq-frame-stack .sheet[data-sequence-draft-frame] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  image-rendering: pixelated;
+  transform-origin: top left;
+}
+
+.wb-shell .seq-frame-missing {
+  height: 100%;
+  padding: 8px;
+  border: 1px dashed var(--u-line-2);
+  border-radius: 8px;
+  color: var(--u-muted);
+  font-size: 12px;
+  text-align: center;
+  align-content: center;
+}
+
+.wb-shell .seq-counter {
+  margin: 0;
+  color: var(--u-muted);
+  font-family: var(--u-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The seam track: a Clip per label and the join between each pair. The seam is a
+   real button, because *standing on the frame before it* is how the join is
+   judged from both sides. */
+.wb-shell .seq-track {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: min(100%, 620px);
+  margin-inline: auto;
+}
+
+.wb-shell .seq-slot,
+.wb-shell .seq-seam {
+  border: 1px solid var(--u-line);
+  border-radius: 6px;
+  background: var(--u-surface);
+  color: var(--u-ink);
+  font-family: var(--u-mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 7px;
+  cursor: pointer;
+}
+
+.wb-shell .seq-slot[data-active] {
+  border-color: var(--u-accent);
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+}
+
+.wb-shell .seq-seam {
+  padding: 5px 3px;
+  border-style: dashed;
+  border-color: var(--u-line-2);
+  color: var(--u-muted);
+}
+
+.wb-shell .seq-seam:hover {
+  border-color: var(--u-accent);
+  color: var(--u-accent-text);
+}
+
+.wb-shell .seq-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* The composition is judged at its seam, so the preview takes the whole stage:
+   the Clip list it used to share with lives in the panel now. */
+.wb-shell .stage-view[data-stage-view="compose"] {
+  justify-content: center;
+}
+
+.wb-shell .seq-preview {
+  justify-content: center;
+}
+
+/* The panel's controls *are* the composition here, so they get more of it than
+   the facts below do — the order has to be reachable without fighting a scroll
+   box sized for one or two fields. */
+.wb-shell .inspector[data-inspector-for="compose"] .inspector-actions {
+  max-height: 78%;
+}
+
+/* The Clip rows carry the same two seams as a word, so a row can be approached
+   without hunting the track. */
+.wb-shell .sequence-item .btn[data-sequence-align-row] {
+  white-space: nowrap;
+}
+
+/* The row being re-aligned is marked, and the word changes: pressing it again is
+   a way back to its seam, and pressing another row moves the fork there. */
+.wb-shell .sequence-item .btn[data-sequence-align-row][data-active] {
+  border-color: var(--u-accent);
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+}
