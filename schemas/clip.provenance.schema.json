@@ -93,6 +93,10 @@
       "description": "Manual placement on top of the automatic Anchor. Omitted when {0,0}.",
       "$ref": "#/$defs/offset"
     },
+    "flipX": {
+      "description": "Whether the frames are mirrored left to right at bake time. Omitted when the Clip is not flipped.",
+      "const": true
+    },
     "derivedFrom": {
       "description": "The Asset this Clip was forked from; null when not a fork.",
       "oneOf": [

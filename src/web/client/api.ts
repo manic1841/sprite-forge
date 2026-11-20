@@ -101,8 +101,8 @@ export interface WorkbenchApi {
   readClipDraft(characterId: string, draftId: string): Promise<ClipDraft>;
   /**
    * The URL a Draft frame's PNG is served from, for an `<img src>`. Synchronous:
-   * it is a URL, not a fetch, so the browser loads the image itself. `revision`
-   * busts the cache after a Repair so the repaired frame is re-fetched.
+   * it is a URL, not a fetch, so the browser loads the image itself. The URL always
+   * carries the cache-buster; `revision` adds the Repair counter as well.
    */
   frameUrl(characterId: string, draftId: string, index: number, revision?: number): string;
   /** Read a Draft's Repair state: its ordered operations plus validity warnings. */
@@ -125,7 +125,7 @@ export interface WorkbenchApi {
   ): Promise<string>;
   /** Read a Character's Canvas and every Clip/Draft placement offset (Alignment stage). */
   readCharacterAlignment(characterId: string): Promise<CharacterAlignment>;
-  /** Read a Draft's placement offset plus alignment-validity warnings. */
+  /** Read a Draft's placement offset, mirror and validity warnings. */
   readDraftAlignment(characterId: string, draftId: string): Promise<AlignmentState>;
   /** Set (or clear) a Draft's manual placement offset. */
   setPlacementOffset(
@@ -133,6 +133,8 @@ export interface WorkbenchApi {
     draftId: string,
     offset: PlacementOffset,
   ): Promise<ClipDraft>;
+  /** Mirror a Draft left to right, or clear the mirror. */
+  setFlipX(characterId: string, draftId: string, flipX: boolean): Promise<ClipDraft>;
   /** Resize a Character's Canvas in either direction and re-bake its committed Clips. */
   resizeCanvas(characterId: string, width: number, height: number): Promise<ResizeCanvasResult>;
   /** Shrink a Character's Canvas to its content floor. */
@@ -213,6 +215,21 @@ export interface ExportRequest {
 export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
   const base = '/api';
 
+  /**
+   * Cache-buster for frame and sheet URLs.
+   *
+   * Pixels are rewritten in place — a Repair, a Canvas resize — so the URL stays
+   * the same and the browser reuses the bitmap it already decoded. A resized Canvas
+   * would then be drawn as the old pixels stretched into the new, larger box. Every
+   * mutation that can rewrite pixels bumps this, and it is appended to the image
+   * URLs, so a re-read comes from the store. A response header alone is not enough:
+   * the decoded image is still reused for an identical URL within the page.
+   */
+  let pixelEpoch = 0;
+  function bumpPixels(): void {
+    pixelEpoch += 1;
+  }
+
   async function call<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetchImpl(`${base}${path}`, {
       headers: { 'content-type': 'application/json' },
@@ -255,11 +272,14 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
         method: 'POST',
         body: JSON.stringify(request),
       }),
-    commitDraft: (characterId, draftId, name) =>
-      call<CommittedAsset>(`/characters/${characterId}/drafts/${draftId}/commit`, {
-        method: 'POST',
-        body: JSON.stringify({ name }),
-      }),
+    commitDraft: async (characterId, draftId, name) => {
+      const committed = await call<CommittedAsset>(
+        `/characters/${characterId}/drafts/${draftId}/commit`,
+        { method: 'POST', body: JSON.stringify({ name }) },
+      );
+      bumpPixels();
+      return committed;
+    },
     renameSegment: (recordingId, cutId, newId) =>
       call<CutList>(`/recordings/${recordingId}/cuts/${cutId}/rename`, {
         method: 'POST',
@@ -288,19 +308,27 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
       call<ClipDraft>(`/characters/${characterId}/drafts/${draftId}`),
     frameUrl: (characterId, draftId, index, revision) => {
       const base = `/api/characters/${characterId}/drafts/${draftId}/frames/${index}`;
-      return revision && revision > 0 ? `${base}?r=${revision}` : base;
+      const stale = revision && revision > 0 ? `&r=${revision}` : '';
+      return `${base}?v=${pixelEpoch}${stale}`;
     },
     readRepair: (characterId, draftId) =>
       call<RepairState>(`/characters/${characterId}/drafts/${draftId}/repair`),
-    appendRepairOperation: (characterId, draftId, operation) =>
-      call<RepairState>(`/characters/${characterId}/drafts/${draftId}/repair/operations`, {
-        method: 'POST',
-        body: JSON.stringify(operation),
-      }),
-    undoRepairOperation: (characterId, draftId) =>
-      call<RepairState>(`/characters/${characterId}/drafts/${draftId}/repair/undo`, {
-        method: 'POST',
-      }),
+    appendRepairOperation: async (characterId, draftId, operation) => {
+      const state = await call<RepairState>(
+        `/characters/${characterId}/drafts/${draftId}/repair/operations`,
+        { method: 'POST', body: JSON.stringify(operation) },
+      );
+      bumpPixels();
+      return state;
+    },
+    undoRepairOperation: async (characterId, draftId) => {
+      const state = await call<RepairState>(
+        `/characters/${characterId}/drafts/${draftId}/repair/undo`,
+        { method: 'POST' },
+      );
+      bumpPixels();
+      return state;
+    },
     sampleRepairColor: async (characterId, draftId, frame, x, y) => {
       const body = await call<{ color: string }>(
         `/characters/${characterId}/drafts/${draftId}/repair/sample?frame=${frame}&x=${x}&y=${y}`,
@@ -315,22 +343,38 @@ export function createApi(fetchImpl: typeof fetch = fetch): WorkbenchApi {
         method: 'POST',
         body: JSON.stringify(offset),
       }),
-    resizeCanvas: (characterId, width, height) =>
-      call<ResizeCanvasResult>(`/characters/${characterId}/resize-canvas`, {
+    setFlipX: (characterId, draftId, flipX) =>
+      call<ClipDraft>(`/characters/${characterId}/drafts/${draftId}/alignment/flip`, {
         method: 'POST',
-        body: JSON.stringify({ width, height }),
+        body: JSON.stringify({ flipX }),
       }),
-    fitCanvas: (characterId) =>
-      call<ResizeCanvasResult>(`/characters/${characterId}/fit-canvas`, {
-        method: 'POST',
-      }),
-    frameCanvas: (characterId, request) =>
-      call<Canvas>(`/characters/${characterId}/frame-canvas`, {
+    resizeCanvas: async (characterId, width, height) => {
+      const resized = await call<ResizeCanvasResult>(
+        `/characters/${characterId}/resize-canvas`,
+        { method: 'POST', body: JSON.stringify({ width, height }) },
+      );
+      bumpPixels();
+      return resized;
+    },
+    fitCanvas: async (characterId) => {
+      const resized = await call<ResizeCanvasResult>(
+        `/characters/${characterId}/fit-canvas`,
+        { method: 'POST' },
+      );
+      bumpPixels();
+      return resized;
+    },
+    frameCanvas: async (characterId, request) => {
+      const canvas = await call<Canvas>(`/characters/${characterId}/frame-canvas`, {
         method: 'POST',
         body: JSON.stringify(request),
-      }),
+      });
+      bumpPixels();
+      return canvas;
+    },
     sheetUrl: (characterId, kind, id) =>
-      `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet`,
+      `/api/characters/${characterId}/${kind === 'clip' ? 'clips' : 'sequences'}/${id}/sheet` +
+      `?v=${pixelEpoch}`,
     exportCharacter: (characterId, target, request) =>
       call<ExportResult>(`/characters/${characterId}/exports/${target}`, {
         method: 'POST',

@@ -175,7 +175,9 @@ A session is split from the **inside**, never across: `cutSession` composes
 and `draftEditor` composes `draftSheet` (the zoom rate and fit) and `repairTools`
 (the gestures). Each sub-module takes a narrow deps interface its session
 satisfies and never imports the session, so the verb set stays the facade and no
-cycle appears.
+cycle appears. The Alignment stage does the same with `canvasGrips`: the Canvas
+edges are a gesture with geometry rules of their own (the preview of a re-bake),
+so they live beside the stage's layout rather than inside it.
 
 The app sheet is split the same way it is read: `site/styles/` lines up
 `00-base` → `10-shell` → `20-chrome` → one file per region → `90-errors` →

@@ -36,6 +36,53 @@
   box-shadow: inset 0 0 0 1px var(--u-accent);
 }
 
+/* the band's own indices: a band alone does not say which frames it covers */
+.wb-shell .pick-index {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font: 400 9px/1 var(--ui-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--u-accent-ink);
+  pointer-events: none;
+}
+
+.wb-shell .pick-index[data-edge='start'] {
+  left: 3px;
+}
+
+.wb-shell .pick-index[data-edge='end'] {
+  right: 3px;
+}
+
+/* the typed range: two narrow fields that read as the selection's numbers. They
+   keep their width while the counter beside them truncates. */
+.wb-shell .pick-index-input {
+  flex: none;
+  width: 5.5ch;
+  height: 20px;
+  padding: 0 2px;
+  border: 1px solid var(--u-line-2);
+  border-radius: 3px;
+  background: var(--u-fill);
+  color: var(--u-ink);
+  font: 400 11px/1.6 var(--ui-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  appearance: textfield;
+}
+
+.wb-shell .pick-index-input:focus-visible {
+  outline: 2px solid var(--u-accent);
+  outline-offset: 1px;
+}
+
+.wb-shell .pick-index-input::-webkit-outer-spin-button,
+.wb-shell .pick-index-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* --------------------------------------------------------- transport bars */
 
 /* The filmstrip and the Draft tools are both transports under a picture, so they
@@ -207,7 +254,7 @@
 /* too narrow to hold a number: the cells close up into one band, and only the
    clock comes from their edges, so it reads as a density strip, not a comb */
 .wb-shell .film.is-dense {
-  gap: 1px;
+  gap: 0;
 }
 
 .wb-shell .film.is-dense .cell {
@@ -293,6 +340,26 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--u-muted);
+}
+
+/* the selected band's own indices, inset from the handles so both stay legible */
+.wb-shell .cut-index {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  font: 400 9px/1 var(--ui-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--u-ink);
+  pointer-events: none;
+}
+
+.wb-shell .cut-index[data-edge='start'] {
+  left: 11px;
+}
+
+.wb-shell .cut-index[data-edge='end'] {
+  right: 11px;
 }
 
 /* handles sit on the selected band's own edges, flush with it */

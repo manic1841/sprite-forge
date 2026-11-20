@@ -221,6 +221,10 @@ export function createDraftEditor(deps: DraftEditorDeps): DraftEditor {
 
     const sheetEl = make('div', 'draft-sheet');
     sheetEl.dataset.draftSheet = '';
+    // The stored frame is unflipped (Repair is authored on it), so a mirrored Draft
+    // is turned here. The whole sheet turns, overlay included, and the pointer maths
+    // un-turn the x it reads.
+    sheetEl.classList.toggle('is-mirrored', draft.flipX === true);
     sheetEl.append(img, overlay);
 
     const board = make('div', 'draft-board');

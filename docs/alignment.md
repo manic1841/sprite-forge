@@ -56,13 +56,61 @@ It cannot shrink past the **content floor**: the smallest symmetric Canvas the d
 pixels (plus any Draft's `placementOffset`) still fit on. A size below it is refused
 with the floor named. *Fit to content* resizes straight down to it.
 
-**The board holds its zoom.** The Alignment board is shown at one display rate (pixels
-per Canvas pixel) and a resize keeps it, so a smaller Canvas appears as a smaller board
-and the edges simply cut the pixels off — a crop, not a zoom-out, not a resample. The
-rate is clamped to the stage, though: growing past the room lowers it. Only a window
-resize clears it and refits. The board's `image-rendering: pixelated` keeps it honest at
-every rate, and the Canvas' size is printed under the board so the number is readable
-without measuring.
+### Dragging the Canvas frame
+
+The Canvas' own border is the resize handle: each edge of the board is a grab, and
+dragging it resizes. Because the Canvas is symmetric about the Anchor, a width drag
+moves **both** sides — one Canvas column dragged is two columns of width — and the
+content shifts with it; a height drag adds rows above the Anchor, which is why the
+top edge grows upward as well. Corners are not separate handles, for the same
+reason: an edge already moves the pair it belongs to.
+
+The drag is a **preview of the store's own arithmetic**: the frame's edge moves, the
+Anchor follows it, and every ghost is translated by the delta a re-bake would apply.
+The picture keeps the pixel size it was drawn at and is shifted by the same delta, so
+it stays still on screen while the area around it grows; shrinking lets the frame clip
+it. Nothing is written until release, and exactly one resize is written then — the
+preview and the write share one formula, so letting go never jumps.
+
+The pointer is read at the held rate, so one screen pixel of movement is always the
+same fraction of a Canvas pixel and the edge tracks the pointer exactly.
+
+Frames and sheets are rewritten **in place**, so their URLs are versioned with a
+counter the client bumps on every pixel mutation. Without it the browser reuses the
+bitmap it has already decoded and draws the old pixels — a cropped box of the old,
+smaller frame — into the new, larger one, which reads exactly like a stretch.
+
+A drag **cannot ask for a size the store would refuse**: it clamps at the content
+floor and keeps the width even, so an odd drag lands on whole columns instead of a
+rejected save. A drag that ends where it began writes nothing.
+
+Each edge is a real button, so the same resize is on the keyboard: arrow keys move
+the edge (a whole column of width, or a row of height; `shift` takes eight), and the
+keyboard offers the same clamps. The handles appear only where the Canvas is
+editable — a committed Clip's Align face has none, since its framing is read-only
+and a fork inherits the Character's Canvas anyway.
+
+## Actions the tool will refuse are disabled
+
+An Alignment action that the store would reject is greyed out **before** the click, and
+the reason is on screen in its place — never a save that fails afterwards. *Resize
+canvas* is disabled while the typed size is below the floor, has an odd width, is not a
+whole positive number, or is already the Canvas size; *Fit to content* is disabled when
+nothing is drawn or the Canvas is already at the floor; *Frame canvas from frame* is
+disabled while the frame is still being measured, and afterwards when the framing is
+already in place or would crop what is drawn. The store still validates — the checks
+here only keep the common case out of its error path.
+
+**A resize changes the Canvas' area, not the picture's size.** The board is drawn at
+one display rate (pixels per Canvas pixel) and the rate is **held**, so a resize moves
+the frame's edges while the sprite stays exactly as big as it was: growing reveals
+empty margin, shrinking cuts pixels away. Refitting on every resize would rescale the
+sprite under the pointer instead. The rate is always a **whole number of screen pixels**
+(never below 1) and the board is drawn with `image-rendering: pixelated`, so a Canvas
+pixel is always the same square block. A Canvas that outgrows the stage therefore keeps
+its rate and **scrolls** rather than shrinking to a fraction; only a window resize
+refits it to the new room. The Canvas' size is printed under the board so the number is
+readable without measuring, and the readout counts through the drag.
 
 The store is working data, not a version history: old sheets are overwritten, and the
 store's own version control (git) is the revision history.
@@ -86,10 +134,34 @@ provenance:
 - It travels with the Clip: re-running reads it back and re-applies it, and **forking
   copies it**.
 
+## Mirroring
+
+A capture is authored facing one way; a Clip that needs the other way carries
+`flipX: true` beside its offset:
+
+```jsonc
+// clips/<clip-id>/provenance.json
+{ "flipX": true, "placementOffset": { "x": 0, "y": -2 } }
+```
+
+- Only `true` is recorded; clearing the box drops the field.
+- It is applied **after** the Repair replay and before the offset, so Repair geometry
+  stays authored on the unflipped frame and a mirror never invalidates a script.
+- Mirroring bakes into the sheet at commit. A committed Clip shows *mirror: mirrored*
+  and is not re-flipped; fork it to toggle the flag again.
+- The Clip face previews the mirror too: the frame is shown turned (sheet and
+  footprint overlay together) and Repair clicks are un-turned, so the script still
+  lands on the stored, unflipped pixel.
+- On the Canvas it previews as a flipped ghost image, never a flipped box, so dragging
+  still reads in Canvas space.
+
 ## Forking
 
 A fork shares its Character's Canvas. A fork never carries its own Canvas — variants
 differ in pixels and in their `placementOffset`, never in Canvas size.
+
+A fork of a mirrored Clip starts from unflipped frames with `flipX: true` retained, so
+it reapplies the same mirror on commit rather than baking it twice.
 
 ## Committed Clips and Placement
 

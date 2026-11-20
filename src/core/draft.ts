@@ -129,6 +129,14 @@ export interface ClipDraftDescriptor {
    */
   placementFraming?: RepairFraming;
   /**
+   * Whether the Draft is mirrored left to right when it is baked or shown aligned.
+   * Absent when false; the stored frames stay unflipped, so a Repair script —
+   * authored on those frames — stays valid across a flip (docs/alignment.md).
+   * Carried into the committed Asset's provenance and inherited by a fork.
+   * Design-local: Drafts are not a frozen format (format-spec §11).
+   */
+  flipX?: boolean;
+  /**
    * A fork's inherited Repair-script reference (docs/repair.md, format-spec §6).
    * Absent when there is no Repair. Part of the fork seam: Repair scripts land in
    * #27; commit re-homes this reference onto the new Asset's Clip id.
@@ -614,6 +622,7 @@ export async function segmentContentBounds(
   if (value.derivedFrom !== undefined) preserved.derivedFrom = value.derivedFrom;
   if (value.placementOffset) preserved.placementOffset = value.placementOffset;
   if (value.placementFraming) preserved.placementFraming = value.placementFraming;
+  if (value.flipX) preserved.flipX = value.flipX;
   if (value.repair) preserved.repair = value.repair;
   if (value.repairFraming) preserved.repairFraming = value.repairFraming;
   return preserved;
@@ -879,6 +888,7 @@ const DRAFT_OPTIONAL_KEYS = [
   'derivedFrom',
   'placementOffset',
   'placementFraming',
+  'flipX',
   'repair',
   'repairFraming',
 ] as const;
@@ -1014,6 +1024,11 @@ function validateDraftDescriptor(value: unknown, artifact: string, draftId: stri
       issue('/placementOffset', 'must be an object with integer x and y');
     } else if (offset.x === 0 && offset.y === 0) {
       issue('/placementOffset', 'must be omitted when {0,0}');
+    }
+  }
+  if ('flipX' in value && value.flipX !== undefined) {
+    if (value.flipX !== true) {
+      issue('/flipX', 'must be true when present (omit it when not flipped)');
     }
   }
   if ('repair' in value && value.repair !== null && value.repair !== undefined) {

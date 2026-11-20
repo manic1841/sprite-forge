@@ -43,8 +43,9 @@ if (shell instanceof HTMLElement) {
     await workbench.ready;
     document.documentElement.dataset.wb = 'live';
     const store = document.querySelector('[data-wb-store]');
-    if (store) {
-      store.textContent = 'local store';
+    if (store && typeof body.root === 'string') {
+      store.textContent = body.root;
+      store.title = body.root;
     }
 
     // A visitor meets a cut in progress rather than an empty editor: open the

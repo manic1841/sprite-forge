@@ -29,7 +29,7 @@ import {
   type DraftSegmentSnapshot,
 } from './draft.js';
 import { StoreError } from './errors.js';
-import { translateOnCanvas } from './frames.js';
+import { flipHorizontally, translateOnCanvas } from './frames.js';
 import { assertValidId } from './ids.js';
 import {
   assetDir,
@@ -88,6 +88,11 @@ export interface ClipProvenance {
   repair: string | null;
   /** Manual placement on top of the automatic Anchor; omitted when `{0,0}`. */
   placementOffset?: { x: number; y: number };
+  /**
+   * Whether the frames are mirrored left to right at bake time. Omitted when the
+   * Clip is not flipped; the Draft's frames stay unflipped either way.
+   */
+  flipX?: boolean;
   /** The forked-from Asset, or null. */
   derivedFrom: AssetRef | null;
   spriteForgeVersion: string;
@@ -200,6 +205,7 @@ export async function commitDraft(
     canvas,
     script,
     draft.placementOffset ?? { x: 0, y: 0 },
+    draft.flipX === true,
   );
   // The Draft's script is re-homed onto the committed Asset id (the fork seam
   // #24 opened); provenance points at the re-homed script.
@@ -458,19 +464,24 @@ export async function forkAsset(
   const parent = await readCommittedClip(root, characterId, id);
   const frames = await sliceSheet(root, characterId, id, parent.meta, canvas);
 
-  // A committed sheet already carries the parent's manual placement offset; a
-  // fork's Draft holds the **automatic** placement again (the offset is recorded
-  // on the descriptor and re-applied on the next bake), so un-translate it here.
+  // A committed sheet already carries the parent's manual placement offset and
+  // its mirror; a fork's Draft holds the **automatic** placement again (the offset
+  // and the flip are recorded on the descriptor and re-applied on the next bake),
+  // so undo both here — un-translate, then un-flip.
   const inheritedOffset = parent.provenance.placementOffset ?? { x: 0, y: 0 };
+  const inheritedFlip = parent.provenance.flipX === true;
 
   await removePath(root, draftDir(characterId, draftId));
   const framePaths: string[] = [];
   for (let index = 0; index < frames.length; index++) {
-    const automatic = translateOnCanvas(
+    let automatic = translateOnCanvas(
       { width: canvas.width, height: canvas.height, data: frames[index]! },
       -inheritedOffset.x,
       -inheritedOffset.y,
     );
+    if (inheritedFlip) {
+      automatic = flipHorizontally(automatic);
+    }
     const png = await sharp(Buffer.from(automatic.data), {
       raw: { width: canvas.width, height: canvas.height, channels: 4 },
     })
@@ -509,6 +520,7 @@ export async function forkAsset(
           },
         }
       : {}),
+    ...(inheritedFlip ? { flipX: true } : {}),
     ...(inheritedRepair ? { repair: inheritedRepair } : {}),
   };
 
@@ -671,6 +683,9 @@ function buildClipProvenance(
   if (offset && (offset.x !== 0 || offset.y !== 0)) {
     provenance.placementOffset = { ...offset };
   }
+  if (draft.flipX === true) {
+    provenance.flipX = true;
+  }
   return provenance;
 }
 
@@ -706,16 +721,19 @@ export async function tileRepairedFrames(
   canvas: Canvas,
   script: RepairScript,
   offset: { x: number; y: number },
+  flipX = false,
 ): Promise<Buffer> {
   const sheetWidth = frames.length * canvas.width;
   const sheetHeight = canvas.height;
   const sheet = Buffer.alloc(sheetWidth * sheetHeight * 4);
 
   for (let index = 0; index < frames.length; index++) {
-    // Baked tiles are the repaired result: replay the script for this frame,
-    // then place the Clip manually by its offset.
+    // Baked tiles are the repaired result: replay the script for this frame, apply
+    // the Clip's mirror, then place it manually by its offset. Repair geometry is
+    // authored on the unflipped frame, so flipping last keeps scripts valid.
     const repaired = applyRepairScriptToFrame(frames[index]!, index, script);
-    const frame = translateOnCanvas(repaired, offset.x, offset.y).data;
+    const flipped = flipX ? flipHorizontally(repaired) : repaired;
+    const frame = translateOnCanvas(flipped, offset.x, offset.y).data;
     const offsetX = index * canvas.width;
     for (let y = 0; y < canvas.height; y++) {
       for (let x = 0; x < canvas.width; x++) {

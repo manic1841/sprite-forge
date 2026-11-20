@@ -42,6 +42,8 @@ export function draftInspector(
     addRow(list, 'delay', `${draftDelayMs(draft, ctx.state.draftFrame)} ms`);
     addRow(list, 'background', draft.background.hex);
     addRow(list, 'loop', String(draft.loop));
+    // The frame above is shown turned when this is on; the stored pixels are not.
+    addRow(list, 'mirror', draft.flipX === true ? 'on' : 'off');
     facts.appendChild(list);
   }
   info.appendChild(facts);

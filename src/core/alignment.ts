@@ -73,10 +73,12 @@ export interface AlignmentWarning {
   message: string;
 }
 
-/** A Draft's alignment state: its offset plus any validity warnings. */
+/** A Draft's alignment state: its offset and mirror plus any validity warnings. */
 export interface AlignmentState {
   /** The manual offset; `{0,0}` when there is none. */
   offset: PlacementOffset;
+  /** Whether the frames are mirrored left to right. */
+  flipX: boolean;
   warnings: AlignmentWarning[];
 }
 
@@ -85,6 +87,14 @@ export interface SetPlacementOffsetOptions {
   characterId: string;
   draftId: string;
   offset: PlacementOffset;
+}
+
+/** Inputs for {@link setFlipX}. */
+export interface SetFlipXOptions {
+  characterId: string;
+  draftId: string;
+  /** `true` mirrors the Clip left to right; `false` clears the mirror. */
+  flipX: boolean;
 }
 
 /** Inputs for {@link readDraftAlignment} / {@link expandCanvas}. */
@@ -149,8 +159,8 @@ export interface CharacterAlignment {
    */
   contentFloor: ContentFloor;
   /** `frameCount` is carried so a Clip's ghost can show one frame, not its whole sheet. */
-  clips: Array<{ id: string; frameCount: number; placementOffset?: PlacementOffset }>;
-  drafts: Array<{ id: string; placementOffset?: PlacementOffset }>;
+  clips: Array<{ id: string; frameCount: number; placementOffset?: PlacementOffset; flipX?: boolean }>;
+  drafts: Array<{ id: string; placementOffset?: PlacementOffset; flipX?: boolean }>;
 }
 
 /**
@@ -186,6 +196,33 @@ export async function setPlacementOffset(
   return readClipDraft(root, { characterId, draftId });
 }
 
+/**
+ * Set (or clear) a Draft's mirror.
+ *
+ * Like the placement offset, the mirror is recorded on the Draft and applied at
+ * bake time; the stored frames stay unflipped, so a Repair script authored on
+ * them survives a flip (docs/alignment.md). The Canvas is symmetric about the
+ * Anchor, so mirroring about the centre needs no offset to stay aligned.
+ */
+export async function setFlipX(root: string, options: SetFlipXOptions): Promise<ClipDraft> {
+  const { characterId, draftId, flipX } = options;
+  assertValidId(characterId, 'character', 'characterId');
+  assertValidId(draftId, 'draft', 'draftId');
+  if (typeof flipX !== 'boolean') {
+    throw new StoreError(`flipX must be a boolean; got ${String(flipX)}.`);
+  }
+
+  const draft = await readClipDraft(root, { characterId, draftId });
+  const { dir: _dir, frames: _frames, ...descriptor } = draft;
+  if (flipX) {
+    descriptor.flipX = true;
+  } else {
+    delete descriptor.flipX;
+  }
+  await writeClipDraft(root, descriptor);
+  return readClipDraft(root, { characterId, draftId });
+}
+
 /** Read a Draft's placement offset plus any alignment-validity warnings. */
 export async function readDraftAlignment(
   root: string,
@@ -199,6 +236,7 @@ export async function readDraftAlignment(
   const canvas = await readCanvas(root, characterId);
   return {
     offset: draft.placementOffset ?? { x: 0, y: 0 },
+    flipX: draft.flipX === true,
     warnings: checkAlignmentValidity(draft.placementFraming, framingOf(canvas, draft.frameCount)),
   };
 }
@@ -503,6 +541,7 @@ export async function readCharacterAlignment(
     }
     const provenance = (await readJsonFile(root, provenanceRel)) as {
       placementOffset?: PlacementOffset;
+      flipX?: boolean;
     };
     validateArtifact('clip-provenance', provenance, { artifact: provenanceRel });
     const meta = (await readJsonFile(root, assetMetaPath(characterId, 'clip', clipId))) as {
@@ -512,6 +551,7 @@ export async function readCharacterAlignment(
       id: clipId,
       frameCount: meta.frameCount,
       ...(provenance.placementOffset ? { placementOffset: { ...provenance.placementOffset } } : {}),
+      ...(provenance.flipX === true ? { flipX: true } : {}),
     });
   }
 
@@ -524,6 +564,7 @@ export async function readCharacterAlignment(
     drafts.push({
       id: draftId,
       ...(draft.placementOffset ? { placementOffset: { ...draft.placementOffset } } : {}),
+      ...(draft.flipX === true ? { flipX: true } : {}),
     });
   }
 

@@ -8,7 +8,7 @@
  */
 
 import type { WorkbenchApi } from '../api.js';
-import { confirmAction } from './dialog.js';
+import { confirmAction, promptText } from './dialog.js';
 import { askCharacterTarget, createCharacterFramedFrom, type CutTargetDeps } from './cutTargets.js';
 import type { WorkbenchState } from './state.js';
 
@@ -21,6 +21,10 @@ export interface ExtractDeps extends CutTargetDeps {
 /**
  * Extract a Segment into its Character, then open the Draft it produced.
  *
+ * A Segment is not limited to one Draft: each extract is offered a Draft name, so
+ * the same footage can be worked twice (a different key, a different repair) and
+ * kept side by side. Naming the Draft that already exists refreshes it instead.
+ *
  * @returns whether a Draft was opened.
  */
 export async function extractSegment(deps: ExtractDeps, cutId: string): Promise<boolean> {
@@ -32,13 +36,65 @@ export async function extractSegment(deps: ExtractDeps, cutId: string): Promise<
   if (characterId === null) {
     return false;
   }
-  const draft = await extractDraftInto(deps, characterId, recordingId, cutId);
+  const draftId = await askDraftId(deps, characterId, cutId);
+  if (draftId === null) {
+    return false;
+  }
+  const draft = await extractDraftInto(deps, characterId, recordingId, cutId, draftId);
   if (draft === null) {
     return false;
   }
   await deps.rescan();
   await deps.loadDraft(characterId, draft.id);
   return true;
+}
+
+/**
+ * The Draft name, prefilled with a free id.
+ *
+ * The default is the Segment's own id while it is free — the common case, and the
+ * one that reads as "the Clip of this Segment". Once it is taken the default moves
+ * to the next free suffix, so a second extract adds a Draft rather than quietly
+ * replacing the first. Typing a taken name is how a Draft is refreshed on purpose.
+ */
+async function askDraftId(
+  deps: ExtractDeps,
+  characterId: string,
+  cutId: string,
+): Promise<string | null> {
+  const taken = new Set(
+    deps.state.scan?.characters.find((entry) => entry.id === characterId)?.drafts.map(
+      (draft) => draft.id,
+    ) ?? [],
+  );
+  const free = freeDraftId(cutId, taken);
+  const answer = await promptText(
+    `Draft name for Segment "${cutId}" in "${characterId}".` +
+      (taken.has(cutId)
+        ? ` "${cutId}" already exists — keep it to refresh that Draft, or take the free name.`
+        : ''),
+    free,
+    'Extract',
+  );
+  if (answer === null) {
+    return null;
+  }
+  // An empty answer means "you decide", which is the prefilled name.
+  return answer === '' ? free : answer;
+}
+
+/** The first free `<cutId>`, `<cutId>-2`, … to prefill the name with. */
+function freeDraftId(cutId: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(cutId)) {
+    return cutId;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${cutId}-${suffix}`;
+    if (!taken.has(candidate)) {
+      return candidate;
+    }
+  }
+  return cutId;
 }
 
 /**
@@ -89,10 +145,12 @@ async function extractDraftInto(
   characterId: string,
   recordingId: string,
   cutId: string,
+  draftId: string,
 ): Promise<{ id: string } | null> {
   const { api, state } = deps;
+  const request = { recordingId, cutId, draftId };
   try {
-    return await api.extractClipDraft(characterId, { recordingId, cutId });
+    return await api.extractClipDraft(characterId, request);
   } catch (error) {
     const message = (error as Error).message;
     if (!/canvas/i.test(message)) {
@@ -105,7 +163,7 @@ async function extractDraftInto(
     // is the case the expand below covers — so a failure falls through, not up.
     try {
       await api.frameCanvas(characterId, { recordingId, cutId });
-      return await api.extractClipDraft(characterId, { recordingId, cutId });
+      return await api.extractClipDraft(characterId, request);
     } catch {
       // Fall through to the expand offer.
     }
@@ -132,7 +190,7 @@ async function extractDraftInto(
       return null;
     }
     await api.resizeCanvas(characterId, width, height);
-    return await api.extractClipDraft(characterId, { recordingId, cutId });
+    return await api.extractClipDraft(characterId, request);
   }
 }
 

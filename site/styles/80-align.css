@@ -53,6 +53,95 @@
   overflow: hidden;
 }
 
+/* The plate carries the edge handles: the board clips its own overflow, so a
+   handle inside it would be cut in half. */
+.wb-shell .align-plate {
+  position: relative;
+  width: max-content;
+  margin-inline: auto;
+}
+
+.wb-shell .align-grip {
+  position: absolute;
+  z-index: 4;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  touch-action: none;
+}
+
+.wb-shell .align-grip-x {
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  cursor: ew-resize;
+}
+
+.wb-shell .align-grip-y {
+  left: 0;
+  right: 0;
+  height: 14px;
+  cursor: ns-resize;
+}
+
+.wb-shell .align-grip[data-grip-edge="left"] {
+  left: -7px;
+}
+
+.wb-shell .align-grip[data-grip-edge="right"] {
+  right: -7px;
+}
+
+.wb-shell .align-grip[data-grip-edge="top"] {
+  top: -7px;
+}
+
+.wb-shell .align-grip[data-grip-edge="bottom"] {
+  bottom: -7px;
+}
+
+/* the handle is a bar on the edge, shown while the board is under the pointer */
+.wb-shell .align-grip::after {
+  content: '';
+  position: absolute;
+  border-radius: 2px;
+  background: var(--u-accent);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.wb-shell .align-grip-x::after {
+  top: 30%;
+  bottom: 30%;
+  left: 50%;
+  width: 3px;
+  margin-left: -1.5px;
+}
+
+.wb-shell .align-grip-y::after {
+  left: 30%;
+  right: 30%;
+  top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+}
+
+.wb-shell .align-plate:hover .align-grip::after,
+.wb-shell .align-grip:focus-visible::after,
+.wb-shell .align-plate.is-resizing .align-grip::after {
+  opacity: 1;
+}
+
+/* while an edge is dragged the ghosts are in the way of nothing */
+.wb-shell .align-plate.is-resizing,
+.wb-shell .align-plate.is-resizing .align-ghost {
+  user-select: none;
+}
+
+.wb-shell .align-plate.is-resizing .align-ghost {
+  pointer-events: none;
+}
+
 .wb-shell .align-anchor {
   position: absolute;
   z-index: 3;
@@ -81,11 +170,20 @@
   max-width: none;
 }
 
+/* A Draft's mirror is a property of the Draft, not of its stored frame, so the
+   preview turns the picture — the drag box itself stays unmirrored. */
+.wb-shell .is-mirrored {
+  transform: scaleX(-1);
+}
+
 .wb-shell .align-frame {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  /* Centres the board while there is room and keeps it start-aligned once it
+     overflows, so a crop shows its top-left instead of a clipped centre. */
+  margin: auto;
 }
 
 .wb-shell .align-size-readout {
@@ -94,10 +192,12 @@
   color: var(--u-soft);
 }
 
-/* the board is fitted to the stage, so centring never clips its edges */
+/* The board is drawn at a whole-number rate and crops when it outgrows the stage:
+   a Canvas pixel is never resampled, and the stage scrolls rather than zooming. */
 .wb-shell .stage-view[data-stage-view="alignment"] {
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
+  overflow: auto;
 }
 
 .wb-shell .align-offsets,
@@ -117,9 +217,20 @@
   width: 52px;
 }
 
+/* An inline checkbox under the offset pair: it applies on change, so it needs no
+   button of its own and must not read as part of "Set offset" above it. */
+.wb-shell .align-mirror {
+  margin: 8px 0 10px;
+}
+
 .wb-shell .align-floor {
   margin: -2px 0 6px;
   font: 400 11px/1.45 var(--ui-mono);
+}
+
+/* a disabled action says which rule it is up against */
+.wb-shell .align-floor.is-blocked {
+  color: #e8b57a;
 }
 
 .wb-shell .align-clips {

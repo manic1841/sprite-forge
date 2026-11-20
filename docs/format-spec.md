@@ -223,6 +223,7 @@ Schema: [`schemas/clip.provenance.schema.json`](../schemas/clip.provenance.schem
   "background": { "hex": "#9421ce", "source": "sampled", "tolerance": 24 },
   "repair": "repairs/walk/repair.json",
   "placementOffset": { "x": 0, "y": -2 },
+  "flipX": true,
   "derivedFrom": null,
   "spriteForgeVersion": "0.1.0"
 }
@@ -236,6 +237,7 @@ Schema: [`schemas/clip.provenance.schema.json`](../schemas/clip.provenance.schem
 | `background` | ✅ | `{hex, source: "sampled"\|"override", tolerance}`. |
 | `repair` | ➖ | Path to the Repair script, relative to the store root. Omitted or `null` when there is no Repair. |
 | `placementOffset` | ➖ | Manual placement on top of the automatic Anchor; **omitted when `{0,0}`**. |
+| `flipX` | ➖ | `true` when the frames are mirrored left to right at bake time; **omitted when not flipped**. Repair geometry stays in the unflipped frame, so a flip never invalidates a Repair script. |
 | `derivedFrom` | ➖ | `{kind, id}` of the forked-from Asset, or `null`. |
 | `spriteForgeVersion` | ✅ | Tool version that produced the Asset. |
 

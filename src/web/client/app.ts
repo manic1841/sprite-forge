@@ -194,6 +194,7 @@ export function mountWorkbench(
       updateFrame(ctx);
     },
     playStateChanged: () => paintPlayButton(ctx),
+    setSelection: (startFrame, endFrame) => cut.setSelection(startFrame, endFrame),
     stop: () => cut.stop(),
     loadDraft: openDraft,
     loadRecording: openRecording,
@@ -568,6 +569,12 @@ export function mountWorkbench(
     state.loadError = null;
     // Cutting is the only face a Recording has, so it is where a load lands.
     setMode(defaultFace(state.target));
+    // A new Recording starts at its first frame, so the carried scroll is not
+    // restored from the last one (`scrollTo` is not in every DOM implementation).
+    const staleScroller = filmstrip.querySelector<HTMLElement>('[data-strip-scroll]');
+    if (staleScroller) {
+      staleScroller.scrollLeft = 0;
+    }
     renderLibrary();
     renderStage();
     renderFilmstrip();
@@ -596,7 +603,7 @@ export function mountWorkbench(
   async function readAlignment(characterId: string): Promise<void> {
     state.activeCharacterId = characterId;
     state.alignment = await api.readCharacterAlignment(characterId);
-    // A different Character starts at a scale that fits it, not at the last one's.
+    // A different Character starts at a rate that fits it, not at the last one's.
     state.alignScale = null;
     if (state.alignment) {
       state.resizeWidth = state.alignment.canvas.width;

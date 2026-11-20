@@ -137,6 +137,27 @@ export function placeOnCanvas(
 }
 
 /**
+ * Mirror an image left to right, keeping its size.
+ *
+ * This is a Clip's **flip**, applied at bake time after Repair and before the
+ * placement offset. The Canvas is symmetric about the Anchor, so a mirror about
+ * the Canvas centre keeps the subject on the Anchor and needs no compensating
+ * offset (docs/alignment.md).
+ */
+export function flipHorizontally(image: RgbaImage): RgbaImage {
+  const { width, height } = image;
+  const data = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const from = (y * width + x) * 4;
+      const to = (y * width + (width - 1 - x)) * 4;
+      data.set(image.data.subarray(from, from + 4), to);
+    }
+  }
+  return { width, height, data };
+}
+
+/**
  * Translate a Canvas-sized image by `(dx, dy)`, keeping the Canvas size. Content
  * that moves past an edge is dropped; vacated pixels are transparent.
  *

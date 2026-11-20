@@ -200,9 +200,9 @@ export interface AlignState {
   /**
    * Screen pixels per Canvas pixel on the Alignment board; `null` fits the stage.
    *
-   * Held rather than recomputed每 render: refitting would blow a shrunken board
-   * back up to the stage, and a crop would then read as the pixels having been
-   * scaled instead. A window resize clears it to refit.
+   * Held rather than recomputed every render: a resize changes the Canvas' area,
+   * not the picture's size, so refitting would rescale the sprite under the
+   * pointer instead of sliding the frame's edge. A window resize clears it.
    */
   alignScale: number | null;
   resizeWidth: number;

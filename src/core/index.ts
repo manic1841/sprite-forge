@@ -113,6 +113,7 @@ export {
   readCharacterAlignment,
   readDraftAlignment,
   resizeCanvas,
+  setFlipX,
   setPlacementOffset,
 } from './alignment.js';
 export type {
@@ -127,6 +128,7 @@ export type {
   ReadDraftAlignmentOptions,
   ResizeCanvasOptions,
   ResizeCanvasResult,
+  SetFlipXOptions,
   SetPlacementOffsetOptions,
 } from './alignment.js';
 

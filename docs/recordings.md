@@ -87,11 +87,27 @@ In the workbench: select a Segment, then **drag on the frame** to draw the box.
 an existing box); *Whole frame* drops it. The box is snapshot into the Clip's
 provenance like the range is, so a committed Clip keeps reproducing the same pixels.
 
+The box is drawn in percentages of the **frame itself**, never of the pane around it
+(the frame is centred and its element has no border), so a pointer always lands on the
+source pixel it is over — no drift at any preview scale.
+
 In the workbench the same operations are on the Clip editor's stage: the Recording is
 previewed while it plays, a Segment is added from the fields under the list, renamed,
 deleted, or dragged in the filmstrip, and **Extract** turns it into a Draft on the
 same screen. Picking a Character in the Library while a Segment is selected asks the
 same question and extracts that Segment into the Character, opening the Draft it made.
+
+## A Segment can yield several Drafts
+
+A Segment is footage; a Draft is one attempt at turning it into a Clip. The two are
+not one-to-one: Extract asks for the Draft **name**, prefilled with the Segment's own
+id while that is free and stepping to `<id>-2` once it is taken, so the same Segment
+can be worked twice (another key, another repair) and kept side by side. Typing a name
+that already exists is the deliberate **refresh** of that Draft, which re-extracts its
+frames and keeps its Repair script and placement offset.
+
+The same holds outside the workbench: `forge extract --draft <draft-id>` and the
+`draftId` field of `POST /api/characters/<id>/drafts` name the Draft directly.
 
 Extracting needs a Character whose Canvas can hold the Segment, so the stage names the
 target Character above the Segment list. Work is Character-first: pick or create a

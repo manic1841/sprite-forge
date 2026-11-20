@@ -186,7 +186,8 @@ async function verifyClip(
     expectedHash: provenance.recordingHash,
   });
 
-  // Replay the stored Repair script (never re-derived), then bake with the offset.
+  // Replay the stored Repair script (never re-derived), then bake with the mirror
+  // and the offset.
   const script = provenance.repair
     ? await readRepairScript(root, { characterId, clipId })
     : { operations: [] };
@@ -195,6 +196,7 @@ async function verifyClip(
     canvas,
     script,
     provenance.placementOffset ?? { x: 0, y: 0 },
+    provenance.flipX === true,
   );
 
   const sheetRel = sheetPath(characterId, 'clip', clipId);
