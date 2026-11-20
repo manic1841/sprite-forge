@@ -72,7 +72,8 @@
 }
 
 .wb-shell .stage-view>.recording-viewer,
-.wb-shell .stage-view>.draft-viewer {
+.wb-shell .stage-view>.draft-viewer,
+.wb-shell .stage-view>.seq-preview {
   /* The viewer takes what the panels below it leave, rather than a full viewport
      of its own: `flex-basis: 0` plus `min-height: 0` lets the picture give way
      when there is a panel underneath, so the stage never has to scroll to show a
@@ -121,18 +122,30 @@
   min-height: 0;
 }
 
-.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.segments,
-.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.repair-log,
-.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.align-clips,
-.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.records,
-.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer)>.export-form {
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer, > .seq-preview)>.segments,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer, > .seq-preview)>.repair-log,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer, > .seq-preview)>.align-clips,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer, > .seq-preview)>.records,
+.wb-shell .stage-view:has(> .recording-viewer, > .draft-viewer, > .seq-preview)>.export-form {
   max-height: 46%;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--u-line-2) transparent;
 }
 
+/* The Export form is the stage's scroll pane rather than a capped block: a store
+   can list far more Animations than a window holds, and the whole point is to
+   tick through them. Growing instead of capping keeps the Export button at the
+   foot, where submission happens. */
 .wb-shell .stage-view>.export-form {
-  width: min(100%, 520px);
+  width: min(100%, 560px);
   margin-inline: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--u-line-2) transparent;
+  /* the sticky foot and the shadow over it need the padding to live here, and it
+     is tall enough that the last row of a long list can still be scrolled clear */
+  padding-bottom: 56px;
 }

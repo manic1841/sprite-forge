@@ -13,7 +13,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -50,10 +50,13 @@ import {
   removeSequenceDraft,
   renameSegment,
   resizeCanvas,
+  restoreDraftTiming,
   sampleDraftRepairColor,
   saveSequenceDraft,
   scan,
   segmentContentBounds,
+  setFlipX,
+  setDraftFrameMs,
   setPlacementOffset,
   setSegmentRange,
   setSegmentRect,
@@ -313,6 +316,33 @@ export async function handleApiRequest(
               },
             }),
           );
+        }
+        if (method === 'POST' && segments[6] === 'flip' && segments.length === 7) {
+          const body = asRecord(request.body);
+          return ok(
+            await setFlipX(storeRoot, {
+              characterId,
+              draftId,
+              flipX: requiredBoolean(body, 'flipX'),
+            }),
+          );
+        }
+      }
+
+      // /api/characters/<c>/drafts/<d>/timing[/restore]
+      if (segments[5] === 'timing' && segments.length <= 7) {
+        if (method === 'POST' && segments[6] === 'frame' && segments.length === 7) {
+          const body = asRecord(request.body);
+          return ok(
+            await setDraftFrameMs(storeRoot, {
+              characterId,
+              draftId,
+              frameMs: requiredNumber(body, 'frameMs'),
+            }),
+          );
+        }
+        if (method === 'POST' && segments[6] === 'restore' && segments.length === 7) {
+          return ok(await restoreDraftTiming(storeRoot, { characterId, draftId }));
         }
       }
 
@@ -613,7 +643,9 @@ export async function handleApiRequest(
             characterId,
             draftId: requiredOptionalString(body, 'draftId'),
             clips: requiredStringArray(body, 'clips'),
-            forkOf: requiredOptionalString(body, 'forkOf') ?? null,
+            // `forkOf` is optional but nullable: an explicit `null` (a plain
+            // composition, as the client sends) means the same as omitting it.
+            forkOf: optionalNullableString(body, 'forkOf'),
           }),
         };
       }
@@ -713,12 +745,26 @@ export function createApiMiddleware(storeRoot: string): ApiMiddleware {
       next();
       return;
     }
-    void dispatch(storeRoot, req, res).catch((error: unknown) => {
+    void dispatchAfterEnsureStore(storeRoot, req, res).catch((error: unknown) => {
       res.statusCode = 500;
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ error: (error as Error).message }));
     });
   };
+}
+
+/**
+ * A first session starts on an absent default store (ADR-0011): create the root
+ * empty before serving, so `/api/store` scans a directory instead of reporting
+ * "Store root not found". `recursive` also covers a nested store path.
+ */
+async function dispatchAfterEnsureStore(
+  storeRoot: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  await mkdir(storeRoot, { recursive: true });
+  await dispatch(storeRoot, req, res);
 }
 
 async function dispatch(
@@ -739,6 +785,12 @@ async function dispatch(
   res.statusCode = response.status;
   if (response.contentType && Buffer.isBuffer(response.body)) {
     res.setHeader('content-type', response.contentType);
+    // Pixels are re-baked in place: a Canvas resize rewrites every frame and sheet
+    // under the same URL. Without this the browser reuses the bitmap it already
+    // has and draws it into a box of the new size, which reads as the sprite having
+    // been stretched. `no-store` (not merely `no-cache`) is what actually skips the
+    // memory cache; the store is local, so refetching is cheap.
+    res.setHeader('cache-control', 'no-store');
     res.end(response.body);
     return;
   }
@@ -790,6 +842,14 @@ function requiredNumber(body: Record<string, unknown>, key: string): number {
   return value;
 }
 
+function requiredBoolean(body: Record<string, unknown>, key: string): boolean {
+  const value = body[key];
+  if (typeof value !== 'boolean') {
+    throw new ForgeError(`"${key}" must be a boolean.`);
+  }
+  return value;
+}
+
 function requiredOptionalString(
   body: Record<string, unknown>,
   key: string,
@@ -802,6 +862,19 @@ function requiredOptionalString(
     throw new ForgeError(`"${key}" must be a string.`);
   }
   return value;
+}
+
+/**
+ * Read an optional body field that is either a string, `null`, or absent.
+ *
+ * `null` is meaningful where the store accepts it as "cleared" (a composition's
+ * `forkOf`), so it is passed through rather than rejected as a non-string.
+ */
+function optionalNullableString(
+  body: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
+  return body[key] === null ? null : requiredOptionalString(body, key);
 }
 
 function optionalNumber(body: Record<string, unknown>, key: string): number | undefined {

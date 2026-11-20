@@ -635,6 +635,26 @@ describe('the Sequence-draft routes', () => {
     });
   });
 
+  it('accepts an explicit null forkOf for a plain composition', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seedClip(store, gif);
+
+        const saved = await handleApiRequest(store.root, {
+          method: 'POST',
+          url: '/api/characters/hero/sequence-drafts',
+          body: { draftId: 'compo', clips: ['red-run'], forkOf: null },
+        });
+        expect(saved.status).toBe(201);
+        expect(store.readJson('characters/hero/sequence-drafts/compo/draft.json')).toMatchObject({
+          id: 'compo',
+          clips: ['red-run'],
+          forkOf: null,
+        });
+      });
+    });
+  });
+
   it('consumes the composition on commit and records its lineage', async () => {
     await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
       await withStore(async (store) => {

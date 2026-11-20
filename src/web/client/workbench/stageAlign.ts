@@ -8,6 +8,7 @@
 
 import type { AlignStagePort } from './ports.js';
 import { make } from './dom.js';
+import { canvasGrips } from './canvasGrips.js';
 import type { PlacementOffset } from '../types.js';
 
 const SCALE = 4;
@@ -36,15 +37,20 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
 
   const { canvas } = alignment;
   const board = make('div', 'align-board');
+  // Resizing is a Canvas gesture, so the board is the thing being grabbed.
   board.dataset.alignmentCanvas = '';
   board.dataset.canvasWidth = String(canvas.width);
   board.dataset.canvasHeight = String(canvas.height);
-  // The scale is held across renders, so resizing the Canvas actually changes the
-  // board's size. Refitting every render would blow a shrunken board back up to the
-  // stage, and a crop would read as the pixels having been scaled instead. Growing
-  // past the room still lowers the scale; a window resize clears it entirely.
-  const fitted = fitScale(ctx, canvas);
-  const scale = ctx.state.alignScale === null ? fitted : Math.min(ctx.state.alignScale, fitted);
+  // The display rate is **held** across renders. A resize is a change of Canvas
+  // area, not a zoom: the frame's edges move and the picture stays exactly as big
+  // as it was, so growing reveals empty margin and shrinking cuts pixels away.
+  // Refitting every render would rescale the sprite under the pointer instead.
+  //
+  // The rate is a whole number of screen pixels, so no Canvas pixel is ever
+  // resampled; a board that outgrows the stage keeps the rate and scrolls. Only a
+  // window resize refits, since that is a change of the room rather than of the
+  // Canvas.
+  const scale = ctx.state.alignScale ?? fitScale(ctx, canvas);
   ctx.state.alignScale = scale;
   board.dataset.alignScale = String(scale);
   board.style.width = `${canvas.width * scale}px`;
@@ -71,6 +77,8 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
     ghost.dataset.alignLabel = label;
     ghost.dataset.offsetX = String(off.x);
     ghost.dataset.offsetY = String(off.y);
+    // The ghost box is the Clip's own frames, not the Canvas: the Canvas frame around
+    // it can be dragged larger, and the picture has to keep its pixel size inside it.
     ghost.style.transform = `translate(${off.x * scale}px, ${off.y * scale}px)`;
     // A ghost is one Canvas, so a sheet with several frames is shown as its first
     // frame: the image is laid out `frameCount` Canvases wide and the ghost clips
@@ -108,6 +116,13 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
     );
     ghost.dataset.kind = 'draft';
     ghost.dataset.draft = draft.id;
+    // A Draft's stored frame is unflipped (Repair is authored on it), so the mirror
+    // is shown here instead — only on the picture, never on the box, so the drag
+    // maths stay in box space.
+    const ghostImage = ghost.querySelector<HTMLImageElement>('[data-align-ghost-image]');
+    if (draft.flipX && ghostImage) {
+      ghostImage.classList.add('is-mirrored');
+    }
     // A Draft is editable, so its ghost is the handle: drag it to place it. A
     // committed Clip is immutable and only shown (fork it in the inspector).
     makeDraggable(ctx, ghost, characterId, draft.id, scale);
@@ -118,12 +133,30 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
   const size = make('p', 'align-size-readout', `${canvas.width} × ${canvas.height}`);
   size.dataset.alignSizeReadout = '';
 
+  // The board sits on a plate so its edges can be grabbed: the board clips its own
+  // overflow, so handles inside it would be cut in half. A committed Asset's
+  // Canvas is not edited from here (fork instead), so only the editable faces get
+  // them.
+  const plate = make('div', 'align-plate');
+  plate.appendChild(board);
+  if (ctx.state.target.kind !== 'asset') {
+    plate.appendChild(
+      canvasGrips(ctx, {
+        characterId,
+        canvas,
+        floor: alignment.contentFloor,
+        scale,
+        board,
+        readout: size,
+      }),
+    );
+  }
+
   const frame = make('div', 'align-frame');
-  frame.append(board, size);
+  frame.append(plate, size);
   view.appendChild(frame);
-  // A window resize is what the held rate exists to survive, so it is also what
-  // clears it: the new room decides the scale again. The listener outlives this
-  // render, so it drops itself once the board is gone.
+  // The rate is held, so only a change of room (a window resize) refits it. The
+  // listener outlives this render, so it drops itself once the board is gone.
   const refit = (): void => {
     if (!frame.isConnected) {
       window.removeEventListener('resize', refit);
@@ -137,10 +170,12 @@ export function alignmentStageView(ctx: AlignStagePort): HTMLElement {
 }
 
 /**
- * Display pixels per Canvas pixel: as many as fill the stage, up to {@link SCALE_MAX}.
+ * Display pixels per Canvas pixel: as many whole pixels as fill the stage, up to
+ * {@link SCALE_MAX}, and never fewer than one.
  *
- * Whole numbers while it fits, or the Canvas pixels would be drawn at different
- * sizes; a Canvas too big for the stage drops to a fraction instead of clipping.
+ * The rate is always an **integer**, so every Canvas pixel is a whole block of
+ * screen pixels and nothing is resampled. A Canvas too big for the stage keeps 1×
+ * and crops instead of shrinking to a fraction.
  */
 function fitScale(ctx: AlignStagePort, canvas: { width: number; height: number }): number {
   const stage = ctx.regions.stage;
@@ -148,10 +183,10 @@ function fitScale(ctx: AlignStagePort, canvas: { width: number; height: number }
   const width = stage.clientWidth - 44;
   const height = stage.clientHeight - 42;
   const fit = Math.min(width / canvas.width, height / canvas.height, SCALE_MAX);
-  if (!Number.isFinite(fit) || fit <= 0) {
-    return SCALE;
+  if (!Number.isFinite(fit) || fit < 1) {
+    return 1;
   }
-  return fit >= 1 ? Math.floor(fit) : Math.max(0.25, fit);
+  return Math.floor(fit);
 }
 
 /**

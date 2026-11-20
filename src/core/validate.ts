@@ -18,6 +18,7 @@ import type { FormatsPlugin } from 'ajv-formats';
 // CJS interop so it works identically under tsx, vitest and the built ESM CLI.
 const addFormats = createRequire(import.meta.url)('ajv-formats') as FormatsPlugin;
 import { StoreError, ValidationError, type ValidationIssue } from './errors.js';
+import { timingIssues, type AssetTiming } from './timing.js';
 import {
   ASSET_META_FILE,
   ASSET_PROVENANCE_FILE,
@@ -178,6 +179,13 @@ export async function validateExport(
 
   for (const [id, animation] of Object.entries(manifest.animations)) {
     const sheet = animation.sheet;
+    for (const problem of timingIssues(
+      animation.timing as unknown as AssetTiming,
+      animation.frameCount,
+      `/animations/${id}/timing`,
+    )) {
+      issue(problem.path, problem.message);
+    }
     if (isUnsafeRelPath(sheet)) {
       issue(
         `/animations/${id}/sheet`,
@@ -329,13 +337,14 @@ function crossArtifactIssues(
   }
 
   if (kind === 'asset-meta' && isRecord(value)) {
-    const { frameCount, delaysMs, id } = value;
-    if (isNumber(frameCount) && Array.isArray(delaysMs)) {
-      if (delaysMs.length !== 1 && delaysMs.length !== frameCount) {
-        issue(
-          '/delaysMs',
-          `delaysMs must have 1 (uniform) or frameCount (${frameCount}) values; got ${delaysMs.length}`,
-        );
+    const { frameCount, timing, id } = value;
+    if (isNumber(frameCount) && isRecord(timing)) {
+      for (const problem of timingIssues(
+        timing as unknown as AssetTiming,
+        frameCount,
+        '/timing',
+      )) {
+        issue(problem.path, problem.message);
       }
     }
     if (context.folderId !== undefined && typeof id === 'string' && id !== context.folderId) {

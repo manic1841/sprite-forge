@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { workbenchPage } from '../vite.config.ts';
+import { storePath, workbenchPage } from '../vite.config.ts';
 
 const site = fileURLToPath(new URL('../site/', import.meta.url));
 
@@ -55,8 +56,34 @@ describe('the workbench is its own page', () => {
     const landing = await readFile(`${site}index.html`, 'utf8');
 
     expect(workbench).toContain('data-wb-mount');
-    expect(workbench).toContain('workbench.js');
+    expect(workbench).toContain('/workbench.js');
     expect(landing).not.toContain('data-wb-mount');
     expect(landing).toContain('href="/workbench"');
+  });
+
+  it('loads its own assets from the root, so /workbench/ works too', async () => {
+    const workbench = await readFile(`${site}workbench.html`, 'utf8');
+    const urls = [...workbench.matchAll(/(?:href|src)="([^"]+)"/g)].map(
+      (match) => match[1]!,
+    );
+    const local = urls.filter((url) => !/^(?:[a-z]+:|\/|#)/.test(url));
+    expect(local).toEqual([]);
+  });
+});
+
+describe('the dev server store', () => {
+  it('defaults to store/ under the working directory', () => {
+    expect(storePath({}, '/work/store-root')).toBe(
+      resolve('/work/store-root', 'store'),
+    );
+  });
+
+  it('lets SPRITE_FORGE_STORE win, absolute or relative', () => {
+    expect(storePath({ SPRITE_FORGE_STORE: '/data/sprites' }, '/work')).toBe(
+      '/data/sprites',
+    );
+    expect(storePath({ SPRITE_FORGE_STORE: '../shared' }, '/work')).toBe(
+      resolve('/work', '../shared'),
+    );
   });
 });

@@ -42,13 +42,18 @@ export function cutStageView(ctx: CutStagePort): HTMLElement {
   img.dataset.frameIndex = String(ctx.state.frame);
   img.src = ctx.api.recordingFrameUrl(recordingId, ctx.state.frame);
   img.alt = `${recordingId} frame ${ctx.state.frame}`;
-  fitRecordingFrame(ctx, img);
 
   // The box lives on the selected Segment, so it is drawn on the frame only while
   // one is selected: it is that Segment's window, not the Recording's. The layer
   // is a sibling placed over the image; dragging anywhere on the frame draws.
   const holder = make('div', 'cut-frame');
-  holder.append(img);
+  // The box and its ghost are positioned in percentages, so they need a containing
+  // block that **is** the image. The holder fills the stage and centres the frame,
+  // so measuring the layers against it would shift them by the letterbox. The
+  // plate is given the frame's exact drawn size (with the image) below.
+  const plate = make('div', 'cut-image');
+  plate.append(img);
+  holder.append(plate);
   const selected = (cutList.cuts ?? []).find((cut) => cut.id === ctx.state.selectedCut);
   if (selected) {
     const box = make('div', 'cut-box');
@@ -62,7 +67,7 @@ export function cutStageView(ctx: CutStagePort): HTMLElement {
     const ghost = make('div', 'cut-box-ghost');
     ghost.dataset.cutBoxGhost = '';
     ghost.hidden = true;
-    holder.append(box, ghost);
+    plate.append(box, ghost);
     holder.dataset.drawBox = '';
     holder.addEventListener('pointerdown', (event) => {
       ghost.hidden = false;
@@ -81,6 +86,8 @@ export function cutStageView(ctx: CutStagePort): HTMLElement {
 
   const row = make('div', 'draft-stage');
   row.append(prev, holder, next);
+  // Fitted once the row exists, so it measures the room the frame really has.
+  fitRecordingFrame(ctx, img, plate);
   preview.append(row, counter);
   view.appendChild(preview);
   return view;
@@ -124,23 +131,46 @@ function placeBox(layer: HTMLElement, rect: Bounds | undefined, img?: HTMLImageE
  * Recording frames are often only a few dozen pixels across, and at their natural
  * size they read as a stamp in the middle of the stage. The rate is a fit with a
  * ceiling and whole numbers, so pixel art stays square.
+ *
+ * The plate (the box layers' containing block) is given the exact same size as the
+ * image, so a box percentage lands on the pixel it is a percentage of.
  */
-function fitRecordingFrame(ctx: CutStagePort, img: HTMLImageElement): void {
+function fitRecordingFrame(
+  ctx: CutStagePort,
+  img: HTMLImageElement,
+  plate: HTMLElement,
+): void {
   const size = (): boolean => {
-    const width = ctx.regions.stage.clientWidth - 96;
-    const height = ctx.regions.stage.clientHeight - 42;
+    // Fit the row the frame sits in, not the whole stage: there is a filmstrip
+    // below, so the stage's height would overshoot and clip the picture.
+    const row = img.closest<HTMLElement>('.draft-stage');
+    const width = (row?.clientWidth ?? ctx.regions.stage.clientWidth) - 96;
+    const height = (row?.clientHeight ?? ctx.regions.stage.clientHeight) - 8;
     if (!img.naturalWidth || width <= 0 || height <= 0) {
       return false;
     }
     const fit = Math.min(width / img.naturalWidth, height / img.naturalHeight, PREVIEW_SCALE_MAX);
     const scale = fit >= 1 ? Math.floor(fit) : Math.max(0.25, fit);
-    img.style.width = `${img.naturalWidth * scale}px`;
-    img.style.height = `${img.naturalHeight * scale}px`;
+    const shownWidth = `${img.naturalWidth * scale}px`;
+    const shownHeight = `${img.naturalHeight * scale}px`;
+    img.style.width = shownWidth;
+    img.style.height = shownHeight;
+    plate.style.width = shownWidth;
+    plate.style.height = shownHeight;
     return true;
   };
   if (!size()) {
-    // Not decoded yet, so there is no natural size to scale from.
-    img.addEventListener('load', () => size(), { once: true });
+    // Not decodable yet, so there is neither a natural size nor a laid-out row.
+    // A decoded frame waits for the next frame, once the row has been mounted.
+    if (img.complete) {
+      requestAnimationFrame(() => {
+        if (img.isConnected) {
+          size();
+        }
+      });
+    } else {
+      img.addEventListener('load', () => size(), { once: true });
+    }
   }
   // The preview follows the stage, and a resize changes it. The listener drops
   // itself once the frame is gone.

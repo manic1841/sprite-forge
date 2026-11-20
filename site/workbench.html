@@ -7,31 +7,32 @@
     <title>Workbench — sprite-forge</title>
     <meta name="description"
         content="Cut a Recording on the store: mark a Segment, repair the frames and commit a Clip. The workbench runs on the local dev server.">
-    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#141a18">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
         href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&family=DM+Mono:wght@400;500&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="assets/system.css">
-    <link rel="stylesheet" href="assets/ui/base.css">
+    <link rel="stylesheet" href="/assets/system.css">
+    <link rel="stylesheet" href="/assets/ui/base.css">
     <!-- The app sheet is split by layer and region. Order is the cascade:
          tokens/base → shell chrome → one file per region → errors → responsive
          → dialogs. Keep the files in this order. -->
-    <link rel="stylesheet" href="styles/00-base.css">
-    <link rel="stylesheet" href="styles/10-shell.css">
-    <link rel="stylesheet" href="styles/20-chrome.css">
-    <link rel="stylesheet" href="styles/30-rail.css">
-    <link rel="stylesheet" href="styles/40-stage.css">
-    <link rel="stylesheet" href="styles/50-filmstrip.css">
-    <link rel="stylesheet" href="styles/60-inspector.css">
-    <link rel="stylesheet" href="styles/61-inspector-cut.css">
-    <link rel="stylesheet" href="styles/70-draft.css">
-    <link rel="stylesheet" href="styles/80-align.css">
-    <link rel="stylesheet" href="styles/90-errors.css">
-    <link rel="stylesheet" href="styles/98-responsive.css">
-    <link rel="stylesheet" href="styles/99-dialogs.css">
+    <link rel="stylesheet" href="/styles/00-base.css">
+    <link rel="stylesheet" href="/styles/10-shell.css">
+    <link rel="stylesheet" href="/styles/20-chrome.css">
+    <link rel="stylesheet" href="/styles/30-rail.css">
+    <link rel="stylesheet" href="/styles/40-stage.css">
+    <link rel="stylesheet" href="/styles/45-stage-compose.css">
+    <link rel="stylesheet" href="/styles/50-filmstrip.css">
+    <link rel="stylesheet" href="/styles/60-inspector.css">
+    <link rel="stylesheet" href="/styles/61-inspector-cut.css">
+    <link rel="stylesheet" href="/styles/70-draft.css">
+    <link rel="stylesheet" href="/styles/80-align.css">
+    <link rel="stylesheet" href="/styles/90-errors.css">
+    <link rel="stylesheet" href="/styles/98-responsive.css">
+    <link rel="stylesheet" href="/styles/99-dialogs.css">
     <style>
         /*
   The page owns the frame (a slim bar and the full viewport); the workbench owns
@@ -186,14 +187,31 @@
             box-shadow: none;
         }
 
+        /* the kit sizes every `main > section` as at least one screen tall, which
+           on a pane that must not scroll means the content can push it past the
+           window and the window clips the foot of every panel. The app frame is
+           exactly one screen instead, so its regions scroll and the shell does
+           not. `main >` puts this ahead of that section rule. */
+        main>.wb-shell.ui {
+            height: 100svh;
+            min-height: 0;
+        }
+
         /* the app is full bleed: it runs to the window on both sides rather than
            standing in the site's gutters, so the kit container's width and centring
-           go (the `.wrap` stays for the checker's one-child structure) */
-        .wb-shell .wrap {
+           go (the `.wrap` stays for the checker's one-child structure). The kit's
+           `.ui` makes the shell a flex column, so the wrapper has to be a *zero
+           basis* item: grown from its content it would let the panels below decide
+           the page height, and the window would clip them instead of the panels
+           scrolling. It is selected by id because the kit re-bases it with
+           `flex: 1 0 auto` on `main > section > .wrap`. */
+        .wb-shell #app {
             width: 100%;
             max-width: none;
             margin-inline: 0;
             height: 100%;
+            flex: 1 1 0;
+            min-height: 0;
         }
 
         @media (max-width: 639px) {
@@ -285,13 +303,14 @@
                 <div class="wb-fallback">
                     <p><b>Starting the workbench…</b></p>
                     <p class="muted">It reads the store through the local server. If this stays, start it with
-                        <code>SPRITE_FORGE_STORE=./store pnpm web</code> and reload.
+                        <code>pnpm web</code> and reload — it uses the in-repo <code>store/</code> unless
+                        <code>SPRITE_FORGE_STORE</code> points elsewhere.
                     </p>
                 </div>
             </div>
         </section>
     </main>
-    <script type="module" src="workbench.js"></script>
+    <script type="module" src="/workbench.js"></script>
 </body>
 
 </html>

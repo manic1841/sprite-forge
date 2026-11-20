@@ -93,18 +93,67 @@
   margin: 0;
 }
 
+/* The draft's id is its identity, but not its title: quiet under the heading. */
+.wb-shell .sequence-id {
+  margin: 0 0 6px;
+  color: var(--u-muted);
+  font-family: var(--u-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .wb-shell .sequence-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 3px 4px;
+  border: 1px solid var(--u-line);
+  border-radius: 6px;
+  background: var(--u-surface);
 }
 
+/* The panel is narrower than a Clip name can be, so a name wraps rather than
+   collapsing to an ellipsis: a row you cannot read is a row you cannot order. */
 .wb-shell .sequence-clip {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  font-family: var(--u-mono);
+}
+
+/* The recipe is an order, so the position leads the row as a fixed-width chip:
+   the names stay aligned however long they get. */
+.wb-shell .sequence-step {
+  flex: none;
+  min-width: 18px;
+  color: var(--u-muted);
+  font-family: var(--u-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The panel is narrow, so the row's controls collapse to glyphs and only the
+   name takes whatever room is left. */
+.wb-shell .sequence-item .btn {
+  flex: none;
+  min-width: 0;
+  padding-inline: 3px;
+  font-size: 11px;
+}
+
+/* Adding is a row of its own under the list, with the picker taking the room. */
+.wb-shell .sequence-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.wb-shell .sequence-add select {
+  flex: 1;
+  min-width: 0;
 }
 
 .wb-shell .asset-delete {
@@ -125,6 +174,18 @@
   gap: 10px;
 }
 
+/* Character, target and Facing identify the bundle, so they sit together and wrap
+   on their own rather than each taking a full row. */
+.wb-shell .export-identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+
+.wb-shell .export-identity>.field {
+  flex: 1 1 150px;
+}
+
 .wb-shell .export-form .field {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -142,6 +203,196 @@
 
 .wb-shell .export-form .choices {
   grid-column: 2;
+}
+
+/* A field's one-line reason for being, above its control. */
+.wb-shell .field-hint {
+  grid-column: 2;
+  margin: 0 0 2px;
+  color: var(--u-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* Situation rows: the name, then the animations it may play, then only what is
+   still wrong with it. The row is a declaration and a binding at once, so the two
+   read as one line rather than two fields to keep in step. */
+.wb-shell .situation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  grid-column: 2;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-shell .situation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 5px 6px;
+  padding: 6px;
+  border: 1px solid var(--u-line);
+  border-radius: 8px;
+  background: var(--u-surface);
+}
+
+.wb-shell .situation-name {
+  grid-column: 1;
+  min-width: 0;
+  font-family: var(--u-mono);
+}
+
+.wb-shell .situation>.btn {
+  grid-column: 2;
+  grid-row: 1;
+  padding-inline: 4px;
+  font-size: 11px;
+}
+
+.wb-shell .situation-ids {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+/* A bound animation is a pressed chip; an unbound one stays quiet until it is
+   wanted, so the row shows the decision rather than every candidate equally. */
+.wb-shell .chip {
+  padding: 2px 7px;
+  border: 1px solid var(--u-line-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--u-muted);
+  font: 400 11px/1.4 var(--u-mono);
+  cursor: pointer;
+}
+
+.wb-shell .chip:hover {
+  border-color: var(--u-accent);
+  color: var(--u-accent-text);
+}
+
+.wb-shell .chip[data-active] {
+  border-color: var(--u-accent);
+  background: var(--u-tint);
+  color: var(--u-accent-text);
+}
+
+/* Bound, but no longer ticked above: still a real reference, so it is kept and
+   struck through rather than quietly dropped. */
+.wb-shell .chip.stale {
+  border-style: dashed;
+  color: var(--u-muted);
+  text-decoration: line-through;
+}
+
+.wb-shell .situation-problem {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #f0a0a0;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.wb-shell .situations-field>.btn {
+  grid-column: 2;
+  justify-self: start;
+}
+
+/* The request body, folded away: the rows are the editors, this is the receipt. */
+.wb-shell .bindings-preview {
+  grid-column: 2;
+}
+
+.wb-shell .bindings-preview summary {
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.wb-shell .bindings-preview pre {
+  margin: 4px 0 0;
+  padding: 8px;
+  border: 1px solid var(--u-line);
+  border-radius: 8px;
+  background: var(--u-bg);
+  font: 400 11px/1.5 var(--u-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Submitting is done from the foot of a list that can be long, so the verb follows
+   the scroll instead of being somewhere above the fold. */
+.wb-shell .export-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: -2px;
+  padding: 10px 0 6px;
+  background: linear-gradient(to bottom, transparent, var(--u-bg) 34%);
+}
+
+/* Wide space is spent on two columns rather than one narrow ribbon: what goes into
+   the bundle on the left, what may play it on the right. The two are the same
+   decision seen from both ends, so they are read side by side.
+   
+   Asked of the *stage*, not the window: a window is not the room the form has, and
+   the rail and panel widen with it. */
+.wb-shell .stage-view[data-stage-view="export"] {
+  container-type: inline-size;
+}
+
+@container (min-width: 900px) {
+  .wb-shell .stage-view>.export-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "identity identity"
+      "animations situations"
+      "flips situations"
+      "bindings bindings"
+      "actions actions";
+    align-content: start;
+    width: min(100%, 1180px);
+    column-gap: 32px;
+  }
+
+  .wb-shell .stage-view>.export-form>.export-identity {
+    grid-area: identity;
+  }
+
+  /* the three short fields identify the bundle; they do not need to span */
+  .wb-shell .stage-view>.export-form>.export-identity>.field {
+    flex: 1 1 200px;
+    max-width: 340px;
+  }
+
+  /* named areas win over the `.field .choices` column pin further up */
+  .wb-shell .stage-view>.export-form>.export-animations {
+    grid-area: animations;
+  }
+
+  .wb-shell .stage-view>.export-form>.export-flips {
+    grid-area: flips;
+  }
+
+  .wb-shell .stage-view>.export-form>.export-situations {
+    grid-area: situations;
+  }
+
+  .wb-shell .stage-view>.export-form>.export-bindings {
+    grid-area: bindings;
+  }
+
+  .wb-shell .stage-view>.export-form>.export-actions {
+    grid-area: actions;
+  }
 }
 
 .wb-shell .export-summary {

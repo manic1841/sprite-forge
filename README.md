@@ -21,12 +21,15 @@ thin adapter — the browser never touches `node:fs`; it talks to a Node-side
 `/api` server that delegates to the core command surface, so the store stays the
 single source of truth.
 
-Run it against a store (the flag is the `SPRITE_FORGE_STORE` environment
-variable; the default Vite port is **5173**):
+Run it against a store. Without configuration it uses `store/` under the working
+directory (created if missing, same default as the CLI); point it elsewhere with
+the `SPRITE_FORGE_STORE` environment variable. The default Vite port is **5173**:
 
 ```sh
-SPRITE_FORGE_STORE=/path/to/store pnpm web
+pnpm web
 # then open http://localhost:5173/workbench
+
+SPRITE_FORGE_STORE=/path/to/store pnpm web
 ```
 
 The landing page at `http://localhost:5173/` previews the workbench and links to

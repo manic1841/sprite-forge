@@ -37,6 +37,8 @@ export interface CutSessionDeps extends CutTargetDeps {
   };
   /** Run a user action, surfacing a rejection as visible state. */
   run(label: string, body: () => Promise<void>): void;
+  /** Replace the marked range, clamped to the Recording (per the session verb). */
+  setSelection(startFrame: number, endFrame: number): void;
   /** Move the playhead and repaint it in place (no strip rebuild). */
   showFrame(index: number): void;
   /** Repaint the play toggle in place. */
@@ -61,6 +63,8 @@ export interface CutSession {
   paintMarks(): void;
   /** Start a new range at the pressed point and follow the pointer. */
   beginPick(track: HTMLElement, down: PointerEvent): void;
+  /** Replace the marked range from manual index entry (inclusive start, exclusive end). */
+  setSelection(startFrame: number, endFrame: number): void;
   /** Drag a stored Segment's edge; releasing persists the clamped range. */
   startTrim(
     handle: HTMLElement,
@@ -204,6 +208,21 @@ export function createCutSession(deps: CutSessionDeps): CutSession {
     window.addEventListener('keydown', key);
   }
 
+  function setSelection(startFrame: number, endFrameExclusive: number): void {
+    const frameCount = state.cutList?.frameCount ?? 0;
+    if (frameCount === 0) {
+      return;
+    }
+    playback.stop();
+    const start = Math.max(0, Math.min(frameCount - 1, Math.round(startFrame)));
+    const end = Math.max(start + 1, Math.min(frameCount, Math.round(endFrameExclusive)));
+    state.selectedCut = null;
+    paintMarks();
+    state.selection = { startFrame: start, endFrame: end };
+    deps.showFrame(start);
+    paintSelection();
+  }
+
   function paintSelection(): void {
     const track = regions.filmstrip.querySelector<HTMLElement>('[data-pick]');
     const selection = state.selection;
@@ -211,15 +230,7 @@ export function createCutSession(deps: CutSessionDeps): CutSession {
       return;
     }
     const frameCount = state.cutList?.frameCount ?? 1;
-    let band = track.querySelector<HTMLElement>('[data-pick-band]');
-    if (!band) {
-      band = document.createElement('span');
-      band.className = 'pick-band sel';
-      band.dataset.pickBand = '';
-      track.appendChild(band);
-    }
-    band.style.left = `${(selection.startFrame / frameCount) * 100}%`;
-    band.style.width = `${((selection.endFrame - selection.startFrame) / frameCount) * 100}%`;
+    paintSelectionBand(track, selection, frameCount);
 
     // The verbs are only in the header when a range existed at render time; a drag
     // that starts from nothing brings them in itself rather than re-rendering
@@ -233,9 +244,15 @@ export function createCutSession(deps: CutSessionDeps): CutSession {
       group = renderSelectionActions(deps);
       controls.insertBefore(group, controls.querySelector('[data-recording-play]'));
     }
-    const label = group.querySelector<HTMLElement>('[data-pick-label]');
-    if (label) {
-      label.textContent = rangeLabel(selection);
+    // The index fields double as the read-out; a field being typed in keeps its
+    // value rather than snapping under the caret.
+    const startInput = group.querySelector<HTMLInputElement>('[data-pick-start]');
+    const endInput = group.querySelector<HTMLInputElement>('[data-pick-end]');
+    if (startInput && document.activeElement !== startInput) {
+      startInput.value = String(selection.startFrame);
+    }
+    if (endInput && document.activeElement !== endInput) {
+      endInput.value = String(selection.endFrame - 1);
     }
   }
 
@@ -462,6 +479,7 @@ export function createCutSession(deps: CutSessionDeps): CutSession {
     selectSegment,
     paintMarks,
     beginPick,
+    setSelection,
     startTrim,
     saveSelection,
     extract,
@@ -526,20 +544,102 @@ export function rangeLabel(selection: { startFrame: number; endFrame: number }):
 }
 
 /**
- * The actions a marked range offers: confirm it with Play, then keep it.
+ * Paint the marked range on the track: the band, and its two edge indices.
+ *
+ * The indices are drawn on the band itself because a band alone says "roughly
+ * here" and nothing else; the numbers are the answer to "what did I mark". The
+ * end index is the last frame, the human term, not the exclusive bound.
+ */
+export function paintSelectionBand(
+  track: HTMLElement,
+  selection: { startFrame: number; endFrame: number },
+  frameCount: number,
+): void {
+  let band = track.querySelector<HTMLElement>('[data-pick-band]');
+  if (!band) {
+    band = document.createElement('span');
+    band.className = 'pick-band sel';
+    band.dataset.pickBand = '';
+    const start = document.createElement('span');
+    start.className = 'pick-index';
+    start.dataset.edge = 'start';
+    start.dataset.pickBandStart = '';
+    const end = document.createElement('span');
+    end.className = 'pick-index';
+    end.dataset.edge = 'end';
+    end.dataset.pickBandEnd = '';
+    band.append(start, end);
+    track.appendChild(band);
+  }
+  const last = selection.endFrame - 1;
+  band.style.left = `${(selection.startFrame / frameCount) * 100}%`;
+  band.style.width = `${((selection.endFrame - selection.startFrame) / frameCount) * 100}%`;
+  band.title = rangeLabel(selection);
+  const start = band.querySelector<HTMLElement>('[data-pick-band-start]');
+  const end = band.querySelector<HTMLElement>('[data-pick-band-end]');
+  if (start) {
+    start.textContent = String(selection.startFrame);
+  }
+  if (end) {
+    end.textContent = String(last);
+    // One frame has one number; two labels on a single pixel would overlap.
+    end.hidden = last === selection.startFrame;
+  }
+}
+
+/**
+ * The actions a marked range offers: two index fields to type the range exactly,
+ * a Play-checked confirm, and the save/clear verbs.
  *
  * Built here rather than in the filmstrip because a drag that starts from
  * nothing has to insert the same group mid-gesture.
  */
 export function renderSelectionActions(deps: CutSessionDeps): HTMLElement {
   const { state } = deps;
+  const frameCount = state.cutList?.frameCount ?? 0;
   const group = document.createElement('span');
   group.className = 'filmstrip-selection';
   group.dataset.pickActions = '';
   const label = document.createElement('span');
   label.className = 'muted';
   label.dataset.pickLabel = '';
-  label.textContent = state.selection ? rangeLabel(state.selection) : '';
+  label.textContent = 'frames';
+
+  const startInput = indexInput('pickStart', 'Selection start frame');
+  const endInput = indexInput('pickEnd', 'Selection end frame');
+  const sep = document.createElement('span');
+  sep.className = 'muted';
+  sep.textContent = '–';
+  sep.setAttribute('aria-hidden', 'true');
+  const clampIndex = (value: number): number =>
+    Math.max(0, Math.min(Math.max(0, frameCount - 1), value));
+  const apply = (): void => {
+    const parsedStart = Number.parseInt(startInput.value, 10);
+    const parsedEnd = Number.parseInt(endInput.value, 10);
+    if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) {
+      return;
+    }
+    let start = clampIndex(parsedStart);
+    let end = clampIndex(parsedEnd);
+    // Typing an end before the start means a range at the end, not an error.
+    if (end < start) {
+      [start, end] = [end, start];
+    }
+    deps.setSelection(start, end + 1);
+    startInput.value = String(start);
+    endInput.value = String(end);
+  };
+  for (const input of [startInput, endInput]) {
+    input.max = String(Math.max(0, frameCount - 1));
+    input.addEventListener('change', apply);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        apply();
+        input.blur();
+      }
+    });
+  }
 
   const save = document.createElement('button');
   save.className = 'dock-btn';
@@ -567,8 +667,26 @@ export function renderSelectionActions(deps: CutSessionDeps): HTMLElement {
     deps.render.inspector();
   });
 
-  group.append(label, save, cancel);
+  if (state.selection) {
+    startInput.value = String(state.selection.startFrame);
+    endInput.value = String(state.selection.endFrame - 1);
+  }
+  group.append(label, startInput, sep, endInput, save, cancel);
   return group;
+}
+
+/** A small numeric field for an index. */
+function indexInput(attribute: 'pickStart' | 'pickEnd', label: string): HTMLInputElement {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.step = '1';
+  input.inputMode = 'numeric';
+  input.className = 'pick-index-input';
+  input.dataset[attribute] = '';
+  input.setAttribute('aria-label', label);
+  input.title = label;
+  return input;
 }
 
 /** Kept as a free function so the built group can call it without a session reference. */

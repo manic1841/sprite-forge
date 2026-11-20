@@ -56,11 +56,38 @@ describe('validateArtifact', () => {
     expect(issues2.some((i) => i.path === '/anchor/y')).toBe(true);
   });
 
-  it('rejects delaysMs whose length is neither 1 nor frameCount', () => {
+  it('rejects an override on a frame outside the frameCount', () => {
     const issues = issuesOf(() =>
-      validateArtifact('asset-meta', { id: 'walk', frameCount: 4, delaysMs: [50, 60], loop: true }),
+      validateArtifact('asset-meta', {
+        id: 'walk',
+        frameCount: 4,
+        timing: { frameMs: 50, overrideMs: { 4: 60 } },
+        loop: true,
+      }),
     );
-    expect(issues.some((i) => i.path === '/delaysMs')).toBe(true);
+    expect(issues.some((i) => i.path === '/timing/overrideMs/4')).toBe(true);
+  });
+
+  it('rejects an empty override map and a bad base rate', () => {
+    const empty = issuesOf(() =>
+      validateArtifact('asset-meta', {
+        id: 'walk',
+        frameCount: 4,
+        timing: { frameMs: 50, overrideMs: {} },
+        loop: true,
+      }),
+    );
+    expect(empty.some((i) => i.path === '/timing/overrideMs')).toBe(true);
+
+    const zero = issuesOf(() =>
+      validateArtifact('asset-meta', {
+        id: 'walk',
+        frameCount: 4,
+        timing: { frameMs: 0 },
+        loop: true,
+      }),
+    );
+    expect(zero.some((i) => i.path === '/timing/frameMs')).toBe(true);
   });
 
   it('rejects an asset id that does not equal its folder name', () => {

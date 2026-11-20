@@ -12,6 +12,7 @@ import type { InspectorPort } from './ports.js';
 import { make } from './dom.js';
 import { alignInspector } from './alignInspector.js';
 import { assetInspector } from './assetInspector.js';
+import { composeInspector } from './composeInspector.js';
 import { draftInspector } from './draftInspector.js';
 import { exportInspector } from './exportInspector.js';
 import { characterInspector, recordingInspector } from './recordingInspector.js';
@@ -54,8 +55,18 @@ export function renderInspector(ctx: InspectorPort): void {
   } else if (state.mode === 'export') {
     exportInspector(ctx, info);
   } else if (state.mode === 'compose') {
-    if (state.target.kind === 'character') {
-      characterInspector(ctx, state.target.characterId, actions, info);
+    // The stage is only the preview here, so the panel carries the composition
+    // itself. A re-align is a Draft opened *for* the composition — the target is
+    // that fork — so the placement and the commit sit above the list and the seam
+    // stays parked in the preview.
+    const characterId =
+      state.target.kind === 'character' ? state.target.characterId : state.activeCharacterId;
+    if (characterId !== null) {
+      if (state.realign !== null && state.realign.draftId === state.sequenceDraft?.id) {
+        actions.appendChild(ctx.draft.commitSection());
+        alignInspector(ctx, actions, info, { canvas: false });
+      }
+      composeInspector(ctx, characterId, actions, info);
     }
   } else if (state.target.kind === 'draft') {
     draftInspector(ctx, actions, info);

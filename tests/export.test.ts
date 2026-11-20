@@ -119,7 +119,9 @@ describe('exportCharacter', () => {
               [CLIP_ID]: {
                 sheet: `clips/${CLIP_ID}.png`,
                 frameCount: 2,
-                delaysMs: [50, 60],
+                // The verbatim Asset timing; the fixture's 50/60 cadence is
+                // normalized at extract, so the base is the mode.
+                timing: { frameMs: 50 },
                 loop: true,
               },
             },
@@ -174,12 +176,12 @@ describe('exportCharacter', () => {
           );
           expect(manifest.canvas).toEqual({ width: 4, height: 6, anchor: { x: 2, y: 6 } });
 
-          // Each animation carries only sheet/frameCount/delaysMs/loop (+flipsFacing).
+          // Each animation carries only sheet/frameCount/timing/loop (+flipsFacing).
           expect(Object.keys(manifest.animations[CLIP_ID]!).sort()).toEqual([
-            'delaysMs',
             'frameCount',
             'loop',
             'sheet',
+            'timing',
           ]);
           // No frame size and no mirror flag leak into an animation.
           for (const animation of Object.values(manifest.animations)) {

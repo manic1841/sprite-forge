@@ -23,6 +23,7 @@ import { assertValidId } from './ids.js';
 import { assetMetaPath, canvasPath, manifestPath, sheetPath } from './layout.js';
 import { readRepairScript } from './repair.js';
 import { pathExists, readBinaryFile, readJsonFile } from './store/index.js';
+import { timingFromDelays } from './timing.js';
 import type { Canvas } from './character.js';
 import { validateArtifact } from './validate.js';
 
@@ -186,7 +187,8 @@ async function verifyClip(
     expectedHash: provenance.recordingHash,
   });
 
-  // Replay the stored Repair script (never re-derived), then bake with the offset.
+  // Replay the stored Repair script (never re-derived), then bake with the mirror
+  // and the offset.
   const script = provenance.repair
     ? await readRepairScript(root, { characterId, clipId })
     : { operations: [] };
@@ -195,15 +197,25 @@ async function verifyClip(
     canvas,
     script,
     provenance.placementOffset ?? { x: 0, y: 0 },
+    provenance.flipX === true,
   );
 
   const sheetRel = sheetPath(characterId, 'clip', clipId);
   compareBytes(draft, sheetRel, await readBinaryFile(root, sheetRel), sheet);
 
-  // frameCount and delaysMs derive deterministically from the Recording + Segment.
+  // frameCount and timing derive deterministically from the Recording + Segment.
   const metaRel = assetMetaPath(characterId, 'clip', clipId);
   compareValue(draft, `${metaRel}#frameCount`, meta.frameCount, rendered.frames.length);
-  compareValue(draft, `${metaRel}#delaysMs`, meta.delaysMs, rendered.delaysMs);
+  // A stored timing with no overrides claims one flat rate, which is the mode the
+  // Recording yields; whether the blend of hiccups behind it was kept is the
+  // extract's chosen normalization, not something provenance can re-derive.
+  const derivedTiming = timingFromDelays(rendered.delaysMs);
+  compareValue(
+    draft,
+    `${metaRel}#timing`,
+    meta.timing,
+    meta.timing.overrideMs === undefined ? { frameMs: derivedTiming.frameMs } : derivedTiming,
+  );
   // `loop` is a stored choice, not derivable from provenance: authoritative.
   draft.excluded.push(`${metaRel}#loop`);
 
@@ -232,7 +244,7 @@ async function verifySequence(
 
   const metaRel = assetMetaPath(characterId, 'sequence', sequenceId);
   compareValue(draft, `${metaRel}#frameCount`, sequence.meta.frameCount, derived.frameCount);
-  compareValue(draft, `${metaRel}#delaysMs`, sequence.meta.delaysMs, derived.delaysMs);
+  compareValue(draft, `${metaRel}#timing`, sequence.meta.timing, derived.timing);
   // A Sequence always loops; `loop` is fixed, not re-derived.
   draft.excluded.push(`${metaRel}#loop`);
 

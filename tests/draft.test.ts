@@ -24,7 +24,10 @@ import {
   ingestRecording,
   readClipDraft,
   readClipDraftFrame,
+  restoreDraftTiming,
   segmentContentBounds,
+  setDraftFrameMs,
+  setSegmentRange,
   setSegmentRect,
   StoreError,
   validateStore,
@@ -114,6 +117,7 @@ describe('extractClipDraft', () => {
           characterId: CHARACTER_ID,
           recordingId: RECORDING_ID,
           cutId: CUT_ID,
+          keepTiming: true,
         });
 
         expect(draft).toMatchObject({
@@ -336,6 +340,7 @@ describe('extractClipDraft', () => {
             characterId: CHARACTER_ID,
             recordingId: RECORDING_ID,
             cutId: CUT_ID,
+            keepTiming: true,
           });
 
           expect(draft.delaysMs).toEqual([50, 60]);
@@ -373,6 +378,7 @@ describe('extractClipDraft', () => {
             characterId: CHARACTER_ID,
             recordingId: RECORDING_ID,
             cutId: CUT_ID,
+            keepTiming: true,
           });
 
           // `speed` is a playback multiplier: 2 plays twice as fast, halving each
@@ -415,11 +421,88 @@ describe('extractClipDraft', () => {
             characterId: CHARACTER_ID,
             recordingId: RECORDING_ID,
             cutId: CUT_ID,
+            keepTiming: true,
           });
 
           // 10/3 -> 3, 20/3 -> 7: rounded to the nearest integer millisecond.
           expect(draft.delaysMs).toEqual([3, 7]);
           expect(draft.delaysMs.every((delay) => delay >= 1)).toBe(true);
+        });
+      },
+    );
+  });
+
+  it('flattens the source cadence to its dominant delay by default', async () => {
+    await withSyntheticGif(
+      { frames: 4, width: 8, height: 6, delaysMs: [50, 50, 60, 50] },
+      async (gif) => {
+        await withStore(async (store) => {
+          await ingestRecording(store.root, { recordingId: RECORDING_ID, sourcePath: gif.path });
+          await addSegment(store.root, {
+            recordingId: RECORDING_ID,
+            id: CUT_ID,
+            startFrame: 0,
+            endFrame: 4,
+          });
+          // The fixture walks right, so four frames need a wider Canvas than the
+          // two-frame default.
+          await createCharacter(store.root, {
+            characterId: CHARACTER_ID,
+            width: 10,
+            height: 6,
+            anchor: { x: 5, y: 6 },
+          });
+
+          const draft = await extractClipDraft(store.root, {
+            characterId: CHARACTER_ID,
+            recordingId: RECORDING_ID,
+            cutId: CUT_ID,
+          });
+
+          // 50 is the mode: the single 60ms hiccup is dropped, and the Draft says
+          // so, so the choice is visible rather than implied.
+          expect(draft.delaysMs).toEqual([50, 50, 50, 50]);
+          expect(draft.uniformDelayMs).toBe(50);
+        });
+      },
+    );
+  });
+
+  it('pins every frame to one rate and restores the source cadence on ask', async () => {
+    await withSyntheticGif(
+      { frames: 3, width: 8, height: 6, delaysMs: [50, 60, 50] },
+      async (gif) => {
+        await withStore(async (store) => {
+          await seed(gif, store);
+          await setSegmentRange(store.root, {
+            recordingId: RECORDING_ID,
+            id: CUT_ID,
+            startFrame: 0,
+            endFrame: 3,
+          });
+          const draft = await extractClipDraft(store.root, {
+            characterId: CHARACTER_ID,
+            recordingId: RECORDING_ID,
+            cutId: CUT_ID,
+            keepTiming: true,
+          });
+
+          const pinned = await setDraftFrameMs(store.root, {
+            characterId: CHARACTER_ID,
+            draftId: draft.id,
+            frameMs: 40,
+          });
+          expect(pinned.delaysMs).toEqual([40, 40, 40]);
+          expect(pinned.uniformDelayMs).toBe(40);
+
+          const restored = await restoreDraftTiming(store.root, {
+            characterId: CHARACTER_ID,
+            draftId: draft.id,
+          });
+          expect(restored.delaysMs).toEqual([50, 60, 50]);
+          expect(restored.uniformDelayMs).toBeUndefined();
+          // Restoring timing touches no pixels.
+          expect(restored.frames).toEqual(draft.frames);
         });
       },
     );

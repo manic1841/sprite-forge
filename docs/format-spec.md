@@ -25,6 +25,7 @@ Background: [`architecture.md`](./architecture.md), [`recordings.md`](./recordin
 | **Single asset namespace** | Within one Character, **Clip and Sequence ids share one namespace** — `clips/walk/` and `sequences/walk/` cannot both exist. |
 | **Folder equals id** | A folder's name **must equal** the id it holds (`clips/walk/` ⇔ `"id": "walk"`). |
 | **Time** | Always milliseconds, always suffixed `Ms`. Never seconds. |
+| **Rate** | Never frames-per-second. A uniform rate is a base millisecond duration; the exceptions are a sparse map of the frames that deviate, never a full array of them. |
 | **Frames** | Frame indices and counts are integers. A *range* is half-open, `[start, end)`. |
 | **Paths** | Always relative to the store root (manifest paths relative to the manifest), POSIX separators (`/`). No absolute paths, drive letters, or URLs. |
 | **Colours** | `#rrggbb`, lowercase. |
@@ -194,22 +195,40 @@ Repair script; the tool must **warn**, never silently misapply.
 Schema: [`schemas/asset.meta.schema.json`](../schemas/asset.meta.schema.json).
 
 ```jsonc
-{ "id": "walk", "frameCount": 24, "delaysMs": [50], "loop": true }
+{ "id": "walk", "frameCount": 24, "timing": { "frameMs": 50 }, "loop": true }
 ```
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `id` | ✅ | The Asset id; must equal the folder name. |
 | `frameCount` | ✅ | Number of frames. |
-| `delaysMs` | ✅ | Per-frame duration; **one** value (uniform) or exactly `frameCount` values. |
+| `timing` | ✅ | Frame `i` lasts `timing.overrideMs[i] ?? timing.frameMs` ms. See Rule 5.1. |
 | `loop` | ✅ | Whether the Asset loops. |
 
 A Clip and a Sequence use the **same** meta shape. Neither stores frame size
 (§3 Rule 3.2) or Anchor.
 
-**Rule 5.1 — `delaysMs` length.** It is either `1` (uniform, expanded to
-`frameCount`) or exactly `frameCount`. Anything else is invalid; `validate`
-enforces it.
+**Rule 5.1 — timing is a base plus overrides.** `timing.frameMs` is the base
+duration of every frame; `timing.overrideMs` maps a frame index (a decimal
+string, `"0"` upward) to a duration for the frames that differ. It is **omitted**
+when every frame is uniform, and when present it is non-empty and every key is
+**less than `frameCount`**. An override equal to `frameMs` is legal but redundant:
+the tool drops it on write. Rationale:
+[ADR-0016](./adr/0016-timing-is-a-base-plus-sparse-overrides.md).
+
+```jsonc
+// a 138-frame capture with twelve dropped frames
+{ "frameMs": 50, "overrideMs": { "21": 60, "65": 60 } }
+```
+
+A uniform rate is therefore **one** number, and a source whose cadence hiccups pays
+only for the hiccups. `frameMs × frameCount + the overrides` is the Asset's whole
+duration, so a consumer can lay out a strip without expanding anything.
+
+**Rule 5.2 — override keys are frame indices, not array positions.** `"10"` means
+the eleventh frame. The map is sparse, so a single unusual frame costs one entry
+rather than a 138-element array, and an edit to the base rate leaves every override
+untouched.
 
 ## 6. `provenance.json` — Clip
 
@@ -223,6 +242,7 @@ Schema: [`schemas/clip.provenance.schema.json`](../schemas/clip.provenance.schem
   "background": { "hex": "#9421ce", "source": "sampled", "tolerance": 24 },
   "repair": "repairs/walk/repair.json",
   "placementOffset": { "x": 0, "y": -2 },
+  "flipX": true,
   "derivedFrom": null,
   "spriteForgeVersion": "0.1.0"
 }
@@ -236,6 +256,7 @@ Schema: [`schemas/clip.provenance.schema.json`](../schemas/clip.provenance.schem
 | `background` | ✅ | `{hex, source: "sampled"\|"override", tolerance}`. |
 | `repair` | ➖ | Path to the Repair script, relative to the store root. Omitted or `null` when there is no Repair. |
 | `placementOffset` | ➖ | Manual placement on top of the automatic Anchor; **omitted when `{0,0}`**. |
+| `flipX` | ➖ | `true` when the frames are mirrored left to right at bake time; **omitted when not flipped**. Repair geometry stays in the unflipped frame, so a flip never invalidates a Repair script. |
 | `derivedFrom` | ➖ | `{kind, id}` of the forked-from Asset, or `null`. |
 | `spriteForgeVersion` | ✅ | Tool version that produced the Asset. |
 
@@ -265,7 +286,13 @@ order listed. There is no per-clip offset (`at`) and no repeat count; a Sequence
 that needs a clip twice lists it twice. (This is the "ordered concatenation" of
 §GLOSSARY *Sequence*.)
 
-**Rule 7.2 — no separate recipe file.** Like a Clip, a Sequence keeps its recipe
+**Rule 7.2 — a Sequence's timing is derived, never authored.** Its meta timing is
+the concatenation of its Clips' per-frame durations (§5 Rule 5.1): the base is
+their mode (ties go to the smallest) and every other frame becomes an override at
+its shifted index. Two Clips at different rates therefore join honestly — there is
+always a single base to describe the join, and nothing is resampled.
+
+**Rule 7.3 — no separate recipe file.** Like a Clip, a Sequence keeps its recipe
 in provenance and its baked result in `sheet.png`. Because Clips are immutable,
 the concatenation is deterministic and reproducible. `sheet.png` and `meta.json`
 may be regenerated from provenance at any time.
@@ -289,10 +316,10 @@ fixes only the parts that touch the contract as a whole.
 
 The Manifest is the **one** artifact the consumer reads. It is canvas-level: the
 shared `canvas` and `anchor` appear once, and each animation carries only
-`{sheet, frameCount, delaysMs, loop, flipsFacing?}`. Frame size is the `canvas`
+`{sheet, frameCount, timing, loop, flipsFacing?}`. Frame size is the `canvas`
 (§3 Rule 3.2). There is no hitbox and no per-animation mirror flag; direction is
 the consumer's **Facing** (§GLOSSARY), and a `flipsFacing` animation flips it on
-completion.
+completion. `timing` is the Asset's `timing` verbatim (§5 Rule 5.1).
 
 **Rule 9.1 — `formatVersion` is semver and is the consumer's contract.** A
 **major** bump is breaking for the consumer; minor/patch are compatible. This is

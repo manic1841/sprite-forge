@@ -105,6 +105,10 @@
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  /* the middle column is the one that gives when the window is short: without a
+     zero minimum its content would stretch the page instead of the stage fitting
+     it */
+  min-height: 0;
   /* no ground of its own: the shell already paints --u-bg, and a paned box that
      does not run the page's container lines is not a box to line up */
 }

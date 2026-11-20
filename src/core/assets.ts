@@ -29,7 +29,7 @@ import {
   type DraftSegmentSnapshot,
 } from './draft.js';
 import { StoreError } from './errors.js';
-import { translateOnCanvas } from './frames.js';
+import { flipHorizontally, translateOnCanvas } from './frames.js';
 import { assertValidId } from './ids.js';
 import {
   assetDir,
@@ -55,6 +55,12 @@ import {
 } from './store/index.js';
 import type { AssetKind, AssetRef } from './types.js';
 import { validateArtifact } from './validate.js';
+import {
+  copyTiming,
+  expandTiming,
+  timingFromDelays,
+  type AssetTiming,
+} from './timing.js';
 import { SPRITE_FORGE_VERSION } from './version.js';
 import {
   applyRepairScriptToFrame,
@@ -71,8 +77,8 @@ export interface AssetMeta {
   id: string;
   /** Number of frames in the sheet. */
   frameCount: number;
-  /** Per-frame delays in ms; one (uniform) or exactly `frameCount` values. */
-  delaysMs: number[];
+  /** Frame timing: a base duration plus the frames that deviate (Rule 5.1). */
+  timing: AssetTiming;
   /** Whether the Asset loops. */
   loop: boolean;
 }
@@ -88,6 +94,11 @@ export interface ClipProvenance {
   repair: string | null;
   /** Manual placement on top of the automatic Anchor; omitted when `{0,0}`. */
   placementOffset?: { x: number; y: number };
+  /**
+   * Whether the frames are mirrored left to right at bake time. Omitted when the
+   * Clip is not flipped; the Draft's frames stay unflipped either way.
+   */
+  flipX?: boolean;
   /** The forked-from Asset, or null. */
   derivedFrom: AssetRef | null;
   spriteForgeVersion: string;
@@ -200,6 +211,7 @@ export async function commitDraft(
     canvas,
     script,
     draft.placementOffset ?? { x: 0, y: 0 },
+    draft.flipX === true,
   );
   // The Draft's script is re-homed onto the committed Asset id (the fork seam
   // #24 opened); provenance points at the re-homed script.
@@ -211,7 +223,7 @@ export async function commitDraft(
   const meta: AssetMeta = {
     id: assetId,
     frameCount: draft.frameCount,
-    delaysMs: [...draft.delaysMs],
+    timing: timingFromDelays(draft.delaysMs),
     loop: draft.loop,
   };
   const provenance = buildClipProvenance(characterId, draft, repairRel);
@@ -458,19 +470,24 @@ export async function forkAsset(
   const parent = await readCommittedClip(root, characterId, id);
   const frames = await sliceSheet(root, characterId, id, parent.meta, canvas);
 
-  // A committed sheet already carries the parent's manual placement offset; a
-  // fork's Draft holds the **automatic** placement again (the offset is recorded
-  // on the descriptor and re-applied on the next bake), so un-translate it here.
+  // A committed sheet already carries the parent's manual placement offset and
+  // its mirror; a fork's Draft holds the **automatic** placement again (the offset
+  // and the flip are recorded on the descriptor and re-applied on the next bake),
+  // so undo both here — un-translate, then un-flip.
   const inheritedOffset = parent.provenance.placementOffset ?? { x: 0, y: 0 };
+  const inheritedFlip = parent.provenance.flipX === true;
 
   await removePath(root, draftDir(characterId, draftId));
   const framePaths: string[] = [];
   for (let index = 0; index < frames.length; index++) {
-    const automatic = translateOnCanvas(
+    let automatic = translateOnCanvas(
       { width: canvas.width, height: canvas.height, data: frames[index]! },
       -inheritedOffset.x,
       -inheritedOffset.y,
     );
+    if (inheritedFlip) {
+      automatic = flipHorizontally(automatic);
+    }
     const png = await sharp(Buffer.from(automatic.data), {
       raw: { width: canvas.width, height: canvas.height, channels: 4 },
     })
@@ -495,7 +512,7 @@ export async function forkAsset(
     },
     background: { ...parent.provenance.background },
     frameCount: parent.meta.frameCount,
-    delaysMs: expandDelays(parent.meta.delaysMs, parent.meta.frameCount),
+    delaysMs: expandTiming(parent.meta.timing, parent.meta.frameCount),
     loop: parent.meta.loop,
     spriteForgeVersion: SPRITE_FORGE_VERSION,
     derivedFrom: { kind: 'clip', id },
@@ -509,6 +526,7 @@ export async function forkAsset(
           },
         }
       : {}),
+    ...(inheritedFlip ? { flipX: true } : {}),
     ...(inheritedRepair ? { repair: inheritedRepair } : {}),
   };
 
@@ -671,6 +689,9 @@ function buildClipProvenance(
   if (offset && (offset.x !== 0 || offset.y !== 0)) {
     provenance.placementOffset = { ...offset };
   }
+  if (draft.flipX === true) {
+    provenance.flipX = true;
+  }
   return provenance;
 }
 
@@ -706,16 +727,19 @@ export async function tileRepairedFrames(
   canvas: Canvas,
   script: RepairScript,
   offset: { x: number; y: number },
+  flipX = false,
 ): Promise<Buffer> {
   const sheetWidth = frames.length * canvas.width;
   const sheetHeight = canvas.height;
   const sheet = Buffer.alloc(sheetWidth * sheetHeight * 4);
 
   for (let index = 0; index < frames.length; index++) {
-    // Baked tiles are the repaired result: replay the script for this frame,
-    // then place the Clip manually by its offset.
+    // Baked tiles are the repaired result: replay the script for this frame, apply
+    // the Clip's mirror, then place it manually by its offset. Repair geometry is
+    // authored on the unflipped frame, so flipping last keeps scripts valid.
     const repaired = applyRepairScriptToFrame(frames[index]!, index, script);
-    const frame = translateOnCanvas(repaired, offset.x, offset.y).data;
+    const flipped = flipX ? flipHorizontally(repaired) : repaired;
+    const frame = translateOnCanvas(flipped, offset.x, offset.y).data;
     const offsetX = index * canvas.width;
     for (let y = 0; y < canvas.height; y++) {
       for (let x = 0; x < canvas.width; x++) {
@@ -835,12 +859,13 @@ async function sliceSheet(
   return frames;
 }
 
-/** Expand a uniform `delaysMs` to one value per frame; pass a per-frame list through. */
-function expandDelays(delaysMs: number[], frameCount: number): number[] {
-  if (delaysMs.length === 1) {
-    return Array.from({ length: frameCount }, () => delaysMs[0]!);
-  }
-  return [...delaysMs];
+/** Derive a Sequence's meta (§5) from its source Clips: sum frames, concat timing. */
+function deriveSequenceMeta(id: string, clipMetas: AssetMeta[]): AssetMeta {
+  const frameCount = clipMetas.reduce((total, meta) => total + meta.frameCount, 0);
+  // Each source's per-frame durations, concatenated, then collapsed back onto one
+  // base plus the frames that deviate (Rule 5.1 / Rule 7.2).
+  const delaysMs = clipMetas.flatMap((meta) => expandTiming(meta.timing, meta.frameCount));
+  return { id, frameCount, timing: timingFromDelays(delaysMs), loop: true };
 }
 
 /** Refuse a commit whose id is already taken by a committed Clip or Sequence. */
@@ -869,16 +894,6 @@ function assertDraftKind(kind: AssetKind): void {
         `commitSequence (a Sequence has no frame Draft).`,
     );
   }
-}
-
-/** Derive a Sequence's meta (§5) from its source Clips: sum frames, concat delays. */
-function deriveSequenceMeta(id: string, clipMetas: AssetMeta[]): AssetMeta {
-  const frameCount = clipMetas.reduce((total, meta) => total + meta.frameCount, 0);
-  // Each source's per-frame delays (expanding a uniform-1 value first, Rule 5.1),
-  // concatenated, so the result is exactly frameCount long.
-  const delaysMs = clipMetas.flatMap((meta) => expandDelays(meta.delaysMs, meta.frameCount));
-  const uniform = delaysMs.every((delay) => delay === delaysMs[0]);
-  return { id, frameCount, delaysMs: uniform ? [delaysMs[0]!] : delaysMs, loop: true };
 }
 
 /** Tile the source Clips' baked strips end to end into one canvas-tall PNG strip. */

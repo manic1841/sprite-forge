@@ -9,18 +9,32 @@
  *
  *   SPRITE_FORGE_STORE=/path/to/store pnpm web
  *
+ * Without the variable it uses `store/` under the working directory and creates
+ * it when missing, the same default the CLI documents (ADR-0011).
+ *
  * Not a production build: the tool ships the CLI, not this server.
  */
 
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { extname } from 'node:path';
+import { mkdir, stat } from 'node:fs/promises';
+import { extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { createApiMiddleware } from './src/web/server.ts';
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
-const storeRoot = process.env.SPRITE_FORGE_STORE;
+
+/**
+ * The store root: `SPRITE_FORGE_STORE` when set, else `store/` under the working
+ * directory — the same default the CLI uses, so an unconfigured `pnpm web` opens
+ * the in-repo store instead of refusing to start.
+ */
+export function storePath(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  return resolve(cwd, env.SPRITE_FORGE_STORE ?? 'store');
+}
 
 /**
  * The root is `site/`, but the workbench's modules live in `src/`. A URL outside
@@ -117,23 +131,17 @@ export function workbenchPage(): Plugin {
 function workbenchApi(): Plugin {
   return {
     name: 'sprite-forge-workbench-api',
-    configureServer(server) {
+    async configureServer(server) {
+      const storeRoot = storePath();
+      await mkdir(storeRoot, { recursive: true });
+      server.config.logger.info(`sprite-forge store: ${storeRoot}`);
+      const api = createApiMiddleware(storeRoot);
       server.middlewares.use((req, res, next) => {
         if (!req.url?.startsWith('/api/')) {
           next();
           return;
         }
-        if (!storeRoot) {
-          res.statusCode = 500;
-          res.setHeader('content-type', 'application/json');
-          res.end(
-            JSON.stringify({
-              error: 'SPRITE_FORGE_STORE is not set; start with `SPRITE_FORGE_STORE=/path/to/store pnpm web`.',
-            }),
-          );
-          return;
-        }
-        createApiMiddleware(storeRoot)(req, res, next);
+        api(req, res, next);
       });
     },
   };

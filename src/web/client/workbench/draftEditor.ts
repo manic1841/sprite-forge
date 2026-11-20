@@ -43,6 +43,7 @@ export interface DraftEditorDeps {
   setMode(mode: WorkbenchState['mode']): void;
   loadAsset(characterId: string, assetKind: 'clip' | 'sequence', assetId: string): Promise<void>;
   loadAlignment(characterId: string): Promise<void>;
+  loadCharacter(characterId: string): Promise<void>;
   rescan(): Promise<void>;
 }
 
@@ -221,6 +222,10 @@ export function createDraftEditor(deps: DraftEditorDeps): DraftEditor {
 
     const sheetEl = make('div', 'draft-sheet');
     sheetEl.dataset.draftSheet = '';
+    // The stored frame is unflipped (Repair is authored on it), so a mirrored Draft
+    // is turned here. The whole sheet turns, overlay included, and the pointer maths
+    // un-turn the x it reads.
+    sheetEl.classList.toggle('is-mirrored', draft.flipX === true);
     sheetEl.append(img, overlay);
 
     const board = make('div', 'draft-board');
@@ -374,11 +379,67 @@ export function createDraftEditor(deps: DraftEditorDeps): DraftEditor {
       // is shown on its own face, where it plays back like any committed Asset.
       state.draftDescriptor = null;
       state.repair = null;
+      // The re-align is taken down *before* the rescan re-renders: the fork's frames
+      // are gone now, and the preview would otherwise fetch them once more.
+      const pending = state.realign?.forkDraftId === target.draftId ? state.realign : null;
+      if (pending) {
+        state.realign = null;
+      }
       await deps.rescan();
+      // A fork taken from a composition preview is here to *replace a slot*: the
+      // composition takes the new Clip id and the reader is put back on it, rather
+      // than landing on a Clip the composition does not use.
+      if (await returnToComposition(pending, target.characterId, target.draftId, committed.id)) {
+        return;
+      }
       await deps.loadAsset(target.characterId, 'clip', committed.id);
     } catch (error) {
       message.textContent = (error as Error).message;
     }
+  }
+
+  /**
+   * Put a re-aligned fork back into the composition that asked for it.
+   *
+   * Guarded on every part of the pairing — the same composition, the same fork,
+   * the same Clip still in the same slot — so an unrelated commit is untouched.
+   * Returns whether it took the commit over.
+   */
+  async function returnToComposition(
+    realign: WorkbenchState['realign'],
+    characterId: string,
+    draftId: string,
+    committedId: string,
+  ): Promise<boolean> {
+    // Opening the fork's Draft cleared the composition, so the held one is the
+    // fallback — this is a return, not a reload.
+    const composition = state.sequenceDraft ?? realign?.composition ?? null;
+    if (
+      !realign ||
+      !composition ||
+      realign.characterId !== characterId ||
+      realign.draftId !== composition.id ||
+      realign.forkDraftId !== draftId ||
+      composition.clips[realign.slot] !== realign.clipId
+    ) {
+      state.realign = null;
+      return false;
+    }
+    composition.clips[realign.slot] = committedId;
+    state.realign = null;
+    state.sequenceDraft = composition;
+    await api.saveSequenceDraft(composition.characterId, {
+      draftId: composition.id,
+      clips: composition.clips,
+      ...(composition.forkOf === null ? {} : { forkOf: composition.forkOf }),
+    });
+    await deps.rescan();
+    // Back to the Character's composition, which is where the slot lives.
+    await deps.loadCharacter(composition.characterId);
+    deps.setMode('compose');
+    deps.renderStage();
+    deps.renderInspector();
+    return true;
   }
 
   function discardSection(): HTMLElement {
@@ -413,7 +474,19 @@ export function createDraftEditor(deps: DraftEditorDeps): DraftEditor {
     state.target = { kind: 'character', characterId };
     state.draftDescriptor = null;
     state.repair = null;
+    // A discarded re-align fork drops the re-align too; the open composition keeps
+    // its old Clip and is where the reader goes back to.
+    const backToComposition = state.realign?.forkDraftId === draftId;
+    if (backToComposition) {
+      state.realign = null;
+    }
     await deps.rescan();
+    if (backToComposition && state.sequenceDraft !== null) {
+      deps.setMode('compose');
+      deps.renderStage();
+      deps.renderInspector();
+      return;
+    }
     deps.setMode('align');
     await deps.loadAlignment(characterId);
   }

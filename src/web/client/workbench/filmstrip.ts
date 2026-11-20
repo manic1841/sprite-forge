@@ -9,11 +9,21 @@
 
 import type { FilmstripPort } from './ports.js';
 import { make } from './dom.js';
-import { renderSelectionActions, rangeLabel } from './cutSession.js';
+import { paintSelectionBand, renderSelectionActions, rangeLabel } from './cutSession.js';
 import type { Segment } from '../types.js';
 
 /** The narrowest a frame cell is drawn, in px, before zoom starts scrolling. */
 const CELL_PX = 18;
+/**
+ * The narrowest a cell may be squeezed to before the fit gives up scrolling.
+ *
+ * A Recording of a thousand frames cannot be fitted into 600px legibly: the gaps
+ * between cells alone would be wider than the strip, every `1fr` column would
+ * resolve to 0px, and the axis would collapse into a comb of hairlines. Below this
+ * floor the cells keep a real width and the axis overflows instead, so the strip
+ * still scrubs.
+ */
+const DENSE_CELL_PX = 2;
 /** The space held between two cells; also part of the strip's width budget. */
 const GAP_PX = 2;
 /** How much one Ctrl + wheel notch multiplies the time axis. */
@@ -24,6 +34,11 @@ const ZOOM_MAX = 8;
 export function renderFilmstrip(ctx: FilmstripPort): void {
   const { filmstrip } = ctx.regions;
   const { state } = ctx;
+  // Every rebuild replaces the scroller, which would drop the reader back at the
+  // left edge — after zooming that turns the next click on the track into a mark
+  // at frame 0. The offset is carried over so a rebuild is invisible.
+  const previousScroll =
+    filmstrip.querySelector<HTMLElement>('[data-strip-scroll]')?.scrollLeft ?? 0;
   filmstrip.innerHTML = '';
   filmstrip.dataset.activeFrame = String(state.frame);
 
@@ -53,7 +68,6 @@ export function renderFilmstrip(ctx: FilmstripPort): void {
   // frame axis, so they must move together. The block is as wide as the zoom says,
   // and at 1× exactly as wide as the strip.
   const frameCount = state.cutList?.frameCount ?? 0;
-  const isFit = state.trackZoom === 1;
   const scroller = make('div', 'strip-scroll');
   scroller.dataset.stripScroll = '';
   const content = make('div', 'strip-content');
@@ -68,16 +82,34 @@ export function renderFilmstrip(ctx: FilmstripPort): void {
   const viewport = scroller.clientWidth || filmstrip.clientWidth;
   const gaps = Math.max(0, frameCount - 1) * GAP_PX;
   const fitWidth = frameCount > 0 ? (viewport - gaps) / frameCount : CELL_PX;
+  // The index is what sets the legible floor: a Recording of a thousand frames
+  // carries four digits, which need a wider cell than the base floor.
+  const digits = String(Math.max(0, frameCount - 1)).length;
+  const cellFloor = Math.max(CELL_PX, digits * 6 + 4);
+  // A fit too dense to hold its own digits becomes a dense axis: the gaps go, the
+  // cells take the floor width, and the strip scrolls.
+  const isDense = state.trackZoom === 1 && fitWidth < cellFloor;
+  const isFit = state.trackZoom === 1 && !isDense;
+  const denseGap = isDense ? 0 : GAP_PX;
+  const denseGaps = Math.max(0, frameCount - 1) * denseGap;
 
-  // At 1× the columns share the strip out themselves (`1fr`, no floor), so the fit
-  // holds at any window width without watching for resizes. Past 1× the width is a
-  // real number, floored at CELL_PX to keep the digits legible, and it overflows.
+  // At a plain 1× the columns share the strip out themselves (`1fr`, no floor), so
+  // the fit holds at any window width without watching for resizes. Past 1× (and at
+  // the dense floor) the width is a real number — floored at CELL_PX to keep the
+  // digits legible when zoomed — and the axis overflows.
   if (isFit) {
-    content.style.setProperty('--cell-w', `${Math.max(CELL_PX, fitWidth)}px`);
+    content.style.setProperty('--cell-w', `${Math.max(cellFloor, fitWidth)}px`);
   } else {
-    const cellWidth = Math.max(CELL_PX, fitWidth * state.trackZoom);
+    const cellWidth = isDense
+      ? DENSE_CELL_PX
+      : Math.max(cellFloor, fitWidth * state.trackZoom);
     content.style.setProperty('--cell-w', `${cellWidth}px`);
-    content.style.width = `${Math.max(frameCount * cellWidth + gaps, 1)}px`;
+    content.style.width = `${Math.max(frameCount * cellWidth + denseGaps, 1)}px`;
+  }
+  // Restored once the axis has a width (before that the value clamps to 0), so a
+  // rebuild keeps the reader's place. A fresh Recording loads at 0.
+  if (previousScroll > 0) {
+    scroller.scrollLeft = previousScroll;
   }
 
   const frames = make('div', 'film');
@@ -85,11 +117,12 @@ export function renderFilmstrip(ctx: FilmstripPort): void {
   frames.style.gridTemplateColumns = isFit
     ? `repeat(${frameCount}, minmax(0, 1fr))`
     : `repeat(${frameCount}, minmax(var(--cell-w), 1fr))`;
-  // A long Recording at 1× divides the strip down to a few pixels a cell, where
-  // three digits would be clipped mid-glyph. At that density the cells read as a
-  // density map and the counter carries the number; the digits come back as soon
-  // as the fit is wide enough to hold them (and at every zoom above 1×).
-  frames.classList.toggle('is-dense', isFit && fitWidth < CELL_PX);
+  frames.style.gap = `${denseGap}px`;
+  // A long Recording divides the strip down to a few pixels a cell, where the
+  // digits would be clipped mid-glyph. At that density the cells read as a density
+  // map and the counter carries the number; the digits come back as soon as the fit
+  // is wide enough to hold them (and at every zoom above 1×).
+  frames.classList.toggle('is-dense', isDense);
   for (let index = 0; index < frameCount; index += 1) {
     const cell = make('button', 'cell');
     cell.dataset.frame = String(index);
@@ -230,11 +263,7 @@ function cutTrack(ctx: FilmstripPort): HTMLElement {
   const selection = ctx.state.selection;
 
   if (selection) {
-    const band = make('span', 'pick-band sel');
-    band.dataset.pickBand = '';
-    band.style.left = `${(selection.startFrame / frameCount) * 100}%`;
-    band.style.width = `${((selection.endFrame - selection.startFrame) / frameCount) * 100}%`;
-    track.appendChild(band);
+    paintSelectionBand(track, selection, frameCount);
   }
 
   for (const cut of ctx.state.cutList?.cuts ?? []) {
@@ -287,6 +316,16 @@ function cutRange(ctx: FilmstripPort, cut: Segment): HTMLElement {
 
   if (!selected) {
     return range;
+  }
+  // The selected band owns the inspector; its own indices are drawn on it so the
+  // band being edited says which frames it covers.
+  const edges = cut.endFrame - cut.startFrame === 1 ? (['start'] as const) : (['start', 'end'] as const);
+  for (const edge of edges) {
+    const index = make('span', 'cut-index');
+    index.dataset.cutIndex = edge;
+    index.dataset.edge = edge;
+    index.textContent = String(edge === 'start' ? cut.startFrame : cut.endFrame - 1);
+    range.appendChild(index);
   }
   for (const edge of ['start', 'end'] as const) {
     const handle = make('span', 'cut-handle');

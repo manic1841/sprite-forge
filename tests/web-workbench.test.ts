@@ -127,6 +127,13 @@ function fakeApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     readCharacterAlignment: async () => ALIGNMENT,
     readDraftAlignment: async () => EMPTY_ALIGNMENT,
     setPlacementOffset: async () => DRAFT,
+    setFlipX: async () => DRAFT,
+    setDraftFrameMs: async (_characterId, _draftId, frameMs) => ({
+      ...DRAFT,
+      delaysMs: [frameMs, frameMs, frameMs],
+      uniformDelayMs: frameMs,
+    }),
+    restoreDraftTiming: async () => DRAFT,
     resizeCanvas: async () => ({
       canvas: ALIGNMENT.canvas,
       rebakedClips: [],
@@ -198,13 +205,13 @@ const EXPORT_RESULT: ExportResult = {
   manifestPath: 'exports/pixel-pet/manifest.json',
   sheetPaths: ['exports/pixel-pet/clips/walk.png'],
   manifest: {
-    formatVersion: '1.0.0',
+    formatVersion: '2.0.0',
     target: 'pixel-pet',
     character: 'hero',
     authoredFacing: 'right',
     canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
     animations: {
-      walk: { sheet: 'clips/walk.png', frameCount: 3, delaysMs: [50], loop: true },
+      walk: { sheet: 'clips/walk.png', frameCount: 3, timing: { frameMs: 50 }, loop: true },
     },
     bindings: { idle: ['walk'] },
     lock: { spriteForgeVersion: '0.1.0', exportedAt: '2026-10-08T00:00:00.000Z' },
@@ -218,7 +225,7 @@ const CLIP: CommittedAsset = {
   kind: 'clip',
   id: 'walk',
   dir: 'characters/hero/clips/walk',
-  meta: { id: 'walk', frameCount: 3, delaysMs: [50], loop: true },
+  meta: { id: 'walk', frameCount: 3, timing: { frameMs: 50 }, loop: true },
   provenance: {
     recordingId: 'idle',
     recordingHash: `sha256:${'a'.repeat(64)}`,
@@ -235,7 +242,7 @@ const SEQUENCE: CommittedSequence = {
   kind: 'sequence',
   id: 'walk-jump',
   dir: 'characters/hero/sequences/walk-jump',
-  meta: { id: 'walk-jump', frameCount: 6, delaysMs: [50], loop: false },
+  meta: { id: 'walk-jump', frameCount: 6, timing: { frameMs: 50 }, loop: false },
   provenance: { clips: ['walk', 'greeting'], derivedFrom: null, spriteForgeVersion: '0.1.0' },
 };
 
@@ -244,7 +251,7 @@ const SEQUENCE_FORK: SequenceFork = {
   id: 'walk-jump',
   clips: ['walk', 'greeting'],
   derivedFrom: { kind: 'sequence', id: 'walk-jump' },
-};const EMPTY_ALIGNMENT: AlignmentState = { offset: { x: 0, y: 0 }, warnings: [] };
+};const EMPTY_ALIGNMENT: AlignmentState = { offset: { x: 0, y: 0 }, flipX: false, warnings: [] };
 const ALIGNMENT: CharacterAlignment = {
   canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
   contentFloor: { width: 4, height: 6, hasContent: true },
@@ -277,6 +284,30 @@ function answerDialog(accept = true, value?: string): void {
   }
   const selector = accept ? '[data-dialog-confirm]' : '[data-dialog-cancel]';
   document.querySelector<HTMLElement>(selector)!.click();
+}
+
+/**
+ * Type into a field the way a person does.
+ *
+ * Setting `.value` alone is invisible to a listener that only answers `input`, so
+ * this sets the value and dispatches a **bubbling** event — the same one typing
+ * raises, which the row and the form both wait on for their derived state.
+ */
+function typeInto(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/**
+ * Answer an ask the action only reaches after a microtask hop (one that follows an
+ * awaited step, such as Extract asking for the target before the Draft name).
+ *
+ * The dialog is appended synchronously once reached, so a `setTimeout(0)` — which
+ * runs after the pending microtasks flush — is enough to find it.
+ */
+async function answerDialogAfterHop(accept = true, value?: string): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  answerDialog(accept, value);
 }
 
 /**
@@ -576,7 +607,9 @@ describe('the Library', () => {
     expect(wb.root.querySelector('[data-segment-delete="walk"]')).not.toBeNull();
 
     // Opening a Character leaves the Recording, so its branch folds away with it.
+    // A Segment is in hand, so the click also extracts and asks for a Draft name.
     rail.querySelector<HTMLElement>('[data-character="hero"]')!.click();
+    await answerDialogAfterHop();
     await wb.settled();
     expect(rail.querySelector('[data-recording="idle"]')!.getAttribute('aria-expanded')).toBe(
       'false',
@@ -630,9 +663,12 @@ describe('the Library', () => {
     // The rail Character row answers the same question as the save dialog, so it
     // turns the cut in hand into that Character's Draft instead of only opening it.
     rail.querySelector<HTMLElement>('[data-character="hero"]')!.click();
+    await answerDialogAfterHop();
     await wb.settled();
 
-    expect(extracted).toEqual([{ characterId: 'hero', recordingId: 'idle', cutId: 'walk' }]);
+    expect(extracted).toEqual([
+      { characterId: 'hero', recordingId: 'idle', cutId: 'walk', draftId: 'walk' },
+    ]);
     expect(wb.mode).toBe('align');
     expect(wb.root.querySelector('[data-region="inspector"] [data-inspector-section="alignment"]')).not.toBeNull();
   });
@@ -669,6 +705,26 @@ describe('the filmstrip', () => {
     expect([...frames].map((el) => (el as HTMLElement).dataset.frame)).toEqual([
       '0', '1', '2', '3', '4', '5', '6', '7',
     ]);
+  });
+
+  it('keeps every cell a real width on a Recording too long to fit', async () => {
+    const long: CutList = { ...CUTS, frameCount: 2000, cuts: [] };
+    const wb = mountWorkbench(container, {
+      api: fakeApi({ readCutList: async () => long }),
+    });
+    await wb.ready;
+    // A real viewport, so the fit has a width to fall short of.
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(600);
+    await wb.loadRecording('idle');
+
+    const film = wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] .film')!;
+    expect(film.classList.contains('is-dense')).toBe(true);
+    // The fit would be under a pixel a cell, so the axis takes a floor width and
+    // scrolls instead of collapsing into a comb of zero-width columns.
+    const content = wb.root.querySelector<HTMLElement>('[data-strip-content]')!;
+    expect(Number.parseFloat(content.style.width)).toBeGreaterThan(600);
+    expect(film.style.gap).toBe('0px');
+    vi.restoreAllMocks();
   });
 
   it('moves the active frame by frame index when a cell is clicked', async () => {
@@ -726,6 +782,54 @@ describe('the filmstrip', () => {
 
     expect(wb.root.querySelector('[data-region="filmstrip"] [data-pick-save]')).not.toBeNull();
     expect(wb.activeFrame).toBe(1);
+  });
+
+  it('shows the marked range as indices and takes them typed', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    measureTrack();
+    const track = wb.root.querySelector<HTMLElement>('[data-region="filmstrip"] [data-pick]')!;
+
+    track.dispatchEvent(pointer('pointerdown', 10));
+    window.dispatchEvent(pointer('pointermove', 30));
+    window.dispatchEvent(pointer('pointerup', 30));
+
+    const strip = (): HTMLElement => wb.root.querySelector('[data-region="filmstrip"]')!;
+    expect(strip().querySelector('[data-pick-band-start]')!.textContent).toBe('1');
+    expect(strip().querySelector('[data-pick-band-end]')!.textContent).toBe('3');
+
+    const start = strip().querySelector<HTMLInputElement>('[data-pick-start]')!;
+    const end = strip().querySelector<HTMLInputElement>('[data-pick-end]')!;
+    expect(start.value).toBe('1');
+    expect(end.value).toBe('3');
+
+    // Typing an end is a direct edit of the range, and it takes the playhead to
+    // the start so the preview matches.
+    end.value = '5';
+    end.dispatchEvent(new Event('change'));
+    expect(strip().querySelector('[data-pick-band]')!.getAttribute('title')).toBe('frames 1–5');
+
+    start.value = '2';
+    start.dispatchEvent(new Event('change'));
+    expect(strip().querySelector('[data-pick-band]')!.getAttribute('title')).toBe('frames 2–5');
+    expect(wb.activeFrame).toBe(2);
+  });
+
+  it('keeps the strip where it was scrolled when a Segment is selected', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(800);
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(80);
+    const scroller = (): HTMLElement =>
+      wb.root.querySelector('[data-region="filmstrip"] [data-strip-scroll]')!;
+
+    scroller().scrollLeft = 120;
+    await selectSegment(wb, 'walk');
+
+    expect(scroller().scrollLeft).toBe(120);
+    vi.restoreAllMocks();
   });
 
   it('keeps marking and editing exclusive, so Play has one target', async () => {
@@ -850,6 +954,12 @@ describe('the box on a Segment', () => {
     await selectSegment(wb, 'walk');
     const box = wb.root.querySelector<HTMLElement>('[data-cut-box]');
     expect(box?.dataset.box).toBe('1,2,3,4');
+    // The box is positioned in percentages, so its containing block must be the
+    // frame itself — not the holder that centres and letterboxes it.
+    const plate = box?.parentElement;
+    expect(plate?.className).toBe('cut-image');
+    expect(plate?.parentElement?.dataset.drawBox).toBe('');
+    expect(plate?.querySelector('img')).not.toBeNull();
     expect(wb.root.querySelector('[data-segment-box]')?.textContent).toContain('box 1,2 3×4');
 
     wb.root.querySelector<HTMLElement>('[data-segment-box-clear]')!.click();
@@ -1024,6 +1134,62 @@ describe('the Clip editor stage', () => {
     expect(view.querySelector('[data-draft-frame-counter]')!.textContent).toBe('frame 0 / 3');
     expect(view.querySelectorAll('[data-draft-frame-cell]')).toHaveLength(3);
     expect(wb.activeDraftFrame).toBe(0);
+  });
+
+  it('shows a mirrored Draft turned on the Clip face, and says so', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({ readClipDraft: async () => ({ ...DRAFT, flipX: true }) }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+
+    // The stored frame stays unflipped (Repair is authored on it); only the view
+    // turns, sheet and overlay together.
+    const sheet = wb.root.querySelector<HTMLElement>('[data-draft-sheet]')!;
+    expect(sheet.classList.contains('is-mirrored')).toBe(true);
+    expect(
+      [...wb.root.querySelectorAll('[data-region="inspector"] dt')].find(
+        (cell) => cell.textContent === 'mirror',
+      )?.nextElementSibling?.textContent,
+    ).toBe('on');
+  });
+
+  it('leaves an unmirrored Draft upright', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+
+    expect(
+      wb.root.querySelector('[data-draft-sheet]')!.classList.contains('is-mirrored'),
+    ).toBe(false);
+  });
+
+  it('paints through the mirror onto the stored, unflipped pixel', async () => {
+    const written: Array<{ x: number; y: number }> = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        readClipDraft: async () => ({ ...DRAFT, flipX: true }),
+        appendRepairOperation: async (_characterId, _draftId, operation) => {
+          written.push(operation.geometry as { x: number; y: number });
+          return EMPTY_REPAIR;
+        },
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+
+    const img = wb.root.querySelector<HTMLImageElement>('[data-draft-frame]')!;
+    Object.defineProperty(img, 'naturalWidth', { value: 10, configurable: true });
+    Object.defineProperty(img, 'naturalHeight', { value: 10, configurable: true });
+    measureTrack(10);
+
+    // A click 1px in from the left of a turned 10px frame is its pixel 8.
+    wb.root.querySelector<HTMLElement>('[data-repair-tool="paint"]')!.click();
+    img.dispatchEvent(pointer('pointerdown', 1));
+    window.dispatchEvent(pointer('pointerup', 1));
+    await wb.settled();
+
+    expect(written[0]).toMatchObject({ points: [[8, 0]] });
   });
 
   it('navigates Draft frames by frame index (the unit)', async () => {
@@ -1369,6 +1535,11 @@ describe('the Alignment stage', () => {
     const fitted: string[] = [];
     const wb = mountWorkbench(container, {
       api: fakeApi({
+        // Room above the floor, so there is something to fit down to.
+        readCharacterAlignment: async () => ({
+          ...ALIGNMENT,
+          canvas: { width: 8, height: 10, anchor: { x: 4, y: 10 } },
+        }),
         fitCanvas: async (characterId) => {
           fitted.push(characterId);
           return {
@@ -1392,7 +1563,24 @@ describe('the Alignment stage', () => {
     expect(fitted).toEqual(['hero']);
   });
 
-  it('keeps the board’s zoom through a resize, so a crop is not shown as a zoom', async () => {
+  it('offers Fit to content only while there is room above the floor', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        // The Canvas is already the floor.
+        readCharacterAlignment: async () => ALIGNMENT,
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const fit = wb.root.querySelector<HTMLButtonElement>('[data-fit-canvas-action]')!;
+    expect(fit.disabled).toBe(true);
+    expect(fit.title).toMatch(/smallest size/i);
+  });
+
+  it('holds the rate through a resize, so only the Canvas area changes', async () => {
     // A Canvas big enough to shrink the fitted rate: 400px of stage over 100px is
     // 3 display pixels per Canvas pixel, and the fit alone would give 16 once the
     // Canvas is 20px.
@@ -1444,7 +1632,8 @@ describe('the Alignment stage', () => {
     inspector.querySelector<HTMLElement>('[data-resize-canvas-action]')!.click();
     await wb.settled();
 
-    // The board is now genuinely smaller: same rate, fewer Canvas pixels.
+    // The smaller Canvas is drawn at the rate it already had: the area shrank, the
+    // pixels did not grow.
     const after = wb.root.querySelector<HTMLElement>('[data-alignment-canvas]')!;
     expect(after.dataset.alignScale).toBe('3');
     expect(after.style.width).toBe('60px');
@@ -1454,10 +1643,166 @@ describe('the Alignment stage', () => {
     ).toBe('20 × 20');
   });
 
+  it('offers the Canvas edges as resize handles on an editable face', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const stage = wb.root.querySelector('[data-region="stage"]') as HTMLElement;
+    const edges = [...stage.querySelectorAll<HTMLElement>('[data-grip-edge]')].map(
+      (grip) => grip.dataset.gripEdge,
+    );
+    expect(edges).toEqual(['left', 'right', 'top', 'bottom']);
+    // A grip is a labelled button, so the size is reachable without a pointer.
+    const left = stage.querySelector<HTMLElement>('[data-grip-edge="left"]')!;
+    expect(left.tagName).toBe('BUTTON');
+    expect(left.getAttribute('aria-label')).toMatch(/width/i);
+  });
+
+  it('withholds the handles where the Canvas is not edited (a committed Asset)', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+    wb.root.querySelector<HTMLElement>('[data-asset="walk"]')!.click();
+    await wb.settled();
+    wb.setMode('align');
+    await wb.settled();
+
+    const stage = wb.root.querySelector('[data-region="stage"]') as HTMLElement;
+    expect(stage.querySelector('[data-alignment-canvas]')).not.toBeNull();
+    expect(stage.querySelectorAll('[data-grip-edge]')).toHaveLength(0);
+  });
+
+  it('resizes the Canvas by dragging its edge, previewing the re-bake', async () => {
+    const sized: unknown[] = [];
+    let current: CharacterAlignment = ALIGNMENT;
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        readCharacterAlignment: async () => current,
+        readDraftAlignment: async () => EMPTY_ALIGNMENT,
+        resizeCanvas: async (characterId, width, height) => {
+          sized.push({ characterId, width, height });
+          current = { ...ALIGNMENT, canvas: { width, height, anchor: { x: width / 2, y: height } } };
+          return {
+            canvas: current.canvas,
+            rebakedClips: [],
+            rebakedSequences: [],
+            repairWarnings: [],
+          };
+        },
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const stage = wb.root.querySelector('[data-region="stage"]') as HTMLElement;
+    const board = stage.querySelector<HTMLElement>('[data-alignment-canvas]')!;
+    const scale = Number(board.dataset.alignScale);
+    const grip = stage.querySelector<HTMLElement>('[data-grip-edge="right"]')!;
+    const at = (type: string, x: number, y: number): PointerEvent =>
+      new PointerEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true });
+
+    grip.dispatchEvent(at('pointerdown', 100, 100));
+    window.dispatchEvent(at('pointermove', 100 + 4 * scale, 100));
+    // While the pointer is down the outcome is already on screen: the store's own
+    // arithmetic, applied without writing. The frame grows; the picture keeps its
+    // size, so the extra area is empty rather than the sprite being stretched.
+    expect(board.style.width).toBe(`${12 * scale}px`);
+    const image = stage.querySelector<HTMLElement>(
+      '[data-align-ghost][data-draft="wip"] [data-align-ghost-image]',
+    )!;
+    expect(image.style.width).toBe(`${4 * scale}px`);
+    expect(image.style.height).toBe(`${6 * scale}px`);
+    // The bitmap is shifted by the delta the re-bake will apply (width +8 is dx 4,
+    // height unchanged) so its pixels stay put while the frame's edge moves.
+    expect(image.style.transform).toBe(`translate(${4 * scale}px, 0px)`);
+    expect(stage.querySelector('[data-align-size-readout]')!.textContent).toBe('12 × 6');
+    expect(stage.querySelector<HTMLElement>('[data-anchor]')!.dataset.anchorX).toBe('2');
+
+    window.dispatchEvent(at('pointerup', 100 + 4 * scale, 100));
+    await wb.settled();
+
+    // Symmetric about the Anchor: four columns dragged is eight columns of width.
+    expect(sized).toEqual([{ characterId: 'hero', width: 12, height: 6 }]);
+  });
+
+  it('stops an edge drag at the content floor instead of writing a refused size', async () => {
+    const sized: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        readCharacterAlignment: async () => ALIGNMENT,
+        readDraftAlignment: async () => EMPTY_ALIGNMENT,
+        resizeCanvas: async (characterId, width, height) => {
+          sized.push({ characterId, width, height });
+          return {
+            canvas: { width, height, anchor: { x: width / 2, y: height } },
+            rebakedClips: [],
+            rebakedSequences: [],
+            repairWarnings: [],
+          };
+        },
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const stage = wb.root.querySelector('[data-region="stage"]') as HTMLElement;
+    const board = stage.querySelector<HTMLElement>('[data-alignment-canvas]')!;
+    const scale = Number(board.dataset.alignScale);
+    const grip = stage.querySelector<HTMLElement>('[data-grip-edge="bottom"]')!;
+    const at = (type: string, x: number, y: number): PointerEvent =>
+      new PointerEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true });
+
+    // The Canvas is already the floor, so pulling inward changes nothing at all.
+    grip.dispatchEvent(at('pointerdown', 10, 10));
+    window.dispatchEvent(at('pointermove', 10, 10 - 5 * scale));
+    expect(stage.querySelector('[data-align-size-readout]')!.textContent).toBe('4 × 6');
+    window.dispatchEvent(at('pointerup', 10, 10 - 5 * scale));
+    await wb.settled();
+    expect(sized).toEqual([]);
+  });
+
+  it('resizes from the keyboard, one whole column of width per arrow', async () => {
+    const sized: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        readCharacterAlignment: async () => ALIGNMENT,
+        readDraftAlignment: async () => EMPTY_ALIGNMENT,
+        resizeCanvas: async (characterId, width, height) => {
+          sized.push({ characterId, width, height });
+          return {
+            canvas: { width, height, anchor: { x: width / 2, y: height } },
+            rebakedClips: [],
+            rebakedSequences: [],
+            repairWarnings: [],
+          };
+        },
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const stage = wb.root.querySelector('[data-region="stage"]') as HTMLElement;
+    const left = stage.querySelector<HTMLElement>('[data-grip-edge="left"]')!;
+    // The edge travels left, so the Canvas grows: two columns, and never odd.
+    left.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    await wb.settled();
+    expect(sized).toEqual([{ characterId: 'hero', width: 6, height: 6 }]);
+  });
+
   it('surfaces a stale-alignment warning from the server rather than hiding it', async () => {
     const warned = fakeApi({
       readDraftAlignment: async () => ({
         offset: { x: 0, y: -1 },
+        flipX: false,
         warnings: [{ code: 'alignment-framing-changed', message: 'the Canvas changed' }],
       }),
     });
@@ -1521,6 +1866,98 @@ describe('the Alignment stage', () => {
     expect(ghost.style.overflow).toBe('hidden');
     expect(image.style.width).toBe(`${ALIGNMENT.canvas.width * scale * 3}px`);
   });
+
+  it('mirrors the Draft when the Mirror x box is ticked', async () => {
+    const written: unknown[] = [];
+    let mirrored = false;
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        setFlipX: async (characterId, draftId, flipX) => {
+          written.push({ characterId, draftId, flipX });
+          mirrored = flipX;
+          return { ...DRAFT, flipX };
+        },
+        readDraftAlignment: async () => ({
+          offset: { x: 0, y: 0 },
+          flipX: mirrored,
+          warnings: [],
+        }),
+        readCharacterAlignment: async () => ({
+          ...ALIGNMENT,
+          drafts: [{ ...ALIGNMENT.drafts[0]!, flipX: mirrored }],
+        }),
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const flip = wb.root.querySelector<HTMLInputElement>('[data-align-flip]')!;
+    // Mirroring is a Draft flag beside the offset, not a baked pixel, so it never
+    // rewrites the Repair script.
+    expect(flip.closest('.align-mirror')!.textContent).toContain('Mirror x');
+    expect(flip.checked).toBe(false);
+
+    flip.checked = true;
+    flip.dispatchEvent(new Event('change', { bubbles: true }));
+    await wb.settled();
+
+    expect(written).toEqual([{ characterId: 'hero', draftId: 'wip', flipX: true }]);
+    const ghost = wb.root.querySelector<HTMLElement>('[data-align-ghost][data-draft="wip"]')!;
+    expect(ghost.querySelector('[data-align-ghost-image]')!.classList.contains('is-mirrored'))
+      .toBe(true);
+  });
+
+  it('carries the mirror over to the Clip face it was set on', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        setFlipX: async (_characterId, _draftId, flipX) => ({ ...DRAFT, flipX }),
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const flip = wb.root.querySelector<HTMLInputElement>('[data-align-flip]')!;
+    flip.checked = true;
+    flip.dispatchEvent(new Event('change', { bubbles: true }));
+    await wb.settled();
+
+    // The Clip face paints from the held Draft, so the write has to update it.
+    wb.setMode('clip');
+    expect(
+      wb.root.querySelector('[data-draft-sheet]')!.classList.contains('is-mirrored'),
+    ).toBe(true);
+  });
+
+  it('shows a committed Clip as mirrored rather than offering a flip', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        readCharacterAlignment: async () => ({
+          ...ALIGNMENT,
+          clips: [{ ...ALIGNMENT.clips[0]!, flipX: true }],
+        }),
+      }),
+    });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+    wb.setMode('align');
+    await wb.settled();
+    wb.root.querySelector<HTMLElement>('[data-align-clip-open="walk"]')!.click();
+    await wb.settled();
+    // Opening a Clip drops on the clip face; its placement view is Alignment.
+    wb.setMode('align');
+    await wb.settled();
+
+    const inspector = wb.root.querySelector('[data-region="inspector"]')!;
+    expect(inspector.querySelector('[data-align-flip]')).toBeNull();
+    const key = [...inspector.querySelectorAll('dt')].find((cell) =>
+      cell.textContent === 'mirror',
+    )!;
+    expect(key.nextElementSibling?.textContent).toBe('mirrored');
+  });
 });
 
 describe('clampRange', () => {
@@ -1561,7 +1998,7 @@ describe('the Export stage', () => {
     expect(manifest).not.toBeNull();
     expect(manifest.dataset.manifestTarget).toBe('pixel-pet');
     // The inspector renders the manifest JSON the consumer would read.
-    expect(manifest.textContent).toContain('"formatVersion": "1.0.0"');
+    expect(manifest.textContent).toContain('"formatVersion": "2.0.0"');
     expect(manifest.textContent).toContain('"clips/walk.png"');
 
     expect(wb.activeExport).toBe('pixel-pet');
@@ -2110,22 +2547,134 @@ describe('the recording workspace', () => {
     const framed: unknown[] = [];
     const wb = mountWorkbench(container, {
       api: fakeApi({
+        // A framing the Canvas does not already have, above the floor.
+        deriveAnchor: async () =>
+          ({
+            frame: 0,
+            bounds: { x: 0, y: 0, width: 6, height: 8 },
+            anchor: { x: 3, y: 8 },
+            canvas: { width: 6, height: 8, anchor: { x: 3, y: 8 } },
+          }) as DerivedAnchor,
         frameCanvas: async (characterId, request) => {
           framed.push({ characterId, ...request });
-          return ALIGNMENT.canvas;
+          return { width: 6, height: 8, anchor: { x: 3, y: 8 } };
         },
       }),
     });
     await wb.ready;
     await wb.loadRecording('idle');
     await wb.loadCharacter('hero');
+    await wb.settled();
 
-    const button = wb.root.querySelector<HTMLElement>('[data-frame-canvas-run]');
+    const button = wb.root.querySelector<HTMLButtonElement>('[data-frame-canvas-run]');
     expect(button).not.toBeNull();
+    expect(button!.disabled).toBe(false);
     button!.click();
     await wb.settled();
 
     expect(framed).toEqual([{ characterId: 'hero', recordingId: 'idle' }]);
+  });
+
+  it('disables framing when the frame would crop drawn content', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        // The floor is larger than what this frame implies.
+        deriveAnchor: async () =>
+          ({
+            frame: 0,
+            bounds: { x: 0, y: 0, width: 2, height: 2 },
+            anchor: { x: 1, y: 2 },
+            canvas: { width: 2, height: 2, anchor: { x: 1, y: 2 } },
+          }) as DerivedAnchor,
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    await wb.loadCharacter('hero');
+    await wb.settled();
+
+    const button = wb.root.querySelector<HTMLButtonElement>('[data-frame-canvas-run]')!;
+    expect(button.disabled).toBe(true);
+    expect(wb.root.querySelector('[data-frame-canvas-note]')!.textContent).toMatch(
+      /content floor/i,
+    );
+  });
+
+  it('disables framing when the Canvas already matches the frame', async () => {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        deriveAnchor: async () =>
+          ({
+            frame: 0,
+            bounds: { x: 0, y: 0, width: 4, height: 6 },
+            anchor: { x: 2, y: 6 },
+            canvas: { width: 4, height: 6, anchor: { x: 2, y: 6 } },
+          }) as DerivedAnchor,
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+    await wb.loadCharacter('hero');
+    await wb.settled();
+
+    const button = wb.root.querySelector<HTMLButtonElement>('[data-frame-canvas-run]')!;
+    expect(button.disabled).toBe(true);
+    expect(wb.root.querySelector('[data-frame-canvas-note]')!.textContent).toMatch(
+      /already framed/i,
+    );
+  });
+
+  it('disables a resize the store would refuse, naming the rule', async () => {
+    const sized: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        resizeCanvas: async (characterId, width, height) => {
+          sized.push({ characterId, width, height });
+          return {
+            canvas: { width, height, anchor: { x: width / 2, y: height } },
+            rebakedClips: [],
+            rebakedSequences: [],
+            repairWarnings: [],
+          };
+        },
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.setMode('align');
+    await wb.settled();
+
+    const inspector = wb.root.querySelector<HTMLElement>('[data-region="inspector"]')!;
+    const widthInput = inspector.querySelector<HTMLInputElement>('[data-resize-width]')!;
+    const heightInput = inspector.querySelector<HTMLInputElement>('[data-resize-height]')!;
+    const resize = inspector.querySelector<HTMLButtonElement>('[data-resize-canvas-action]')!;
+    const floorNote = inspector.querySelector<HTMLElement>('[data-align-floor]')!;
+
+    // Below the content floor.
+    widthInput.value = '2';
+    widthInput.dispatchEvent(new Event('input'));
+    heightInput.value = '2';
+    heightInput.dispatchEvent(new Event('input'));
+    expect(resize.disabled).toBe(true);
+    expect(floorNote.textContent).toMatch(/content floor/i);
+
+    // Odd width: the Anchor could not sit at the centre.
+    widthInput.value = '5';
+    widthInput.dispatchEvent(new Event('input'));
+    heightInput.value = '8';
+    heightInput.dispatchEvent(new Event('input'));
+    expect(resize.disabled).toBe(true);
+    expect(floorNote.textContent).toMatch(/even/i);
+
+    // A size it can take.
+    widthInput.value = '6';
+    widthInput.dispatchEvent(new Event('input'));
+    heightInput.value = '8';
+    heightInput.dispatchEvent(new Event('input'));
+    expect(resize.disabled).toBe(false);
+    resize.click();
+    await wb.settled();
+    expect(sized).toEqual([{ characterId: 'hero', width: 6, height: 8 }]);
   });
 
   it('extracts a segment straight into a Draft on the same screen', async () => {
@@ -2148,12 +2697,79 @@ describe('the recording workspace', () => {
     extract.click();
     // No target was chosen, so Extract asks which Character to use.
     answerDialog();
+    // Then it asks for the Draft name, prefilled with the Segment's own id.
+    await answerDialogAfterHop();
     await wb.settled();
 
-    expect(extracted).toEqual([{ characterId: 'hero', recordingId: 'idle', cutId: 'walk' }]);
+    expect(extracted).toEqual([
+      { characterId: 'hero', recordingId: 'idle', cutId: 'walk', draftId: 'walk' },
+    ]);
     // The new Draft is open on Placement, where it is positioned before painting.
     expect(wb.activeDraft).toEqual({ characterId: 'hero', draftId: 'wip' });
     expect(wb.root.querySelector('[data-stage-view="alignment"]')).not.toBeNull();
+  });
+
+  it('extracts the same Segment into a second Draft instead of replacing the first', async () => {
+    const extracted: Array<{ draftId?: string }> = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        // The Segment's own id is already a Draft of this Character.
+        scan: async () => ({
+          ...SCAN,
+          characters: SCAN.characters.map((character) =>
+            character.id === 'hero'
+              ? { ...character, drafts: [...character.drafts, { id: 'walk', dir: 'characters/hero/drafts/walk' }] }
+              : character,
+          ),
+        }),
+        extractClipDraft: async (_characterId, request) => {
+          extracted.push(request);
+          return DRAFT;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    await selectSegment(wb, 'walk');
+    wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!.click();
+    answerDialog();
+    await answerDialogAfterHop();
+    await wb.settled();
+
+    // The prefilled name steps past the one in use, so nothing is overwritten.
+    expect(extracted.map((request) => request.draftId)).toEqual(['walk-2']);
+  });
+
+  it('refreshes an existing Draft when its name is kept', async () => {
+    const extracted: Array<{ draftId?: string }> = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        scan: async () => ({
+          ...SCAN,
+          characters: SCAN.characters.map((character) =>
+            character.id === 'hero'
+              ? { ...character, drafts: [...character.drafts, { id: 'walk', dir: 'characters/hero/drafts/walk' }] }
+              : character,
+          ),
+        }),
+        extractClipDraft: async (_characterId, request) => {
+          extracted.push(request);
+          return DRAFT;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadRecording('idle');
+
+    await selectSegment(wb, 'walk');
+    wb.root.querySelector<HTMLElement>('[data-segment-extract="walk"]')!.click();
+    answerDialog();
+    // Typing the taken name is the explicit "refresh this Draft".
+    await answerDialogAfterHop(true, 'walk');
+    await wb.settled();
+
+    expect(extracted.map((request) => request.draftId)).toEqual(['walk']);
   });
 
   it('creates the Character on extract when there is none to point at', async () => {
@@ -2184,6 +2800,8 @@ describe('the recording workspace', () => {
     expect(button.textContent).toBe('Extract');
     button.click();
     answerDialog(true, 'kitty');
+    // Naming the new Character is followed by naming its first Draft.
+    await answerDialogAfterHop();
     await wb.settled();
 
     // The new Character is framed from the Segment, so the pixels fit on arrival.
@@ -2428,6 +3046,38 @@ describe('sequence composition', () => {
     expect(saves.at(-1)).toEqual({ characterId: 'hero', clips: ['walk'] });
   });
 
+  it('omits forkOf when the composition is not forked', async () => {
+    const requests: Array<{ draftId?: string; clips: string[]; forkOf?: string | null }> = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        saveSequenceDraft: async (characterId, request) => {
+          requests.push(request);
+          return {
+            id: request.draftId ?? 'composition',
+            characterId,
+            clips: [...request.clips],
+            forkOf: request.forkOf ?? null,
+            spriteForgeVersion: '0.1.0',
+            dir: `characters/${characterId}/sequence-drafts/composition`,
+          };
+        },
+      }),
+    });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+    wb.setMode('compose');
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-new]')!.click();
+    await wb.settled();
+    wb.root.querySelector<HTMLElement>('[data-sequence-add-run]')!.click();
+    await wb.settled();
+
+    // Every save carries the Clip list; none carries a `forkOf` key at all.
+    expect(requests.every((request) => !('forkOf' in request))).toBe(true);
+    expect(wb.root.querySelectorAll('[data-sequence-clip]')).toHaveLength(1);
+    expect(wb.root.querySelector('[data-action-error]')).toBeNull();
+  });
+
   it('reorders and commits the composition, consuming its draft', async () => {
     const commits: Array<{ name: string; clips: string[]; draftId?: string }> = [];
     const wb = mountWorkbench(container, {
@@ -2504,6 +3154,363 @@ describe('sequence composition', () => {
   });
 });
 
+describe('composition preview', () => {
+  /** A clip pinned to one frame duration. */
+  function clip(id: string, frameCount: number, delaysMs: number[]): CommittedAsset {
+    return { ...CLIP, id, meta: { id, frameCount, timing: { frameMs: delaysMs[0]! }, loop: true } };
+  }
+
+  /** A scan holding `a` and `b` as committed Clips of `hero`. */
+  function twoClipScan(): StoreScan {
+    return {
+      ...SCAN,
+      characters: [
+        {
+          ...SCAN.characters[0]!,
+          assets: [
+            { kind: 'clip', id: 'a', dir: 'characters/hero/clips/a' },
+            { kind: 'clip', id: 'b', dir: 'characters/hero/clips/b' },
+          ],
+          sequenceDrafts: [
+            { id: 'composition', dir: 'characters/hero/sequence-drafts/composition' },
+          ],
+        },
+      ],
+    };
+  }
+
+  /** Mount with an empty composition already open, holding `a` then `b`. */
+  async function composing(
+    api: Parameters<typeof fakeApi>[0] = {},
+  ): Promise<ReturnType<typeof mountWorkbench>> {
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        scan: async () => twoClipScan(),
+        readClip: async (_characterId, clipId) =>
+          clipId === 'b' ? clip('b', 2, [30]) : clip('a', 3, [50]),
+        readSequenceDraft: async (characterId, draftId) => ({
+          id: draftId,
+          characterId,
+          clips: ['a', 'b'],
+          forkOf: null,
+          spriteForgeVersion: '0.1.0',
+          dir: `characters/${characterId}/sequence-drafts/${draftId}`,
+        }),
+        ...api,
+      }),
+    });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+    wb.setMode('compose');
+    wb.root.querySelector<HTMLElement>('[data-sequence-draft-open]')!.click();
+    // The preview reads its sources from the render, so it settles a hop behind
+    // the load that opened the composition.
+    for (let hop = 0; hop < 5 && wb.previewSlots.length !== 2; hop += 1) {
+      await wb.settled();
+    }
+    return wb;
+  }
+
+  function counter(wb: ReturnType<typeof mountWorkbench>): string {
+    return wb.root.querySelector('[data-sequence-counter]')!.textContent ?? '';
+  }
+
+  /**
+   * Let the preview finish whatever the last action started.
+   *
+   * A save re-renders, the render re-reads the slots, and that read is a hop behind
+   * the save; awaiting `settled` once only covers the save.
+   */
+  async function settlePreview(
+    wb: ReturnType<typeof mountWorkbench>,
+    until: () => boolean,
+  ): Promise<void> {
+    for (let hop = 0; hop < 8 && !until(); hop += 1) {
+      await wb.settled();
+    }
+  }
+
+  it('plays both Clips in order, each at its own delay, across the seam', async () => {
+    vi.useFakeTimers();
+    const wb = await composing();
+    expect(counter(wb)).toContain('a · 1/3');
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-play]')!.click();
+    await wb.settled();
+    // `a` has 3 frames at 50 ms: two ticks reach its last frame, still inside `a`.
+    vi.advanceTimersByTime(50);
+    vi.advanceTimersByTime(50);
+    expect(counter(wb)).toContain('a · 3/3');
+    // The next tick crosses the seam, and `b` runs at its own 30 ms.
+    vi.advanceTimersByTime(50);
+    expect(counter(wb)).toContain('b · 1/2');
+    // The last frame of `b` is the end of the strip.
+    vi.advanceTimersByTime(30);
+    expect(
+      wb.root.querySelector<HTMLButtonElement>('[data-sequence-next]')!.disabled,
+    ).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('wraps from the last frame back to the first', async () => {
+    vi.useFakeTimers();
+    const wb = await composing();
+    wb.root.querySelector<HTMLElement>('[data-sequence-play]')!.click();
+    await wb.settled();
+    // 3×50 + 2×30 = 210 ms runs the whole composition out.
+    vi.advanceTimersByTime(210);
+    expect(counter(wb)).toContain('a · 1/3');
+    vi.useRealTimers();
+  });
+
+  it('marks the seam and stands on the frame before it', async () => {
+    const wb = await composing();
+
+    // One join between the two Clips, drawn as its own control.
+    const seam = wb.root.querySelector<HTMLElement>('[data-sequence-seam="1"]')!;
+    expect(seam).not.toBeNull();
+    seam.click();
+    await wb.settled();
+    // The frame before the join is `a`'s last, so ▶ is the Clip change itself.
+    expect(counter(wb)).toContain('a · 3/3');
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-next]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('b · 1/2');
+  });
+
+  it('jumps from the transport when the playhead is not near the seam', async () => {
+    const wb = await composing();
+    wb.root.querySelector<HTMLElement>('[data-sequence-seek="1"]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('b · 1/2');
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-seam-before]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('a · 3/3');
+  });
+
+  it('stands in for a Clip whose sheet cannot be read', async () => {
+    const wb = await composing({
+      readClip: async (_characterId, clipId) => {
+        if (clipId === 'b') {
+          throw new Error('broken provenance');
+        }
+        return clip('a', 3, [50]);
+      },
+    });
+
+    wb.root.querySelector<HTMLElement>('[data-sequence-seek="1"]')!.click();
+    await wb.settled();
+    expect(wb.root.querySelector('[data-sequence-missing="b"]')).not.toBeNull();
+    expect(wb.root.querySelector('[data-action-error]')).toBeNull();
+  });
+
+  it('clamps the playhead when the Clip under it is removed', async () => {
+    const wb = await composing();
+    wb.root.querySelector<HTMLElement>('[data-sequence-seek="1"]')!.click();
+    await wb.settled();
+
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-remove]')[1]!.click();
+    await settlePreview(wb, () => wb.previewSlots.length === 1);
+    expect(counter(wb)).toContain('a · 3/3');
+  });
+
+  it('forks a Clip to align it and puts its commit back in the slot', async () => {
+    const forks: Array<{ clipId: string; draftId?: string }> = [];
+    const saves: string[][] = [];
+    const commits: string[] = [];
+    const wb = await composing({
+      forkClip: async (_characterId, clipId, draftId) => {
+        forks.push({ clipId, ...(draftId === undefined ? {} : { draftId }) });
+        return { ...DRAFT, id: draftId ?? 'fork' };
+      },
+      commitDraft: async (characterId, _draftId, name) => {
+        commits.push(name);
+        return { kind: 'clip', id: name, dir: `characters/${characterId}/clips/${name}` } as
+          unknown as CommittedAsset;
+      },
+      saveSequenceDraft: async (characterId, request) => {
+        saves.push(request.clips);
+        return {
+          id: request.draftId ?? 'composition',
+          characterId,
+          clips: [...request.clips],
+          forkOf: request.forkOf ?? null,
+          spriteForgeVersion: '0.1.0',
+          dir: `characters/${characterId}/sequence-drafts/composition`,
+        };
+      },
+    });
+
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-align-row]')[1]!.click();
+    await settlePreview(wb, () => wb.root.querySelector('[data-sequence-draft-frame]') !== null);
+
+    expect(forks).toEqual([{ clipId: 'b', draftId: 'b-align' }]);
+    // The composition stays on screen — the seam is the reason for the fork — and
+    // the playhead is parked on the frame before it, so ▶ is the join itself.
+    expect(wb.mode).toBe('compose');
+    expect(wb.realign).toMatchObject({ slot: 1, clipId: 'b' });
+    expect(counter(wb)).toContain('a · 3/3');
+    // The slot plays the fork's own frame, not the still-placed committed Clip.
+    expect(
+      wb.root.querySelector('[data-sequence-draft-frame="b-align"]'),
+    ).not.toBeNull();
+    expect(wb.root.querySelector('[data-align-for-composition]')?.textContent).toContain(
+      'b',
+    );
+
+    // Stepping forward is the Clip change; the fork's own first frame is what shows.
+    wb.root.querySelector<HTMLElement>('[data-sequence-next]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('b · 1/3');
+
+    // The commit is in the panel, and it takes the slot.
+    wb.root.querySelector<HTMLElement>('[data-commit-run]')!.click();
+    await settlePreview(wb, () =>
+      [...wb.root.querySelectorAll<HTMLElement>('[data-sequence-clip]')].some(
+        (item) => item.dataset.sequenceClip === 'b-align',
+      ),
+    );
+
+    expect(commits).toEqual(['b-align']);
+    // The slot took the new Clip rather than the composition pointing at the old.
+    expect(saves.at(-1)).toEqual(['a', 'b-align']);
+    expect(wb.mode).toBe('compose');
+    expect(wb.realign).toBeNull();
+    const items = wb.root.querySelectorAll<HTMLElement>('[data-sequence-clip]');
+    expect([...items].map((item) => item.dataset.sequenceClip)).toEqual(['a', 'b-align']);
+  });
+
+  it('places the fork by its pending offset and mirror, and drops it on discard', async () => {
+    let flip = false;
+    const wb = await composing({
+      forkClip: async (_characterId, _clipId, draftId) => ({ ...DRAFT, id: draftId ?? 'fork' }),
+      setFlipX: async (_characterId, draftId, next) => {
+        flip = next;
+        return { ...DRAFT, id: draftId, flipX: next };
+      },
+      readCharacterAlignment: async () => ({
+        ...ALIGNMENT,
+        drafts: [{ id: 'b-align', placementOffset: { x: 3, y: -2 }, flipX: flip }],
+      }),
+      discardDraft: async () => undefined,
+    });
+
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-align-row]')[1]!.click();
+    await settlePreview(wb, () => wb.root.querySelector('[data-sequence-draft-frame]') !== null);
+
+    // The fork's pending placement is on the frame it is placed with, so the seam
+    // can be judged against what the commit will bake.
+    const frame = wb.root.querySelector<HTMLElement>('[data-sequence-draft-frame]')!;
+    expect(frame.dataset.offsetX).toBe('3');
+    expect(frame.dataset.offsetY).toBe('-2');
+    expect(frame.dataset.flip).toBe('false');
+
+    const mirror = wb.root.querySelector<HTMLInputElement>('[data-align-flip]')!;
+    mirror.checked = true;
+    mirror.dispatchEvent(new Event('change'));
+    await settlePreview(
+      wb,
+      () => wb.root.querySelector<HTMLElement>('[data-sequence-draft-frame]')?.dataset.flip === 'true',
+    );
+    expect(wb.root.querySelector<HTMLElement>('[data-sequence-draft-frame]')!.dataset.flip).toBe(
+      'true',
+    );
+
+    // Dropping the fork leaves the composition alone and puts the old Clip back.
+    wb.root.querySelector<HTMLElement>('[data-discard-draft]')!.click();
+    answerDialog();
+    await settlePreview(wb, () => wb.realign === null);
+    expect(wb.mode).toBe('compose');
+    expect(wb.root.querySelector('[data-sequence-draft-frame]')).toBeNull();
+    expect(counter(wb)).toContain('a · 3/3 · frame 3/5');
+  });
+
+  it('moves the adjustment to another Clip from the panel or its row', async () => {
+    const forks: string[] = [];
+    const dropped: string[] = [];
+    const wb = await composing({
+      forkClip: async (_characterId, clipId, draftId) => {
+        forks.push(draftId ?? clipId);
+        return { ...DRAFT, id: draftId ?? 'fork' };
+      },
+      discardDraft: async (_characterId, draftId) => {
+        dropped.push(draftId);
+      },
+    });
+
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-align-row]')[0]!.click();
+    await settlePreview(wb, () => wb.realign !== null);
+    expect(wb.realign).toMatchObject({ slot: 0, forkDraftId: 'a-align' });
+    // The Clip in hand says so, and the other one offers the switch.
+    expect(wb.root.querySelector<HTMLElement>('[data-align-target="0"]')!.dataset.active).toBe('');
+    expect(wb.root.querySelector<HTMLElement>('[data-align-target="1"]')!.dataset.active).toBe(
+      undefined,
+    );
+
+    // The panel retargets to the second Clip by itself.
+    wb.root.querySelector<HTMLElement>('[data-align-target="1"]')!.click();
+    await settlePreview(
+      wb,
+      () => wb.root.querySelector('[data-sequence-draft-frame="b-align"]') !== null,
+    );
+
+    expect(forks).toEqual(['a-align', 'b-align']);
+    // The abandoned fork was never committed, so switching takes it back.
+    expect(dropped).toEqual(['a-align']);
+    expect(wb.realign).toMatchObject({ slot: 1, forkDraftId: 'b-align' });
+    expect(wb.mode).toBe('compose');
+    // The playhead is parked on the seam of the new one, and it is the clip whose
+    // offset the panel edits.
+    expect(counter(wb)).toContain('a · 3/3');
+    expect(wb.root.querySelector('[data-sequence-draft-frame="b-align"]')).not.toBeNull();
+    expect(wb.root.querySelector('[data-align-offset-y]')).not.toBeNull();
+
+    // Pressing the Clip already in hand only walks back to its seam.
+    wb.root.querySelector<HTMLElement>('[data-sequence-next]')!.click();
+    await wb.settled();
+    expect(counter(wb)).toContain('b · 1/3');
+    wb.root.querySelectorAll<HTMLElement>('[data-sequence-align-row]')[1]!.click();
+    await settlePreview(wb, () => counter(wb).includes('a · 3/3'));
+    expect(dropped).toEqual(['a-align']);
+    expect(forks).toEqual(['a-align', 'b-align']);
+  });
+
+  it('leaves an unrelated commit alone', async () => {
+    const saves: string[][] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        saveSequenceDraft: async (characterId, request) => {
+          saves.push(request.clips);
+          return {
+            id: request.draftId ?? 'composition',
+            characterId,
+            clips: [...request.clips],
+            forkOf: request.forkOf ?? null,
+            spriteForgeVersion: '0.1.0',
+            dir: `characters/${characterId}/sequence-drafts/composition`,
+          };
+        },
+      }),
+    });
+    await wb.ready;
+    await openCharacter(wb, 'hero');
+    // Open a composition, then go and commit a Draft that has nothing to do with it.
+    wb.setMode('compose');
+    wb.root.querySelector<HTMLElement>('[data-sequence-new]')!.click();
+    await wb.settled();
+    const savesBefore = saves.length;
+
+    await openDraftForEdit(wb, 'hero', 'wip');
+    wb.root.querySelector<HTMLElement>('[data-commit-run]')!.click();
+    await wb.settled();
+
+    expect(saves).toHaveLength(savesBefore);
+    expect(wb.mode).toBe('view');
+  });
+});
+
 describe('export contract fields', () => {
   it('sends the animation subset, situations, flips and facing', async () => {
     const requests: unknown[] = [];
@@ -2523,7 +3530,18 @@ describe('export contract fields', () => {
     (stage.querySelector('[data-export-target-input]') as HTMLInputElement).value = 'pixel-pet';
     stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
     stage.querySelector<HTMLInputElement>('[data-export-flip="walk"]')!.click();
-    (stage.querySelector('[data-export-situations]') as HTMLInputElement).value = 'idle, happy';
+    // The first Situation is there to fill; bind it, then declare a second one.
+    typeInto(
+      stage.querySelector<HTMLInputElement>('[data-export-situation-name]')!,
+      'idle',
+    );
+    stage.querySelector<HTMLElement>('[data-export-situation-bind="walk"]')!.click();
+    stage.querySelector<HTMLElement>('[data-export-situation-add]')!.click();
+    typeInto(
+      stage.querySelectorAll<HTMLInputElement>('[data-export-situation-name]')[1]!,
+      'happy',
+    );
+    stage.querySelectorAll<HTMLElement>('[data-export-situation-bind="walk"]')[1]!.click();
     (stage.querySelector('[data-export-facing]') as HTMLSelectElement).value = 'left';
     stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
     await wb.settled();
@@ -2531,13 +3549,100 @@ describe('export contract fields', () => {
     expect(requests).toEqual([
       {
         target: 'pixel-pet',
-        bindings: { idle: [] },
+        bindings: { idle: ['walk'], happy: ['walk'] },
         animations: ['walk'],
         situations: ['idle', 'happy'],
         flipsFacing: ['walk'],
         authoredFacing: 'left',
       },
     ]);
+  });
+
+  it('offers only the ticked animations as bindings', async () => {
+    const wb = mountWorkbench(container, { api: fakeApi() });
+    await wb.ready;
+    await wb.loadCharacter('hero');
+    wb.setMode('export');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    const bindables = (): string[] =>
+      [...stage.querySelectorAll<HTMLElement>('[data-export-situation-bind]')].map(
+        (chip) => chip.dataset.exportSituationBind!,
+      );
+    // Nothing ticked: a row has nothing to bind to and says so.
+    expect(bindables()).toEqual([]);
+    expect(stage.textContent).toContain('tick an animation to bind it');
+
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    expect(bindables()).toEqual(['walk']);
+  });
+
+  it('keeps a binding whose animation was unticked, and blocks the export until it is back', async () => {
+    const requests: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        exportCharacter: async (_characterId, target, request) => {
+          requests.push({ target, ...request });
+          return EXPORT_RESULT;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadCharacter('hero');
+    wb.setMode('export');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    (stage.querySelector('[data-export-target-input]') as HTMLInputElement).value = 'pixel-pet';
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    stage.querySelector<HTMLElement>('[data-export-situation-bind="walk"]')!.click();
+    // Unticking leaves the reference in place (marked), rather than silently
+    // binding a Situation to nothing.
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    const stale = stage.querySelector<HTMLElement>('[data-export-situation-bind="walk"][data-stale]');
+    expect(stale).not.toBeNull();
+    expect(stage.querySelector('[data-export-situation-problem]')?.textContent).toContain(
+      'not exported',
+    );
+
+    stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
+    await wb.settled();
+    expect(requests).toEqual([]);
+
+    // Ticking it again clears the objection and the export goes through.
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
+    await wb.settled();
+    expect(requests).toHaveLength(1);
+  });
+
+  it('catches a duplicated or unbound Situation before the server sees it', async () => {
+    const requests: unknown[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        exportCharacter: async (_characterId, target, request) => {
+          requests.push({ target, ...request });
+          return EXPORT_RESULT;
+        },
+      }),
+    });
+    await wb.ready;
+    await wb.loadCharacter('hero');
+    wb.setMode('export');
+
+    const stage = wb.root.querySelector('[data-region="stage"]')!;
+    (stage.querySelector('[data-export-target-input]') as HTMLInputElement).value = 'pixel-pet';
+    stage.querySelector<HTMLInputElement>('[data-export-animation="walk"]')!.click();
+    stage.querySelector<HTMLElement>('[data-export-situation-bind="walk"]')!.click();
+
+    stage.querySelector<HTMLElement>('[data-export-situation-add]')!.click();
+    typeInto(stage.querySelectorAll<HTMLInputElement>('[data-export-situation-name]')[1]!, 'idle');
+    expect(stage.querySelector('[data-export-situation-problem]')?.textContent).toContain(
+      'declared twice',
+    );
+
+    stage.querySelector<HTMLFormElement>('[data-export-form]')!.requestSubmit();
+    await wb.settled();
+    expect(requests).toEqual([]);
   });
 
   it('keeps the half-typed form across a re-render', async () => {
@@ -2581,6 +3686,31 @@ describe('discard and store check', () => {
     expect(discarded).toEqual(['hero/wip']);
     expect(wb.activeDraft).toBeNull();
     expect(wb.mode).toBe('align');
+  });
+
+  it('offers Discard on the Placement face too, where extraction lands', async () => {
+    const discarded: string[] = [];
+    const wb = mountWorkbench(container, {
+      api: fakeApi({
+        discardDraft: async (characterId, draftId) => {
+          discarded.push(`${characterId}/${draftId}`);
+        },
+      }),
+    });
+    await wb.ready;
+    await openDraftForEdit(wb, 'hero', 'wip');
+    // Extract opens a Draft on Placement, so the way out has to be reachable there
+    // without first switching to the Clip face.
+    wb.setMode('align');
+    await wb.settled();
+
+    const inspector = wb.root.querySelector('[data-region="inspector"]')!;
+    inspector.querySelector<HTMLElement>('[data-discard-draft]')!.click();
+    answerDialog();
+    await wb.settled();
+
+    expect(discarded).toEqual(['hero/wip']);
+    expect(wb.activeDraft).toBeNull();
   });
 
   it('renders the store check problems', async () => {

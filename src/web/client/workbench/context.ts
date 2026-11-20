@@ -8,6 +8,7 @@
 
 import type { CutSession, CutSessionDeps } from './cutSession.js';
 import type { DraftEditor } from './draftEditor.js';
+import type { SequencePreview } from './sequencePreview.js';
 import type { BasePort } from './ports.js';
 
 /** The persistent region nodes, so a view can target its own container. */
@@ -42,4 +43,6 @@ export interface WorkbenchContext extends BasePort {
   /** The dependency bag the session was built from, so detached controls rebuild. */
   readonly cutDeps: CutSessionDeps;
   readonly draft: DraftEditor;
+  /** The Composition preview: the open composition played back, seams included. */
+  readonly preview: SequencePreview;
 }

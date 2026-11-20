@@ -32,12 +32,23 @@ export interface RepairDeps {
   renderContext(): void;
 }
 
-/** The pixel under a pointer event, in Canvas coordinates (the frame PNG is the Canvas). */
-function pointerPixel(event: PointerEvent, img: HTMLImageElement): [number, number] {
+/**
+ * The pixel under a pointer event, in Canvas coordinates (the frame PNG is the Canvas).
+ *
+ * A mirrored Draft shows its frame turned, so the x read off the screen is counted
+ * from the wrong edge and is flipped back here. Repair itself always writes to the
+ * stored, unflipped frame.
+ */
+function pointerPixel(
+  event: PointerEvent,
+  img: HTMLImageElement,
+  flipX: boolean,
+): [number, number] {
   const rect = img.getBoundingClientRect();
   const width = img.naturalWidth || rect.width || 1;
   const height = img.naturalHeight || rect.height || 1;
-  const x = Math.floor(((event.clientX - rect.left) / (rect.width || 1)) * width);
+  const fromLeft = Math.floor(((event.clientX - rect.left) / (rect.width || 1)) * width);
+  const x = flipX ? width - 1 - fromLeft : fromLeft;
   const y = Math.floor(((event.clientY - rect.top) / (rect.height || 1)) * height);
   return [x, y];
 }
@@ -64,7 +75,7 @@ export function attachFootprint(
     }
     const pencil = deps.state.tool === 'eyedropper';
     const size = pencil ? 1 : deps.state.brushSize;
-    const [x, y] = pointerPixel(event, img);
+    const [x, y] = pointerPixel(event, img, deps.state.draftDescriptor?.flipX === true);
 
     overlay.width = width;
     overlay.height = height;
@@ -112,10 +123,11 @@ export function attachPainting(deps: RepairDeps, img: HTMLImageElement): void {
       return;
     }
     event.preventDefault();
-    const start = pointerPixel(pointer, img);
+    const flipped = deps.state.draftDescriptor?.flipX === true;
+    const start = pointerPixel(pointer, img, flipped);
     const points: Array<[number, number]> = [start];
     const move = (moveEvent: PointerEvent): void => {
-      const point = pointerPixel(moveEvent, img);
+      const point = pointerPixel(moveEvent, img, flipped);
       const last = points[points.length - 1]!;
       if (point[0] !== last[0] || point[1] !== last[1]) {
         points.push(point);
@@ -141,7 +153,7 @@ async function pickColor(
   if (draft.kind !== 'draft') {
     return;
   }
-  const [x, y] = pointerPixel(event, img);
+  const [x, y] = pointerPixel(event, img, deps.state.draftDescriptor?.flipX === true);
   const color = await deps.api.sampleRepairColor(
     draft.characterId,
     draft.draftId,

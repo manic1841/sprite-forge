@@ -26,6 +26,7 @@ import type { WorkbenchContext } from './workbench/context.js';
 import type { CutSession, CutSessionDeps } from './workbench/cutSession.js';
 import { createCutSession } from './workbench/cutSession.js';
 import { createDraftEditor } from './workbench/draftEditor.js';
+import { createSequencePreview } from './workbench/sequencePreview.js';
 import { make } from './workbench/dom.js';
 import { renderInspector as inspectorView } from './workbench/inspector.js';
 import { renderLibrary as libraryView } from './workbench/library.js';
@@ -89,6 +90,12 @@ export interface WorkbenchHandle {
   readonly activeExport: string | null;
   /** The live Export Manifest (Export stage), or `null`. */
   readonly manifest: WorkbenchState['manifest'];
+  /** The composition preview's playhead. */
+  readonly previewFrame: number;
+  /** The composition preview's resolved source Clips. */
+  readonly previewSlots: WorkbenchState['previewSlots'];
+  /** A slot waiting for a re-aligned Clip, or `null`. */
+  readonly realign: WorkbenchState['realign'];
   /** Switch mode; swaps the stage and re-renders the contextual inspector. */
   setMode(mode: WorkbenchMode): void;
   /** Load a Recording: read its cut list and show it in the filmstrip. */
@@ -194,6 +201,7 @@ export function mountWorkbench(
       updateFrame(ctx);
     },
     playStateChanged: () => paintPlayButton(ctx),
+    setSelection: (startFrame, endFrame) => cut.setSelection(startFrame, endFrame),
     stop: () => cut.stop(),
     loadDraft: openDraft,
     loadRecording: openRecording,
@@ -212,6 +220,21 @@ export function mountWorkbench(
     setMode,
     loadAsset: openAsset,
     loadAlignment: openAlignment,
+    loadCharacter,
+    rescan,
+  });
+
+  const preview = createSequencePreview({
+    api,
+    state,
+    regions: { stage },
+    renderStage,
+    renderInspector,
+    renderContext,
+    run,
+    loadDraft: openDraft,
+    loadAlignment: openAlignment,
+    setMode,
     rescan,
   });
 
@@ -223,6 +246,7 @@ export function mountWorkbench(
     cut,
     cutDeps,
     draft,
+    preview,
 
     render() {
       renderLibrary();
@@ -482,6 +506,11 @@ export function mountWorkbench(
     // of a blank one.
     state.mode = availableFaces().includes(mode) ? mode : defaultFace(state.target);
     root.dataset.mode = state.mode;
+    // The composition preview plays in the stage it belongs to; leaving the face
+    // stops it rather than letting a hidden timer run on.
+    if (from === 'compose' && state.mode !== 'compose') {
+      preview.stop();
+    }
     renderModes();
     renderStage();
     renderFilmstrip();
@@ -568,6 +597,12 @@ export function mountWorkbench(
     state.loadError = null;
     // Cutting is the only face a Recording has, so it is where a load lands.
     setMode(defaultFace(state.target));
+    // A new Recording starts at its first frame, so the carried scroll is not
+    // restored from the last one (`scrollTo` is not in every DOM implementation).
+    const staleScroller = filmstrip.querySelector<HTMLElement>('[data-strip-scroll]');
+    if (staleScroller) {
+      staleScroller.scrollLeft = 0;
+    }
     renderLibrary();
     renderStage();
     renderFilmstrip();
@@ -596,7 +631,7 @@ export function mountWorkbench(
   async function readAlignment(characterId: string): Promise<void> {
     state.activeCharacterId = characterId;
     state.alignment = await api.readCharacterAlignment(characterId);
-    // A different Character starts at a scale that fits it, not at the last one's.
+    // A different Character starts at a rate that fits it, not at the last one's.
     state.alignScale = null;
     if (state.alignment) {
       state.resizeWidth = state.alignment.canvas.width;
@@ -775,6 +810,15 @@ export function mountWorkbench(
     },
     get manifest() {
       return state.manifest;
+    },
+    get previewFrame() {
+      return state.previewFrame;
+    },
+    get previewSlots() {
+      return state.previewSlots;
+    },
+    get realign() {
+      return state.realign;
     },
     setMode,
     loadRecording: openRecording,

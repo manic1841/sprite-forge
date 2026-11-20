@@ -61,14 +61,91 @@ export type Target =
 /** A Sequence being composed: see the core `SequenceDraft` recipe. */
 export type { SequenceDraft };
 
+/** One source Clip resolved onto the composition preview. */
+export interface PreviewSlot {
+  /** The source Clip id (in the composition's own order). */
+  clipId: string;
+  /** Its frame count, read from its committed meta. */
+  frameCount: number;
+  /** Per-frame durations, expanded to `frameCount` entries. */
+  delaysMs: number[];
+  /** The Clip could not be read, so the slot stands in as a placeholder. */
+  missing: boolean;
+  /**
+   * The fork Draft standing in for this Clip while it is being re-aligned.
+   *
+   * Placement is baked, so it can only be judged by looking at a Draft's raw
+   * frames with the pending offset applied — the committed sheet beside it would
+   * not move until the commit.
+   */
+  draftId: string | null;
+}
+
+/**
+ * The composition preview: what the composition looks like played back.
+ *
+ * A Sequence is pure concatenation (Rule 7.1), so the preview is the very frames
+ * commit will tile — there is nothing to bake first. A composition is also what
+ * makes a *seam* possible, so the preview's job is to show the seam: the boundary
+ * between two Clips, the frame either side of it, and the wrap from the last frame
+ * back to the first.
+ *
+ * The names carry a `preview` prefix because the cut face already owns `frame`
+ * and `playing` in this same flat state.
+ */
+export interface PreviewState {
+  /** The composition draft the slots were built for, or `null`. */
+  previewDraftId: string | null;
+  /** The source Clips in composition order. */
+  previewSlots: PreviewSlot[];
+  /** The frame index across the whole concatenation. */
+  previewFrame: number;
+  /** Whether the preview is playing. */
+  previewPlaying: boolean;
+  /**
+   * A slot waiting for a re-aligned Clip.
+   *
+   * Alignment is baked into a committed Clip, so re-aligning one means a fork; the
+   * slot is held here so the fork's commit can take its place instead of leaving
+   * the composition pointing at the old id.
+   */
+  realign: {
+    characterId: string;
+    draftId: string;
+    slot: number;
+    clipId: string;
+    forkDraftId: string;
+    /**
+     * The composition itself, held because opening the fork's Draft clears
+     * `sequenceDraft` — coming back has to restore the composition, not reload it.
+     */
+    composition: SequenceDraft;
+  } | null;
+}
+
+/** One Situation the consumer declares, and the animations that may play for it. */
+export interface ExportSituation {
+  /** The consumer's Situation id — consumer vocabulary, never store vocabulary. */
+  name: string;
+  /** The exported animation ids bound to it; more than one is picked at random. */
+  ids: string[];
+}
+
 /** The Export form's uncommitted input, kept across re-renders. */
 export interface ExportForm {
   target: string;
   animations: string[];
-  situations: string;
+  /**
+   * Situation → animations, as one list.
+   *
+   * Declaring a Situation and binding it used to be two fields (a comma list and a
+   * JSON box) that could disagree; a row here *is* both, so a Situation cannot be
+   * declared without a binding, and a binding cannot name an animation the row does
+   * not offer.
+   */
+  situations: ExportSituation[];
   flipsFacing: string[];
   authoredFacing: 'right' | 'left';
-  bindings: string;
 }
 
 /**
@@ -200,9 +277,9 @@ export interface AlignState {
   /**
    * Screen pixels per Canvas pixel on the Alignment board; `null` fits the stage.
    *
-   * Held rather than recomputed每 render: refitting would blow a shrunken board
-   * back up to the stage, and a crop would then read as the pixels having been
-   * scaled instead. A window resize clears it to refit.
+   * Held rather than recomputed every render: a resize changes the Canvas' area,
+   * not the picture's size, so refitting would rescale the sprite under the
+   * pointer instead of sliding the frame's edge. A window resize clears it.
    */
   alignScale: number | null;
   resizeWidth: number;
@@ -249,7 +326,8 @@ export type WorkbenchState = ShellState &
   DraftState &
   AlignState &
   AssetState &
-  ExportState;
+  ExportState &
+  PreviewState;
 
 
 /** A fresh state: nothing open, defaults on the tools. */
@@ -286,13 +364,19 @@ export function createState(): WorkbenchState {
     asset: null,
     assetFrame: 0,
     sequenceDraft: null,
+    previewDraftId: null,
+    previewSlots: [],
+    previewFrame: 0,
+    previewPlaying: false,
+    realign: null,
     exportForm: {
       target: '',
       animations: [],
-      situations: '',
+      // One row to start with: an Export with no binding is not closed, so the form
+      // opens with the shape it needs rather than an empty box to fill.
+      situations: [{ name: 'idle', ids: [] }],
       flipsFacing: [],
       authoredFacing: 'right',
-      bindings: '{ "idle": [] }',
     },
     validation: null,
     reproducible: null,

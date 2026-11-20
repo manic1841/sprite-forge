@@ -16,6 +16,7 @@ import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import {
   addSegment,
+  appendRepairOperation,
   commitDraft,
   contentFloor,
   createCharacter,
@@ -26,9 +27,11 @@ import {
   readDraftAlignment,
   readDraftRepair,
   resizeCanvas,
+  setFlipX,
   setPlacementOffset,
   StoreError,
   validateStore,
+  verifyReproducible,
 } from '../src/core/index.js';
 import { withStore, type StoreFixture } from './harness.js';
 import { withSyntheticGif, type SyntheticGif } from './synthetic-gif.js';
@@ -210,6 +213,149 @@ describe('fork carries the placement offset', () => {
         expect(store.readText(SHEET)).toBe(parentSheet);
         const forkSheet = await decode(store, `characters/${CHARACTER_ID}/clips/walk-run-2/sheet.png`);
         expect(pixel(forkSheet, 1, 3)).toEqual([255, 0, 0, 255]);
+      });
+    });
+  });
+});
+
+describe('setFlipX', () => {
+  it('mirrors the baked frames and keeps the Repair script valid', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        await extract(store);
+
+        // Erase frame 0's right-hand pixel: (1,4,2,2) becomes a single pixel at
+        // x=1, so the mirror is visible in the sheet.
+        const repaired = await appendRepairOperation(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          operation: {
+            tool: 'erase-rect',
+            frames: { start: 0, end: 1 },
+            geometry: { x: 2, y: 4, width: 1, height: 1 },
+          },
+        });
+        expect(repaired.warnings).toEqual([]);
+
+        const draft = await setFlipX(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          flipX: true,
+        });
+        expect(draft.flipX).toBe(true);
+        expect(store.readJson(DRAFT_PATH)).toMatchObject({ flipX: true });
+        // Repair geometry is authored on the unflipped frame, so a flip is not a
+        // framing change and never warns.
+        expect((await readDraftRepair(store.root, { characterId: CHARACTER_ID, draftId: DRAFT_ID })).warnings)
+          .toEqual([]);
+        // The Draft's frames stay unflipped on disk; the mirror is applied when
+        // they are baked.
+        expect(await readDraftAlignment(store.root, { characterId: CHARACTER_ID, draftId: DRAFT_ID }))
+          .toMatchObject({ flipX: true });
+
+        await commitDraft(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          assetId: ASSET_ID,
+        });
+
+        // Frame 0's remaining pixel mirrors from x=1 to x=2; frame 1 mirrors whole
+        // (its content at x=2..3 lands at x=0..1 of that cell).
+        const sheet = await decode(store, SHEET);
+        expect(pixel(sheet, 2, 4)).toEqual([255, 0, 0, 255]);
+        expect(pixel(sheet, 1, 4)[3]).toBe(0);
+        expect(pixel(sheet, 4 + 0, 4)).toEqual([255, 0, 0, 255]);
+
+        expect(store.readJson(PROVENANCE)).toMatchObject({ flipX: true });
+        await expect(validateStore(store.root)).resolves.toBeDefined();
+        await expect(
+          verifyReproducible(store.root, { characterId: CHARACTER_ID, kind: 'clip', id: ASSET_ID }),
+        ).resolves.toMatchObject({ reproducible: true });
+      });
+    });
+  });
+
+  it('omits flipX from the Draft and provenance when cleared', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        await extract(store);
+
+        await setFlipX(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          flipX: true,
+        });
+        await setFlipX(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          flipX: false,
+        });
+        expect(store.readJson(DRAFT_PATH)).not.toHaveProperty('flipX');
+
+        await commitDraft(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          assetId: ASSET_ID,
+        });
+        expect(store.readJson(PROVENANCE)).not.toHaveProperty('flipX');
+      });
+    });
+  });
+
+  it('inherits the mirror on a fork and reproduces the parent sheet', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        await extract(store);
+        await setFlipX(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          flipX: true,
+        });
+        await commitDraft(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: DRAFT_ID,
+          assetId: ASSET_ID,
+        });
+        const parentSheet = store.readText(SHEET);
+
+        // The fork's Draft holds unflipped frames again, with the mirror recorded
+        // beside it; committing re-applies both.
+        const fork = await forkAsset(store.root, {
+          characterId: CHARACTER_ID,
+          kind: 'clip',
+          id: ASSET_ID,
+        });
+        expect(fork.flipX).toBe(true);
+
+        await commitDraft(store.root, {
+          characterId: CHARACTER_ID,
+          draftId: ASSET_ID,
+          assetId: 'walk-run-2',
+        });
+        expect(
+          store.readJson(`characters/${CHARACTER_ID}/clips/walk-run-2/provenance.json`),
+        ).toMatchObject({ flipX: true });
+        expect(store.readText(`characters/${CHARACTER_ID}/clips/walk-run-2/sheet.png`))
+          .toBe(parentSheet);
+      });
+    });
+  });
+
+  it('rejects a non-boolean flip', async () => {
+    await withSyntheticGif({ frames: 2, width: 8, height: 6, delaysMs: [50, 60] }, async (gif) => {
+      await withStore(async (store) => {
+        await seed(gif, store);
+        await extract(store);
+        await expect(
+          setFlipX(store.root, {
+            characterId: CHARACTER_ID,
+            draftId: DRAFT_ID,
+            flipX: 'yes' as unknown as boolean,
+          }),
+        ).rejects.toThrow(StoreError);
       });
     });
   });

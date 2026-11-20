@@ -173,6 +173,12 @@ So the correct mapping is a **per-frame `delaysMs` array copied straight from
 `metadata().delay`** — 511 entries of 50 and 12 entries of 60 — not a single fixed FPS. A uniform
 frame rate would drop/telescope the periodic 60 ms hiccup. `loop` is `0` (infinite).
 
+> **Since ADR-0016** the array is what the *ingest* layer reads, but it is no longer what an
+> artifact stores. `extract` normalises it to the modal delay and only writes a divergent frame
+> as a `timing.overrideMs` entry, so a Clip keeps the hiccups while carrying one `frameMs`.
+> `--keep-timing` keeps the raw cadence. Read the rest of this section as describing the GIF and
+> `sharp`, not the on-disk format.
+
 ---
 
 ## 3. Palette / alpha limits and de-backgrounded RGBA
